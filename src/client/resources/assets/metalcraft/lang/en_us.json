@@ -1,0 +1,9 @@
+{
+  "metalcraft.options.title": "MetalCraft Settings",
+  "metalcraft.options.video_header": "MetalCraft",
+  "metalcraft.options.open": "MetalCraft Settings...",
+  "metalcraft.options.half_resolution": "Half-resolution rendering",
+  "metalcraft.options.half_resolution.description": "Render at macOS logical resolution instead of the Retina display's 2x backing resolution. The image is upscaled to the native Metal surface for a substantial GPU performance gain.",
+  "metalcraft.options.half_resolution.tooltip": "Halves each framebuffer dimension, reducing the rendered pixel count to one quarter.",
+  "metalcraft.options.render_resolution": "Current render resolution: %s x %s"
+}

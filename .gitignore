@@ -1,0 +1,50 @@
+# Gradle
+.gradle/
+build/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Fabric Loom / Minecraft dev runtime
+run/
+runs/
+remappedSrc/
+*.launch
+
+# Build & native artifacts
+*.dylib
+*.so
+*.dll
+*.o
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Logs
+logs/
+*.log
+hs_err_pid*
+replay_pid*
+
+# IDE
+*.iml
+*.ipr
+*.iws
+.idea/
+.classpath
+.project
+.settings/
+bin/
+.vscode/
+.fleet/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Stray nested working copy (not part of this repo)
+MetalMod/

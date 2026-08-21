@@ -1,0 +1,117 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+	id 'maven-publish'
+}
+
+base {
+	archivesName = 'metalcraft'
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		metalcraft {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+sourceSets {
+	shaderSmoke {
+		java.srcDir 'src/smoke/java'
+		compileClasspath += sourceSets.client.output + configurations.clientCompileClasspath
+		runtimeClasspath += output + compileClasspath + configurations.clientRuntimeClasspath
+	}
+}
+
+processResources {
+	inputs.property 'version', project.version
+
+	filesMatching('fabric.mod.json') {
+		expand version: project.version
+	}
+}
+
+def isAppleSiliconBuild = System.getProperty('os.name').toLowerCase().contains('mac') &&
+	['aarch64', 'arm64'].contains(System.getProperty('os.arch').toLowerCase())
+def metalNativeOutput = layout.buildDirectory.file('native/macos-arm64/libmetalcraft.dylib')
+
+tasks.register('compileMetalNative', Exec) {
+	onlyIf { isAppleSiliconBuild }
+	inputs.file('src/native/metalcraft.m')
+	outputs.file(metalNativeOutput)
+
+	doFirst {
+		metalNativeOutput.get().asFile.parentFile.mkdirs()
+	}
+
+	commandLine 'xcrun', 'clang',
+		'-O3', '-fobjc-arc', '-fvisibility=hidden', '-dynamiclib',
+		'-arch', 'arm64', '-mmacosx-version-min=13.0',
+		"-I${System.getProperty('java.home')}/include",
+		"-I${System.getProperty('java.home')}/include/darwin",
+		'-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-framework', 'AppKit',
+		'src/native/metalcraft.m', '-o', metalNativeOutput.get().asFile.absolutePath
+}
+
+tasks.register('shaderTranslationSmoke', JavaExec) {
+	dependsOn tasks.named('clientClasses')
+	dependsOn tasks.named('compileShaderSmokeJava')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.metal.MetalShaderTranslationSmoke'
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('shaderTranslationSmoke')
+}
+
+tasks.named('runClient') {
+	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
+		systemProperty 'fabric.client.gametest', 'true'
+		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
+		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
+		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')
+	}
+}
+
+processClientResources {
+	if (isAppleSiliconBuild) {
+		dependsOn tasks.named('compileMetalNative')
+		from(metalNativeOutput) {
+			into 'natives/macos-arm64'
+		}
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.release = 25
+}
+
+java {
+	withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+	from('LICENSE') {
+		rename { "${it}_${project.base.archivesName.get()}" }
+	}
+}
+
+publishing {
+	publications {
+		create('mavenJava', MavenPublication) {
+			from components.java
+		}
+	}
+}

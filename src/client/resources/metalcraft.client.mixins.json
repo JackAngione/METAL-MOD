@@ -1,0 +1,18 @@
+{
+  "required": true,
+  "package": "dev.metalcraft.client.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "MinecraftBackendAvailabilityMixin",
+    "MinecraftFrameMetricsMixin",
+    "OptionsSubScreenAccessor",
+    "PreferredGraphicsApiMixin",
+    "ShaderManagerMixin",
+    "VideoSettingsScreenMixin",
+    "WindowFramebufferAccessor",
+    "WindowRenderResolutionMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

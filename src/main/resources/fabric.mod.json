@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "metalcraft",
+  "version": "${version}",
+  "name": "MetalCraft",
+  "description": "Adds a direct Apple Metal backend for Minecraft on Apple silicon and provides a shader extension API.",
+  "authors": [
+    "MetalCraft contributors"
+  ],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "preLaunch": [
+      "dev.metalcraft.client.MetalCraftPreLaunch"
+    ],
+    "client": [
+      "dev.metalcraft.client.MetalCraftClient"
+    ],
+    "fabric-client-gametest": [
+      "dev.metalcraft.client.test.MetalLifecycleGameTest"
+    ]
+  },
+  "mixins": [
+    {
+      "config": "metalcraft.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
