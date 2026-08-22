@@ -51,7 +51,7 @@ Two findings, and the second is the more useful one.
 
 ### What the frame time was actually going into
 
-Adding a timer around drawable acquisition (`MetalPresentProbe`, read per frame by the benchmark) resolved the gap between roughly 9 ms of per-frame CPU time and a 15 ms frame interval. Acquisition is inside the measured CPU section, and it was most of it:
+Adding a timer around drawable acquisition (then `MetalPresentProbe`, since folded into `MetalStallProbe` as its `ACQUIRE` source) resolved the gap between roughly 9 ms of per-frame CPU time and a 15 ms frame interval. Acquisition is inside the measured CPU section, and it was most of it:
 
 | Phase | Interval | CPU frame | of which acquire | Remaining CPU work |
 |---|---:|---:|---:|---:|
@@ -223,15 +223,93 @@ further change to the Metal backend can move that. Reducing the residual stall m
 collector tuning, or upstream changes to how Minecraft meshes chunks, and either should be measured
 with the same probe rather than assumed.
 
-Note that the harness requests 3840x2160 but configures a 7680x2104 drawable, roughly twice the
-intended pixel count. The comparisons above are unaffected because both sides configured the same
-surface, but absolute resolution claims in this document are not currently trustworthy.
+Note that the numbers above were measured before the resolution reporting was fixed, and the surface
+they ran against was 7680x2104 while the harness reported 3840x2160. The comparison holds because
+both sides configured the same surface, but the resolution labelling them was wrong. Later
+measurements in this document state the size that was actually rendered and presented.
+
+### Cutting the per-frame CPU cost of binding and handle lookup
+
+Three changes to the render path, measured back to back on one machine at 3840x2104, three
+interleaved repeats each, against a build differing only in these three changes:
+
+- **Resources are bound only to the stages that read them.** `nSetUniformBuffer`, `nSetTexture`,
+  `nSetSampler`, and `nSetTexelBuffer` each issued a vertex call and a fragment call for every bind,
+  because nothing in the Java layer knew which stage wanted what. SPIRV-Cross is now asked which
+  slots each translated stage declares, and the answer is resolved into a per-slot stage mask once
+  when the pipeline compiles.
+- **The handle registry is a slot table rather than a boxed dictionary.** Every native command
+  resolved two or three handles, and each lookup allocated an `NSNumber`, hashed a `CFNumber`, and
+  probed a hash table to answer what is an array index. A handle now packs a generation above a slot
+  index, so a lookup is a bounds check and a compare, and the entry's fields are struct loads rather
+  than property sends. The generation is what makes slot reuse safe.
+- **The render-pass adapter is reused rather than rebuilt.** It allocated four hash maps per pass,
+  two of them keyed by boxed slot indices; those are now flat arrays, and one adapter instance
+  serves every pass on an encoder.
+
+| Phase | Median FPS before | after | Change | p50 CPU ms before | after | Change |
+|---|---:|---:|---:|---:|---:|---:|
+| Stationary | 223.0 | 300.9 | +34.9% | 4.279 | 3.186 | -25.5% |
+| Pan | 228.4 | 309.3 | +35.4% | 4.216 | 3.094 | -26.6% |
+| Traversal | 214.4 | 289.7 | +35.1% | 4.441 | 3.230 | -27.3% |
+
+The 1% lows moved with the medians: 137.0 to 183.0 stationary, 141.9 to 181.9 pan, 112.1 to 136.6
+traversal. Every repeat of the changed build beat every repeat of the baseline on both statistics,
+which is what makes this readable against the 10-15% spread within each phase.
+
+Per-frame CPU time is the number to trust here. These changes remove CPU work on the render thread
+and nothing else, and it fell by about a quarter in every phase.
+
+**The traversal tail is unchanged, as expected.** The worst frame in the changed build's traversal
+repeats is still 175 ms. That tail is collection time driven by vanilla chunk meshing, and no change
+to the Metal backend addresses it.
+
+### The first GPU-side numbers, and a run that was neither CPU- nor GPU-bound
+
+`GPU_FRAME` was added to the stall probe from `MTLCommandBuffer`'s own GPU start and end times, and
+the first diagnostic run with it landed on a machine state that this document has previously only
+been able to call "GPU-bound". It was not.
+
+| | Stationary | Pan | Traversal |
+|---|---:|---:|---:|
+| p50 interval | 8.127 ms | 8.307 ms | 8.256 ms |
+| p50 CPU | 3.253 ms | 2.405 ms | 3.141 ms |
+| GPU busy per frame | 3.53 ms | - | - |
+| p50 acquire | 4.580 ms | 5.112 ms | 5.043 ms |
+| Average FPS | 120.0 | 120.0 | 118.4 |
+
+Three things follow. The frame rate is pinned at exactly the display's 120 Hz, with a p50 interval
+of 8.127 ms against a refresh interval of 8.333 ms - **even though presentation was configured
+`IMMEDIATE`, the surface logged `displaySync=false`, vsync was off, and the frame limiter was
+unlimited.** The same machine free-ran at 300 FPS an hour earlier on the same scene. Second, neither
+processor is saturated: 3.25 ms of CPU and 3.53 ms of GPU inside an 8.13 ms frame. Third, what fills
+the frame is the 4.58 ms the render thread spends waiting for a drawable.
+
+So the run was paced by the presentation path, not by the renderer. Display sync was off, so the
+remaining suspect is `CAMetalLayer`'s drawable pool - `maximumDrawableCount` is not currently set -
+or the window server applying its own pacing to a layer-backed window. That is worth chasing,
+because a paced run absorbs exactly the stalls the benchmark exists to find.
+
+The harness now warns when a phase's frames arrive at the refresh interval, so a paced run cannot be
+quietly compared against a free-running one. It is a warning rather than a failure: the CPU time,
+GPU time, and stall attribution in such a phase are all still meaningful, and a diagnostic run is
+usually after those.
+
+This is also the first measurement that could distinguish "the GPU is the bottleneck" from "the
+render thread is waiting on presentation". Before `GPU_FRAME`, both looked identical from the CPU.
 
 ### Known gaps
 
-Per-frame attribution now covers the render path, the JVM's collection time, and time spent outside
-the render loop, but the harness still has no GPU-side timing, so it can localise a stall to "not the
-CPU" but not to a specific GPU stage. Metal timestamp query pools already exist in the backend (`MetalCommandEncoder`), and bracketing each submitted frame with a begin/end counter pair is the next step; Apple's Instruments Game Performance template and GPU counters remain the reference. It records heap size and collector names but still not thermal state or system load, which would
+Per-frame attribution now covers the render path, the JVM's collection time, time spent outside the
+render loop, and GPU busy time. The last of those comes from `MTLCommandBuffer`'s own GPU start and
+end times, collected in the completion handler that already existed and drained by the render thread
+once per frame as the `GPU_FRAME` source. It answers "is the GPU busy", not "how long did this frame
+take on the GPU": command buffers are attributed to whichever frame they finished in, and they can
+overlap on the GPU, so the sum can exceed the wall clock. Localising a stall to a specific GPU
+*stage* still needs encoder-level counter samples, for which the timestamp query pools already exist
+in the backend; Apple's Instruments Game Performance template and GPU counters remain the reference.
+
+The harness records heap size and collector names but still not thermal state or system load, which would
 have explained the variance above rather than leaving it inferred - and which matters more than this
 document previously assumed: across one afternoon the same scenario ran anywhere from 117 to 361 FPS
 depending on machine and display state.
@@ -246,7 +324,7 @@ Current status of each item, and the work that is open now, is tracked in [NEXT_
 |---:|---|---|---|
 | 0 | ~~Replace the benchmark harness~~ (done; see above) | Done. Established that the traversal tail, not steady-state draw cost, is the problem | Medium |
 | 1 | Persistent triple-buffered shared upload/uniform/vertex arenas; reuse blit encoders | High, and now the top target: the frame became CPU-bound once the depth-clear allocation was removed | Medium |
-| 2 | Batch the JNI render ABI and replace the locked/boxed handle registry hot path | **Partly done**: caching the root device per entry gave +38%; replacing the O(live objects) release scan with a child count made releases 4-5x cheaper. Remaining: the boxed-`NSNumber` dictionary itself, and command batching | Medium-high |
+| 2 | Batch the JNI render ABI and replace the locked/boxed handle registry hot path | **Mostly done**: caching the root device per entry gave +38%; the O(live objects) release scan became a child count; the boxed-`NSNumber` dictionary is now a slot+generation table and stage-selective binding halves the bind calls, together worth +35% and a quarter of the per-frame CPU time. Remaining: command batching itself | Medium-high |
 | 2b | ~~Stop rebuilding the flattened bind-group layout per draw~~ (done) | Done. Removed 98% of the renderer's Java allocation and gave +20-26%; see above | Low |
 | 3 | Remove artificial render-pass/resource churn; correct load/store actions | **Partly done**: the depth-clear scratch target is gone (20x acquire improvement). Remaining: load/store liveness, pass merging | Medium |
 | 4 | Cache shader libraries, pipeline variants, texel views, and translated outputs | Medium frame-hitch/startup win | Medium |
@@ -256,9 +334,14 @@ Current status of each item, and the work that is open now, is tracked in [NEXT_
 
 ### 1. Build a unified-memory fast path
 
-Today, every `writeToBuffer` creates a shared `MTLBuffer`, maps it, copies the Java bytes, and schedules a copy to the target (`MetalCommandEncoder.java:145-154`). Texture uploads do the same with a new padded buffer (`MetalCommandEncoder.java:164-184`). Several copy paths allocate a private temporary and issue one copy for every row (`MetalCommandEncoder.java:202-216,236-248`). `MetalTransientMemory` likewise allocates a new GPU buffer for each request and ignores its `alignment` parameter when suballocating because it does not suballocate at all (`MetalTransientMemory.java:21-59,95-123`). Each native buffer copy then creates and ends a new blit encoder (`metalcraft.m:1231-1266`).
+**Partly done.** `MetalTransientMemory` now implements three rotating frame slots with suballocating
+arenas, and `writeToBuffer` and `writeToTexture` allocate staging out of them rather than creating a
+shared `MTLBuffer` per call. The description below is the original plan; what is left of it is
+blit-encoder reuse, the row-at-a-time private-temporary copy paths
+(`MetalCommandEncoder.copyBufferToTexture` and the padded `copyTextureToBuffer`), and isolating
+readback submissions so a pending callback does not turn `submit()` into `waitUntilCompleted()`.
 
-Replace this with three (optionally four under a high-performance profile) persistent `MTLStorageModeShared` arenas, one per frame in flight. Suballocate aligned slices for dynamic vertex, index, uniform, and upload data; expose each arena's `contents` once as a direct `ByteBuffer`; recycle a slot only from the command-buffer completion handler. Keep one blit encoder open across adjacent transfer commands and end it only before a render/compute pass. Let upstream transient allocation write directly into these Metal-backed slices so the normal path is Java producer -> shared unified memory -> GPU consumer, with no staging allocation or shared-to-private blit for frequently updated data.
+The original plan, for the parts still open: replace this with three (optionally four under a high-performance profile) persistent `MTLStorageModeShared` arenas, one per frame in flight. Suballocate aligned slices for dynamic vertex, index, uniform, and upload data; expose each arena's `contents` once as a direct `ByteBuffer`; recycle a slot only from the command-buffer completion handler. Keep one blit encoder open across adjacent transfer commands and end it only before a render/compute pass. Let upstream transient allocation write directly into these Metal-backed slices so the normal path is Java producer -> shared unified memory -> GPU consumer, with no staging allocation or shared-to-private blit for frequently updated data.
 
 Apple specifically recommends shared storage for CPU-populated or frequently CPU-updated data on Apple GPUs and private storage for GPU-owned data; memoryless storage is for single-pass attachments ([Apple GPU storage modes](https://developer.apple.com/documentation/metal/choosing-a-resource-storage-mode-for-apple-gpus)). Apple also recommends multiple in-flight resource instances so CPU and GPU work overlap without waits ([Synchronizing CPU and GPU work](https://developer.apple.com/documentation/metal/synchronizing-cpu-and-gpu-work)). Keep static, GPU-only geometry/textures private when traces prove that better; do not assume a private copy helps every buffer on unified memory. Test write-combined CPU cache mode only behind a benchmark flag because Apple warns that reads can be very slow and that it can have surprising pitfalls ([`MTLCPUCacheMode.writeCombined`](https://developer.apple.com/documentation/metal/mtlcpucachemode/writecombined)).
 
@@ -266,18 +349,18 @@ Also isolate actual readback submissions. Any pending callback currently turns s
 
 ### 2. Make command submission coarse-grained
 
-Every binding and draw is a synchronized Java method followed by a separate JNI call (`MetalRenderPass.java:162-229,247-300`). Resource binding can call native code for a uniform plus both a texture and sampler before a draw (`MetalRenderPassBackend.java:216-249`). Native lookup then locks one global `NSLock`, boxes `jlong` handles into `NSNumber`, walks ownership chains, and looks up every object (`metalcraft.m:841-920`). Every pin takes another lock and hashes into an `NSMutableSet` (`metalcraft.m:197-240`). Finally, releasing any object scans every registry value for children while holding the global lock (`metalcraft.m:955-986`); per-frame temporary-buffer churn makes that O(live objects) release especially costly.
+Every binding and draw is a synchronized Java method followed by a separate JNI call (`MetalRenderPass.java:162-229,247-300`). Resource binding can call native code for a uniform plus both a texture and sampler before a draw (`MetalRenderPassBackend.java`), though each such call now reaches one stage rather than two. Native lookup then locked one global `NSLock`, boxed `jlong` handles into `NSNumber`, walked ownership chains, and looked up every object. Only the lock remains; the rest is described under the measured effect above. Every pin takes another lock and hashes into an `NSMutableSet` (`metalcraft.m:197-240`). Finally, releasing any object scans every registry value for children while holding the global lock (`metalcraft.m:955-986`); per-frame temporary-buffer churn makes that O(live objects) release especially costly.
 
 First add release-mode telemetry for JNI calls, registry lookups/lock wait, pins, releases, and live-object count. Then:
 
 1. Submit compact native command arrays/direct-buffer structs for repeated binds and draws, validated once per batch. Keep a checked debug ABI, but make the production path coarse.
-2. Replace dictionary/`NSNumber` handles with slot+generation handles in a contiguous table, store the root device directly in every slot, maintain child counts instead of scanning all objects, and shard or eliminate the render-thread lookup lock.
+2. ~~Replace dictionary/`NSNumber` handles with slot+generation handles in a contiguous table, store the root device directly in every slot, maintain child counts instead of scanning all objects.~~ Done. Remaining here: shard or eliminate the render-thread lookup lock, which is still one global `NSLock`.
 3. Transfer an immutable in-flight resource set to the completion handler rather than locking for every render-thread pin. Cache the last bindings on the native encoder too.
-4. Bind only shader stages that use a resource; `nSetUniformBuffer`, `nSetTexture`, and `nSetSampler` currently issue both vertex and fragment calls unconditionally (`metalcraft.m:2439-2462,2534-2581`).
+4. ~~Bind only shader stages that use a resource.~~ Done: the translated shaders are reflected for the slots each stage declares, and the bind calls take a stage mask. See the measured effect above.
 
 Apple does not publish a JNI cost model, so the exact win must come from local counters. The direction is consistent with Apple's guidance to do more GPU work with fewer CPU commands. Argument buffers explicitly reduce the overhead of assigning resources individually ([Improving CPU performance with argument buffers](https://developer.apple.com/documentation/metal/improving-cpu-performance-by-using-argument-buffers)).
 
-Two immediate batch fixes are lower risk: the pointer-buffer indexed multi-draw overload currently loops in Java and crosses JNI per draw (`MetalRenderPassBackend.java:148-155`), and Java multi-draw creates several new primitive arrays before JNI (`MetalRenderPass.java:303-390,545-566`). Consume direct buffers in one native call. Native indirect draw-count paths still loop one Metal call per record (`metalcraft.m:2821-2904`); record stable groups into an `MTLIndirectCommandBuffer` when profiling shows repetition.
+Two batch fixes look easy but are not currently worth doing: the pointer-buffer indexed multi-draw overload loops in Java and crosses JNI per draw, and Java multi-draw creates several new primitive arrays before JNI. Minecraft 26.2 reaches neither - chunk sections and the world border both go through `drawMultipleIndexed`, and nothing in the client calls `multiDrawIndexed`. Fix them when a caller appears, or when a mod needs them; measuring first means finding the call site first. Native indirect draw-count paths still loop one Metal call per record (`metalcraft.m:2821-2904`); record stable groups into an `MTLIndirectCommandBuffer` when profiling shows repetition.
 
 ### 3. Respect the tile renderer and stop creating render-loop objects
 

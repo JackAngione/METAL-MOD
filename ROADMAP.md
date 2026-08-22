@@ -62,7 +62,15 @@ This milestone proved that Minecraft 26.2's backend abstraction is usable, but i
 - [x] Attribute each frame's stalls to a specific render-path operation, JVM collection, or time spent outside the render loop.
 - [x] Remove the per-draw bind-group flattening that produced 98% of the renderer's Java allocation.
 - [x] Replace the O(live objects) native release scan with a child count.
-- [ ] Reduce the residual traversal tail, which is now vanilla chunk-meshing allocation rather than renderer work: needs JVM heap/collector tuning measured with the stall probe.
+- [x] Report the resolution actually rendered and presented, rather than the one requested.
+- [x] Attribute GPU busy time per frame, not just CPU and collection time.
+- [x] Bind each resource only to the shader stages that read it.
+- [x] Replace the boxed-handle registry with a slot+generation table.
+- [x] Stop allocating per-pass hash tables in the render-pass adapter.
+- [ ] Reduce the residual traversal tail, which is vanilla chunk-meshing allocation rather than renderer work: needs JVM heap/collector tuning measured with the stall probe.
+- [ ] Batch the render ABI so a bind-and-draw sequence crosses JNI once rather than per command.
+- [ ] Propagate attachment liveness so dead attachments store `DontCare`, and merge compatible passes.
+- [ ] Localise GPU time to a stage with encoder-level counter samples, not just per command buffer.
 - [ ] Compare OpenGL and Vulkan/Metal on M1, M2, M3, and M4 families.
 - [ ] Tune MoltenVK settings only when measurements demonstrate a win.
 - [ ] Add unified-memory-aware upload staging and allocation telemetry where Blaze3D exposes safe hooks.
