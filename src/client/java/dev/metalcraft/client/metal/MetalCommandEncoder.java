@@ -26,6 +26,8 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	private final List<Runnable> completionCallbacks = new ArrayList<>();
 	private MetalCommandBuffer commands;
 	private MetalRenderPass renderPass;
+	/** Reused across passes; only one pass can be active on an encoder at a time. */
+	private MetalRenderPassBackend renderPassBackend;
 	private boolean closed;
 
 	MetalCommandEncoder(final MetalGpuDevice device, final MetalCommandQueue commandQueue) {
@@ -80,9 +82,9 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.renderPass = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(colorAttachment, depthAttachment));
 		RenderPass.RenderArea area = descriptor.renderArea;
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
-		return new MetalRenderPassBackend(
-			this.device, this.renderPass, area, colorView.getWidth(0), colorView.getHeight(0), depthAttachment != null
-		);
+		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
+		this.renderPassBackend.reset(this.renderPass, area, colorView.getWidth(0), colorView.getHeight(0), depthAttachment != null);
+		return this.renderPassBackend;
 	}
 
 	@Override
@@ -92,6 +94,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		}
 		this.renderPass.close();
 		this.renderPass = null;
+		if (this.renderPassBackend != null) this.renderPassBackend.finish();
 	}
 
 	@Override

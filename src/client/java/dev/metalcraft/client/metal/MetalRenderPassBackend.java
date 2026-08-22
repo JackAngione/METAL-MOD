@@ -15,6 +15,7 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import java.nio.IntBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -26,35 +27,91 @@ import org.lwjgl.PointerBuffer;
 
 /** Blaze3D render-pass adapter translating named bindings and draw state to Metal slots. */
 final class MetalRenderPassBackend implements RenderPassBackend {
+	/**
+	 * Metal's shader argument tables hold sixteen buffers and sixteen textures, and the pass rejects
+	 * anything above that, so the caches below can be flat arrays rather than maps.
+	 */
+	private static final int RESOURCE_SLOTS = 16;
+	/**
+	 * Sized so the name maps never rehash in practice. A pass binds a handful of uniforms and
+	 * textures, and the instance outlives the pass, so the tables are paid for once per encoder
+	 * instead of once per pass.
+	 */
+	private static final int NAME_MAP_CAPACITY = 32;
+
 	private final MetalGpuDevice device;
-	private final MetalRenderPass metal;
-	private final RenderPass.RenderArea renderArea;
-	private final int outputWidth;
-	private final int outputHeight;
-	private final boolean hasDepth;
-	private final Map<String, GpuBufferSlice> uniforms = new HashMap<>();
-	private final Map<String, TextureBinding> textures = new HashMap<>();
-	private final Map<Integer, GpuBufferSlice> boundUniforms = new HashMap<>();
-	private final Map<Integer, TextureBinding> boundTextures = new HashMap<>();
+	private final Map<String, GpuBufferSlice> uniforms = new HashMap<>(NAME_MAP_CAPACITY);
+	private final Map<String, TextureBinding> textures = new HashMap<>(NAME_MAP_CAPACITY);
+	/**
+	 * What is currently bound in each Metal slot, so a redundant bind can be skipped.
+	 *
+	 * <p>These were {@code Map<Integer, ...>}, which boxed a dense slot index to hash it and grew a
+	 * node table per pass. The slots are already small dense integers, so an array answers the same
+	 * question without allocating or hashing anything.
+	 */
+	private final GpuBufferSlice[] boundUniforms = new GpuBufferSlice[RESOURCE_SLOTS];
+	private final MetalGpuTextureView[] boundTextureViews = new MetalGpuTextureView[RESOURCE_SLOTS];
+	private final MetalGpuSampler[] boundSamplers = new MetalGpuSampler[RESOURCE_SLOTS];
+	private MetalRenderPass metal;
+	private RenderPass.RenderArea renderArea;
+	private int outputWidth;
+	private int outputHeight;
+	private boolean hasDepth;
 	private MetalCompiledRenderPipeline pipeline;
 	private MetalGpuBuffer indexBuffer;
 	private MetalRenderPass.IndexType indexType;
 	private int debugGroups;
 
-	MetalRenderPassBackend(
-		final MetalGpuDevice device,
-		final MetalRenderPass metal,
-		final RenderPass.RenderArea renderArea,
-		final int outputWidth,
-		final int outputHeight,
-		final boolean hasDepth
-	) {
+	MetalRenderPassBackend(final MetalGpuDevice device) {
 		this.device = device;
-		this.metal = metal;
-		this.renderArea = renderArea;
-		this.outputWidth = outputWidth;
-		this.outputHeight = outputHeight;
-		this.hasDepth = hasDepth;
+	}
+
+	/**
+	 * Rebinds this adapter to a freshly begun pass.
+	 *
+	 * <p>One instance is reused for every pass on an encoder, because only one pass can be active at
+	 * a time and a per-pass instance meant re-allocating four hash tables per pass - the largest
+	 * single source of allocation left in the renderer once bind-group flattening was gone.
+	 */
+	void reset(
+		final MetalRenderPass pass,
+		final RenderPass.RenderArea area,
+		final int width,
+		final int height,
+		final boolean depth
+	) {
+		this.metal = pass;
+		this.renderArea = area;
+		this.outputWidth = width;
+		this.outputHeight = height;
+		this.hasDepth = depth;
+		this.uniforms.clear();
+		this.textures.clear();
+		this.clearBoundSlots();
+		this.pipeline = null;
+		this.indexBuffer = null;
+		this.indexType = null;
+		this.debugGroups = 0;
+	}
+
+	/**
+	 * Detaches from the finished pass, so a caller holding the adapter past {@code submitRenderPass}
+	 * is told so rather than quietly encoding into whichever pass is opened next. Reuse is what makes
+	 * that failure mode possible, so reuse is what has to close it.
+	 */
+	void finish() {
+		this.metal = null;
+	}
+
+	private MetalRenderPass pass() {
+		if (this.metal == null) throw new IllegalStateException("This Metal render pass has already been submitted");
+		return this.metal;
+	}
+
+	private void clearBoundSlots() {
+		Arrays.fill(this.boundUniforms, null);
+		Arrays.fill(this.boundTextureViews, null);
+		Arrays.fill(this.boundSamplers, null);
 	}
 
 	@Override
@@ -74,9 +131,8 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		if (!compiled.isValid()) throw new IllegalStateException("Direct Metal pipeline is invalid: " + pipeline.getLocation());
 		if (this.pipeline != compiled) {
 			this.pipeline = compiled;
-			this.boundUniforms.clear();
-			this.boundTextures.clear();
-			this.metal.setPipeline(compiled.metal(this.hasDepth));
+			this.clearBoundSlots();
+			this.pass().setPipeline(compiled.metal(this.hasDepth));
 		}
 	}
 
@@ -104,7 +160,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void enableScissor(final int x, final int y, final int width, final int height) {
-		this.metal.setScissor(x, y, width, height);
+		this.pass().setScissor(x, y, width, height);
 	}
 
 	@Override
@@ -117,7 +173,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	public void setVertexBuffer(final int slot, final @Nullable GpuBufferSlice vertexBuffer) {
 		if (vertexBuffer != null) {
 			MetalGpuBuffer buffer = requireBuffer(vertexBuffer.buffer());
-			this.metal.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX + slot, buffer.metal(), vertexBuffer.offset());
+			this.pass().setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX + slot, buffer.metal(), vertexBuffer.offset());
 		}
 	}
 
@@ -134,14 +190,14 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	public void drawIndexed(final int indexCount, final int instanceCount, final int firstIndex, final int vertexOffset, final int firstInstance) {
 		this.bindResources();
 		this.requireIndexBuffer();
-		this.metal.drawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instanceCount, vertexOffset, firstInstance);
+		this.pass().drawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instanceCount, vertexOffset, firstInstance);
 	}
 
 	@Override
 	public void multiDrawIndexed(final IntBuffer drawParameters, final int instanceCount, final int firstInstance, final int drawCount) {
 		this.bindResources();
 		this.requireIndexBuffer();
-		this.metal.multiDrawIndexed(this.primitive(), this.indexBuffer.metal(), this.indexType, drawParameters, instanceCount, firstInstance, drawCount);
+		this.pass().multiDrawIndexed(this.primitive(), this.indexBuffer.metal(), this.indexType, drawParameters, instanceCount, firstInstance, drawCount);
 	}
 
 	@Override
@@ -151,7 +207,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		for (int draw = 0; draw < drawCount; draw++) {
 			int count = indexCounts.get(indexCounts.position() + draw);
 			int baseVertex = vertexOffsets.get(vertexOffsets.position() + draw);
-			this.metal.drawIndexed(this.primitive(), this.indexBuffer.metal(), firstIndexOffsets.get(firstIndexOffsets.position() + draw), this.indexType, count, 1, baseVertex, 0);
+			this.pass().drawIndexed(this.primitive(), this.indexBuffer.metal(), firstIndexOffsets.get(firstIndexOffsets.position() + draw), this.indexType, count, 1, baseVertex, 0);
 		}
 	}
 
@@ -159,7 +215,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	public void drawIndexedIndirect(final GpuBufferSlice commands, final int drawCount) {
 		this.bindResources();
 		this.requireIndexBuffer();
-		this.metal.drawIndexedIndirect(this.primitive(), this.indexBuffer.metal(), this.indexType, requireBuffer(commands.buffer()).metal(), commands.offset(), drawCount);
+		this.pass().drawIndexedIndirect(this.primitive(), this.indexBuffer.metal(), this.indexType, requireBuffer(commands.buffer()).metal(), commands.offset(), drawCount);
 	}
 
 	@Override
@@ -185,32 +241,32 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		if (this.isTriangleFan()) {
 			this.drawTriangleFan(vertexCount, instanceCount, firstVertex, firstInstance);
 		} else {
-			this.metal.draw(this.primitive(), firstVertex, vertexCount, instanceCount, firstInstance);
+			this.pass().draw(this.primitive(), firstVertex, vertexCount, instanceCount, firstInstance);
 		}
 	}
 
 	@Override
 	public void multiDraw(final IntBuffer drawParameters, final int instanceCount, final int firstInstance, final int drawCount) {
 		this.bindResources();
-		this.metal.multiDraw(this.primitive(), drawParameters, instanceCount, firstInstance, drawCount);
+		this.pass().multiDraw(this.primitive(), drawParameters, instanceCount, firstInstance, drawCount);
 	}
 
 	@Override
 	public void multiDraw(final IntBuffer firstVertices, final IntBuffer vertexCounts, final int drawCount) {
 		this.bindResources();
-		this.metal.multiDraw(this.primitive(), firstVertices, vertexCounts, drawCount);
+		this.pass().multiDraw(this.primitive(), firstVertices, vertexCounts, drawCount);
 	}
 
 	@Override
 	public void drawIndirect(final GpuBufferSlice commands, final int drawCount) {
 		this.bindResources();
-		this.metal.drawIndirect(this.primitive(), requireBuffer(commands.buffer()).metal(), commands.offset(), drawCount);
+		this.pass().drawIndirect(this.primitive(), requireBuffer(commands.buffer()).metal(), commands.offset(), drawCount);
 	}
 
 	@Override
 	public void writeTimestamp(final GpuQueryPool pool, final int index) {
 		if (!(pool instanceof MetalTimestampQueryPool queryPool)) throw new IllegalArgumentException("Query pool does not belong to Metal");
-		this.metal.writeTimestamp(queryPool, index);
+		this.pass().writeTimestamp(queryPool, index);
 	}
 
 	private void bindResources() {
@@ -220,19 +276,20 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			BindGroupLayout.UniformDescription description = uniformLayout.get(index);
 			GpuBufferSlice value = this.uniforms.get(description.name());
 			if (value == null) throw new IllegalStateException("Missing Metal uniform " + description.name());
-			if (!value.equals(this.boundUniforms.get(index))) {
+			requireSlot(index, description.name());
+			if (!value.equals(this.boundUniforms[index])) {
 				MetalBuffer buffer = requireBuffer(value.buffer()).metal();
 				if (description.type() == UniformType.TEXEL_BUFFER) {
 					if (description.gpuFormat() == null) {
 						throw new IllegalStateException("Metal texel-buffer uniform has no format: " + description.name());
 					}
-					this.metal.setTexelBuffer(
+					this.pass().setTexelBuffer(
 						index, buffer, value.offset(), value.length(), Blaze3DMetalMappings.textureFormat(description.gpuFormat())
 					);
 				} else {
-					this.metal.setUniformBuffer(index, buffer, value.offset());
+					this.pass().setUniformBuffer(index, buffer, value.offset());
 				}
-				this.boundUniforms.put(index, value);
+				this.boundUniforms[index] = value;
 			}
 		}
 		List<String> samplerLayout = this.pipeline.samplerLayout();
@@ -241,10 +298,14 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			TextureBinding value = this.textures.get(name);
 			if (value == null) throw new IllegalStateException("Missing Metal sampler " + name);
 			int resourceIndex = uniformLayout.size() + index;
-			if (!value.equals(this.boundTextures.get(resourceIndex))) {
-				this.metal.setTexture(resourceIndex, value.view.metal());
-				this.metal.setSampler(resourceIndex, value.sampler.metal());
-				this.boundTextures.put(resourceIndex, value);
+			requireSlot(resourceIndex, name);
+			// Views and samplers have identity equality, so this is the same test the record's
+			// equals() performed, without boxing the slot to look the pair up.
+			if (this.boundTextureViews[resourceIndex] != value.view || this.boundSamplers[resourceIndex] != value.sampler) {
+				this.pass().setTexture(resourceIndex, value.view.metal());
+				this.pass().setSampler(resourceIndex, value.sampler.metal());
+				this.boundTextureViews[resourceIndex] = value.view;
+				this.boundSamplers[resourceIndex] = value.sampler;
 			}
 		}
 	}
@@ -266,7 +327,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		boolean useShorts = vertexCount <= 1 << 16;
 		// The shared fan buffer is already filled; a smaller fan is a prefix of a larger one.
 		MetalBuffer indices = this.device.fanIndices(vertexCount, useShorts);
-		this.metal.drawIndexed(
+		this.pass().drawIndexed(
 			MetalRenderPass.Primitive.TRIANGLE,
 			indices,
 			0L,
@@ -284,6 +345,13 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	private long indexOffset(final int firstIndex) {
 		return Math.multiplyExact((long)firstIndex, this.indexType == MetalRenderPass.IndexType.UINT16 ? 2L : 4L);
+	}
+
+	private static void requireSlot(final int slot, final String name) {
+		if (slot < 0 || slot >= RESOURCE_SLOTS) {
+			throw new IllegalStateException("Metal resource slot " + slot + " for " + name
+				+ " is outside the " + RESOURCE_SLOTS + " slots a Metal argument table provides");
+		}
 	}
 
 	private static MetalGpuBuffer requireBuffer(final GpuBuffer buffer) {
