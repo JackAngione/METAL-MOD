@@ -88,57 +88,6 @@ typedef NS_ENUM(NSUInteger, MCObjectType) {
 
 static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 
-@interface MCNativeObject : NSObject
-
-@property(nonatomic, readonly) MCObjectType type;
-@property(nonatomic, strong, readonly) id object;
-@property(nonatomic, readonly) jlong ownerHandle;
-/**
- * The device this object ultimately belongs to, resolved once at registration.
- *
- * <p>Ownership is fixed for an object's lifetime, so walking the owner chain on every command was
- * re-deriving a constant. A profile of the render thread attributed 13% of its samples to that
- * walk, most of it dictionary lookups and CFNumber hashing one level at a time.
- */
-@property(nonatomic, readonly) jlong rootDeviceHandle;
-/**
- * How many registered objects name this one as their owner.
- *
- * <p>Release has to refuse an object that still owns children. It used to answer that by walking
- * every value in the registry, which copies the whole value array and costs O(live objects) per
- * release - and the renderer releases thousands of chunk buffers while streaming terrain. The
- * count answers the same question in constant time; the scan survives only on the error path,
- * where it still names the offending child's type.
- */
-@property(nonatomic) NSUInteger childCount;
-
-- (instancetype)initWithType:(MCObjectType)type
-	object:(id)object
-	ownerHandle:(jlong)ownerHandle
-	rootDeviceHandle:(jlong)rootDeviceHandle;
-
-@end
-
-
-@implementation MCNativeObject
-
-- (instancetype)initWithType:(MCObjectType)type
-	object:(id)object
-	ownerHandle:(jlong)ownerHandle
-	rootDeviceHandle:(jlong)rootDeviceHandle {
-	self = [super init];
-	if (self != nil) {
-		_type = type;
-		_object = object;
-		_ownerHandle = ownerHandle;
-		_rootDeviceHandle = rootDeviceHandle;
-	}
-	return self;
-}
-
-@end
-
-
 @interface MCMetalSurface : NSObject
 
 @property(nonatomic, strong, readonly) CAMetalLayer *layer;
@@ -481,15 +430,82 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 
 @end
 
+/**
+ * The registry mapping Java handles to the Metal objects they name.
+ *
+ * <p>This was a dictionary keyed by boxed handles, which meant every command that touched an object
+ * allocated an NSNumber, hashed a CFNumber, and probed a hash table - two or three times per call,
+ * on the render thread, for what is really an array index. A slot table answers the same question
+ * with a bounds check and a compare.
+ *
+ * <p>A handle packs a generation above a slot index, so a stale handle whose slot has since been
+ * reused is rejected rather than silently resolving to whatever now lives there. The generation
+ * advances on every release, and slot 0 is usable because the generation starts at one and is never
+ * zero while a slot is live - so a valid handle is never zero, which is the value Java uses for
+ * "closed".
+ *
+ * <p>Entries are plain structs rather than objects: the fields are read on every command, and
+ * reaching them through property accessors on a heap object was another message send apiece.
+ */
+#define MC_SLOT_BITS 24
+#define MC_SLOT_MASK ((1u << MC_SLOT_BITS) - 1u)
+#define MC_MAX_SLOTS (1u << MC_SLOT_BITS)
+
+typedef struct {
+	/** Retained by the table; NULL marks a free slot. Bridged rather than __strong so it can live in realloc'd memory. */
+	void *object;
+	jlong ownerHandle;
+	/**
+	 * The device this object ultimately belongs to, resolved once at registration.
+	 *
+	 * <p>Ownership is fixed for an object's lifetime, so walking the owner chain on every command
+	 * was re-deriving a constant. A profile of the render thread attributed 13% of its samples to
+	 * that walk, most of it dictionary lookups and CFNumber hashing one level at a time.
+	 */
+	jlong rootDeviceHandle;
+	/** Matches the generation encoded in the live handle for this slot. */
+	uint64_t generation;
+	/**
+	 * How many registered objects name this one as their owner.
+	 *
+	 * <p>Release has to refuse an object that still owns children. It used to answer that by walking
+	 * every value in the registry, which copies the whole value array and costs O(live objects) per
+	 * release - and the renderer releases thousands of chunk buffers while streaming terrain. The
+	 * count answers the same question in constant time; the scan survives only on the error path,
+	 * where it still names the offending child's type.
+	 */
+	uint32_t childCount;
+	MCObjectType type;
+} MCSlot;
+
 static pthread_once_t mc_registry_once = PTHREAD_ONCE_INIT;
 static NSLock *mc_registry_lock;
-static NSMutableDictionary<NSNumber *, MCNativeObject *> *mc_registry;
-static jlong mc_next_handle;
+static MCSlot *mc_slots;
+static uint32_t mc_slot_capacity;
+static uint32_t mc_slot_count;
+static uint32_t *mc_free_slots;
+static uint32_t mc_free_count;
 
 static void mc_initialize_registry(void) {
 	mc_registry_lock = [[NSLock alloc] init];
-	mc_registry = [[NSMutableDictionary alloc] init];
-	mc_next_handle = 1;
+}
+
+static jlong mc_make_handle(uint32_t slot, uint64_t generation) {
+	return (jlong)((generation << MC_SLOT_BITS) | slot);
+}
+
+/** @return the live slot for this handle, or NULL if the handle is zero, stale, or out of range */
+static MCSlot *mc_slot_locked(jlong handle) {
+	if (handle <= 0) {
+		return NULL;
+	}
+	uint32_t slot = (uint32_t)handle & MC_SLOT_MASK;
+	uint64_t generation = (uint64_t)handle >> MC_SLOT_BITS;
+	if (slot >= mc_slot_count) {
+		return NULL;
+	}
+	MCSlot *entry = &mc_slots[slot];
+	return entry->object != NULL && entry->generation == generation ? entry : NULL;
 }
 
 static void mc_throw_state(JNIEnv *env, NSString *message) {
@@ -944,29 +960,67 @@ static BOOL mc_require_main_thread(JNIEnv *env, NSString *operation) {
 	return NO;
 }
 
+/** Claims a slot for a new object. The registry lock must already be held. */
+static uint32_t mc_claim_slot_locked(void) {
+	if (mc_free_count > 0) {
+		return mc_free_slots[--mc_free_count];
+	}
+	if (mc_slot_count == mc_slot_capacity) {
+		uint32_t capacity = mc_slot_capacity == 0 ? 256 : mc_slot_capacity * 2;
+		if (capacity > MC_MAX_SLOTS) {
+			capacity = MC_MAX_SLOTS;
+		}
+		if (capacity == mc_slot_capacity) {
+			return UINT32_MAX;
+		}
+		MCSlot *grown = realloc(mc_slots, (size_t)capacity * sizeof(MCSlot));
+		uint32_t *grownFree = realloc(mc_free_slots, (size_t)capacity * sizeof(uint32_t));
+		if (grown == NULL || grownFree == NULL) {
+			// Keep whichever succeeded; the table stays consistent either way and the caller fails.
+			if (grown != NULL) mc_slots = grown;
+			if (grownFree != NULL) mc_free_slots = grownFree;
+			return UINT32_MAX;
+		}
+		mc_slots = grown;
+		mc_free_slots = grownFree;
+		memset(&mc_slots[mc_slot_capacity], 0, (size_t)(capacity - mc_slot_capacity) * sizeof(MCSlot));
+		mc_slot_capacity = capacity;
+	}
+	return mc_slot_count++;
+}
+
 static jlong mc_register_object(id object, MCObjectType type, jlong ownerHandle) {
 	pthread_once(&mc_registry_once, mc_initialize_registry);
 	[mc_registry_lock lock];
-	jlong handle = mc_next_handle++;
+	uint32_t slot = mc_claim_slot_locked();
+	if (slot == UINT32_MAX) {
+		[mc_registry_lock unlock];
+		return 0;
+	}
+	MCSlot *entry = &mc_slots[slot];
+	if (entry->generation == 0) {
+		entry->generation = 1;
+	}
+	jlong handle = mc_make_handle(slot, entry->generation);
 	// Resolved once here rather than on every command that touches the object.
 	jlong rootDeviceHandle = 0;
-	MCNativeObject *owner = ownerHandle == 0 ? nil : mc_registry[@(ownerHandle)];
+	MCSlot *owner = mc_slot_locked(ownerHandle);
 	if (type == MCObjectTypeDevice) {
 		rootDeviceHandle = handle;
-	} else if (owner != nil) {
-		rootDeviceHandle = owner.rootDeviceHandle;
+	} else if (owner != NULL) {
+		rootDeviceHandle = owner->rootDeviceHandle;
+		owner->childCount += 1;
 	}
-	owner.childCount += 1;
-	mc_registry[@(handle)] = [[MCNativeObject alloc]
-		initWithType:type
-		object:object
-		ownerHandle:ownerHandle
-		rootDeviceHandle:rootDeviceHandle];
+	entry->object = (__bridge_retained void *)object;
+	entry->ownerHandle = ownerHandle;
+	entry->rootDeviceHandle = rootDeviceHandle;
+	entry->childCount = 0;
+	entry->type = type;
 	[mc_registry_lock unlock];
 	return handle;
 }
 
-static MCNativeObject *mc_get_entry(JNIEnv *env, jlong handle, MCObjectType expectedType) {
+static id mc_get_object(JNIEnv *env, jlong handle, MCObjectType expectedType) {
 	if (handle == 0) {
 		mc_throw_state(env, [NSString stringWithFormat:@"%@ is closed", mc_type_name(expectedType)]);
 		return nil;
@@ -974,33 +1028,30 @@ static MCNativeObject *mc_get_entry(JNIEnv *env, jlong handle, MCObjectType expe
 
 	pthread_once(&mc_registry_once, mc_initialize_registry);
 	[mc_registry_lock lock];
-	MCNativeObject *entry = mc_registry[@(handle)];
-	[mc_registry_lock unlock];
-
-	if (entry == nil) {
+	MCSlot *entry = mc_slot_locked(handle);
+	if (entry == NULL) {
+		[mc_registry_lock unlock];
 		mc_throw_state(env, [NSString stringWithFormat:@"Unknown or released %@ handle %lld", mc_type_name(expectedType), (long long)handle]);
 		return nil;
 	}
-	if (entry.type != expectedType) {
+	// Copied out under the lock; the slot itself can be reused the moment it is dropped.
+	MCObjectType actualType = entry->type;
+	id object = (__bridge id)entry->object;
+	[mc_registry_lock unlock];
+
+	if (actualType != expectedType) {
 		mc_throw_state(
 			env,
-			[NSString stringWithFormat:@"Handle %lld is a %@, not a %@", (long long)handle, mc_type_name(entry.type), mc_type_name(expectedType)]
+			[NSString stringWithFormat:@"Handle %lld is a %@, not a %@", (long long)handle, mc_type_name(actualType), mc_type_name(expectedType)]
 		);
 		return nil;
 	}
-	return entry;
-}
-
-static id mc_get_object(JNIEnv *env, jlong handle, MCObjectType expectedType) {
-	return mc_get_entry(env, handle, expectedType).object;
+	return object;
 }
 
 static jlong mc_root_device_handle_locked(jlong handle) {
-	if (handle == 0) {
-		return 0;
-	}
-	MCNativeObject *entry = mc_registry[@(handle)];
-	return entry == nil ? 0 : entry.rootDeviceHandle;
+	MCSlot *entry = mc_slot_locked(handle);
+	return entry == NULL ? 0 : entry->rootDeviceHandle;
 }
 
 static BOOL mc_get_objects_same_device(
@@ -1014,20 +1065,20 @@ static BOOL mc_get_objects_same_device(
 	[mc_registry_lock lock];
 	jlong rootDevice = 0;
 	for (NSUInteger index = 0; index < count; index++) {
-		MCNativeObject *entry = mc_registry[@(handles[index])];
-		if (entry == nil || entry.type != types[index]) {
+		MCSlot *entry = mc_slot_locked(handles[index]);
+		if (entry == NULL || entry->type != types[index]) {
 			[mc_registry_lock unlock];
 			mc_throw_state(env, [NSString stringWithFormat:@"Unknown, released, or incorrectly typed %@", mc_type_name(types[index])]);
 			return NO;
 		}
-		jlong candidateRoot = entry.rootDeviceHandle;
+		jlong candidateRoot = entry->rootDeviceHandle;
 		if (candidateRoot == 0 || (rootDevice != 0 && candidateRoot != rootDevice)) {
 			[mc_registry_lock unlock];
 			mc_throw_state(env, @"Metal objects used by one command must belong to the same device");
 			return NO;
 		}
 		rootDevice = candidateRoot;
-		objects[index] = entry.object;
+		objects[index] = (__bridge id)entry->object;
 	}
 	[mc_registry_lock unlock];
 	return YES;
@@ -1042,25 +1093,25 @@ static BOOL mc_get_present_objects(
 ) {
 	pthread_once(&mc_registry_once, mc_initialize_registry);
 	[mc_registry_lock lock];
-	MCNativeObject *commandBufferEntry = mc_registry[@(commandBufferHandle)];
-	MCNativeObject *drawableEntry = mc_registry[@(drawableHandle)];
-	if (commandBufferEntry == nil || commandBufferEntry.type != MCObjectTypeCommandBuffer) {
+	MCSlot *commandBufferEntry = mc_slot_locked(commandBufferHandle);
+	MCSlot *drawableEntry = mc_slot_locked(drawableHandle);
+	if (commandBufferEntry == NULL || commandBufferEntry->type != MCObjectTypeCommandBuffer) {
 		[mc_registry_lock unlock];
 		mc_throw_state(env, @"Cannot present with an unknown, released, or incorrectly typed Metal command buffer");
 		return NO;
 	}
-	if (drawableEntry == nil || drawableEntry.type != MCObjectTypeDrawable) {
+	if (drawableEntry == NULL || drawableEntry->type != MCObjectTypeDrawable) {
 		[mc_registry_lock unlock];
 		mc_throw_state(env, @"Cannot present an unknown, released, or incorrectly typed Metal drawable");
 		return NO;
 	}
-	if (mc_root_device_handle_locked(commandBufferHandle) != mc_root_device_handle_locked(drawableHandle)) {
+	if (commandBufferEntry->rootDeviceHandle != drawableEntry->rootDeviceHandle) {
 		[mc_registry_lock unlock];
 		mc_throw_state(env, @"A command buffer cannot present a drawable created by another Metal device");
 		return NO;
 	}
-	*commandBuffer = commandBufferEntry.object;
-	*drawable = drawableEntry.object;
+	*commandBuffer = (__bridge id)commandBufferEntry->object;
+	*drawable = (__bridge id)drawableEntry->object;
 	[mc_registry_lock unlock];
 	return YES;
 }
@@ -1072,27 +1123,28 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
 
 	pthread_once(&mc_registry_once, mc_initialize_registry);
 	[mc_registry_lock lock];
-	MCNativeObject *entry = mc_registry[@(handle)];
-	if (entry == nil) {
+	MCSlot *entry = mc_slot_locked(handle);
+	if (entry == NULL) {
 		[mc_registry_lock unlock];
 		mc_throw_state(env, [NSString stringWithFormat:@"Unknown or already released %@ handle %lld", mc_type_name(expectedType), (long long)handle]);
 		return;
 	}
-	if (entry.type != expectedType) {
+	if (entry->type != expectedType) {
+		MCObjectType actualType = entry->type;
 		[mc_registry_lock unlock];
 		mc_throw_state(
 			env,
-			[NSString stringWithFormat:@"Cannot release handle %lld as a %@ because it is a %@", (long long)handle, mc_type_name(expectedType), mc_type_name(entry.type)]
+			[NSString stringWithFormat:@"Cannot release handle %lld as a %@ because it is a %@", (long long)handle, mc_type_name(expectedType), mc_type_name(actualType)]
 		);
 		return;
 	}
 
-	if (entry.childCount != 0) {
+	if (entry->childCount != 0) {
 		// Only here is the scan worth its cost, and only to name the child in the message.
 		MCObjectType childType = expectedType;
-		for (MCNativeObject *candidate in mc_registry.allValues) {
-			if (candidate.ownerHandle == handle) {
-				childType = candidate.type;
+		for (uint32_t slot = 0; slot < mc_slot_count; slot++) {
+			if (mc_slots[slot].object != NULL && mc_slots[slot].ownerHandle == handle) {
+				childType = mc_slots[slot].type;
 				break;
 			}
 		}
@@ -1101,19 +1153,23 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
 		return;
 	}
 
-	[mc_registry removeObjectForKey:@(handle)];
-	if (entry.ownerHandle != 0) {
-		MCNativeObject *owner = mc_registry[@(entry.ownerHandle)];
-		if (owner != nil && owner.childCount != 0) {
-			owner.childCount -= 1;
-		}
+	// Handed back to ARC, then released outside the lock along with the slot it vacated.
+	id object = (__bridge_transfer id)entry->object;
+	entry->object = NULL;
+	entry->generation += 1;
+	MCSlot *owner = mc_slot_locked(entry->ownerHandle);
+	if (owner != NULL && owner->childCount != 0) {
+		owner->childCount -= 1;
 	}
+	entry->ownerHandle = 0;
+	entry->rootDeviceHandle = 0;
+	mc_free_slots[mc_free_count++] = (uint32_t)handle & MC_SLOT_MASK;
 	[mc_registry_lock unlock];
 
 	if (expectedType == MCObjectTypeSurface) {
-		[(MCMetalSurface *)entry.object detach];
+		[(MCMetalSurface *)object detach];
 	} else if (expectedType == MCObjectTypeRenderPass) {
-		[(MCMetalRenderPass *)entry.object end];
+		[(MCMetalRenderPass *)object end];
 	}
 }
 
