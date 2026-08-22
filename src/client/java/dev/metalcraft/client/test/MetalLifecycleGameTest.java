@@ -3,6 +3,8 @@ package dev.metalcraft.client.test;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
+import dev.metalcraft.client.MetalCraftRenderResolution;
+import dev.metalcraft.client.metal.MetalSurfaceProbe;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
@@ -150,6 +152,9 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		private final int repeats;
 		private final double minimumFps;
 		private final double minimumOnePercentLow;
+		/** The presented drawable size, recorded so the report states it rather than the request. */
+		private int drawableWidth;
+		private int drawableHeight;
 
 		private MetalRealWorldBenchmark(final ClientGameTestContext context, final String backend) {
 			this.context = context;
@@ -232,9 +237,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		/** @return the effective render resolution as {width, height} */
 		private int[] applyDisplaySettings() {
 			int[] requested = requestedResolution(this.context);
-			this.context.getInput().resizeWindow(requested[0], requested[1]);
-			this.context.waitFor(client -> client.getWindow().getWidth() == requested[0]
-				&& client.getWindow().getHeight() == requested[1]);
+			this.resizeToPixels(requested);
 			this.context.runOnClient(client -> {
 				// The preset rewrites the individual graphics options, so it has to be applied first.
 				client.options.graphicsPreset().set(GraphicsPreset.FANCY);
@@ -258,9 +261,76 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				client.options.broadcastOptions();
 				client.invalidateSurfaceConfiguration();
 			});
+			int[] achieved = this.awaitConfiguredDrawable(requested);
 			LOGGER.info("Metal benchmark: rendering at {}x{}, {} chunks render distance, {} chunks simulation distance",
-				requested[0], requested[1], this.renderDistance, this.simulationDistance);
-			return requested;
+				achieved[0], achieved[1], this.renderDistance, this.simulationDistance);
+			return achieved;
+		}
+
+		/**
+		 * Sizes the window so the pixels Minecraft draws are the pixels the surface presents.
+		 *
+		 * <p>The gametest harness's {@code resizeWindow} writes one number into both the window size
+		 * and the framebuffer size. GLFW measures windows in screen coordinates and framebuffers in
+		 * pixels, so on a Retina display those are not the same number, and asking for 3840x2160
+		 * produced a 3840x2160 render target presented on a 7680x2104 drawable - a final blit that
+		 * upscaled two-to-one and squashed the aspect ratio, on top of a resolution figure that
+		 * described neither buffer. The request is therefore converted to screen coordinates, and the
+		 * framebuffer Minecraft believes in is then set from the drawable the window manager actually
+		 * gave, which is the only size both halves can agree on.
+		 */
+		private void resizeToPixels(final int[] requestedPixels) {
+			float scale = this.context.computeOnClient(MetalLifecycleGameTest::contentScale);
+			int points = Math.max(1, Math.round(requestedPixels[0] / scale));
+			int pointsHigh = Math.max(1, Math.round(requestedPixels[1] / scale));
+			this.context.getInput().resizeWindow(points, pointsHigh);
+			// The window manager may clamp the request - macOS keeps a windowed frame under the menu
+			// bar - so the achieved size is read back rather than assumed.
+			this.context.waitFor(client -> framebufferSize(client)[0] > 0);
+			this.context.runOnClient(MetalCraftRenderResolution::apply);
+			this.context.waitTicks(5);
+		}
+
+		/**
+		 * Waits for the surface to be configured after the resize and checks it against the render
+		 * target, so a run cannot silently present at a size it never drew.
+		 *
+		 * @return the render resolution actually in use as {width, height}
+		 */
+		private int[] awaitConfiguredDrawable(final int[] requestedPixels) {
+			// Only the Metal surface publishes what it was configured with. Another backend under
+			// comparison still has to report a drawable size, so it is read from the window instead.
+			boolean metal = "Metal".equals(this.backend);
+			if (metal) {
+				long before = MetalSurfaceProbe.generation();
+				this.context.waitFor(client -> MetalSurfaceProbe.generation() != before);
+			}
+			int[] rendered = this.context.computeOnClient(client ->
+				new int[] {client.getWindow().getWidth(), client.getWindow().getHeight()});
+			int[] drawable = metal
+				? MetalSurfaceProbe.drawableSize()
+				: this.context.computeOnClient(MetalLifecycleGameTest::framebufferSize);
+			if (drawable[0] <= 0 || drawable[1] <= 0) {
+				throw new AssertionError("The " + this.backend + " surface reported no drawable size, so "
+					+ "the benchmark cannot state the resolution it presented at.");
+			}
+			int expectedWidth = MetalCraftRenderResolution.scaleDimension(drawable[0]);
+			int expectedHeight = MetalCraftRenderResolution.scaleDimension(drawable[1]);
+			if (rendered[0] != expectedWidth || rendered[1] != expectedHeight) {
+				throw new AssertionError(this.backend + " benchmark renders at " + rendered[0] + "x" + rendered[1]
+					+ " but presents on a " + drawable[0] + "x" + drawable[1] + " drawable, so every frame "
+					+ "ends in a rescaling blit and no resolution figure describes the run.");
+			}
+			if (rendered[0] != requestedPixels[0] || rendered[1] != requestedPixels[1]) {
+				// Not fatal: a windowed frame cannot always reach the display's full pixel count. It is
+				// loud because the reported number is now the achieved one, not the requested one.
+				LOGGER.warn("Metal benchmark: requested {}x{} but the window manager gave {}x{}; results "
+					+ "are reported at the achieved size and are not comparable with runs at another size.",
+					requestedPixels[0], requestedPixels[1], rendered[0], rendered[1]);
+			}
+			this.drawableWidth = drawable[0];
+			this.drawableHeight = drawable[1];
+			return rendered;
 		}
 
 		private void reloadResourcePacks() {
@@ -455,9 +525,11 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				.map(GarbageCollectorMXBean::getName)
 				.collect(Collectors.joining("+"));
 			String header = String.format(Locale.ROOT,
-				"backend=%s arch=%s maxHeapMiB=%d gc=%s resolution=%dx%d renderDistance=%d simulationDistance=%d seed=%s "
+				"backend=%s arch=%s maxHeapMiB=%d gc=%s resolution=%dx%d drawable=%dx%d renderDistance=%d "
+					+ "simulationDistance=%d seed=%s "
 					+ "site=%d,%d,%d roughness=%s flatFrameFraction=%s loadedChunkFraction=%s visibleSections=%d",
-				this.backend, architecture, maxHeapMiB, collectors, resolution[0], resolution[1], this.renderDistance,
+				this.backend, architecture, maxHeapMiB, collectors, resolution[0], resolution[1],
+				this.drawableWidth, this.drawableHeight, this.renderDistance,
 				this.simulationDistance, this.seed, site.x(), site.groundY(), site.z(),
 				format(site.roughness()), format(flatFraction), format(loadedFraction), visibleSections);
 			LOGGER.info("Metal benchmark result: {}", header);
@@ -475,11 +547,13 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 
 			String json = String.format(Locale.ROOT,
 				"{\"backend\":\"%s\",\"arch\":\"%s\",\"maxHeapMiB\":%d,\"gc\":\"%s\",\"width\":%d,\"height\":%d,"
+					+ "\"drawableWidth\":%d,\"drawableHeight\":%d,"
 					+ "\"renderDistance\":%d,\"simulationDistance\":%d,\"seed\":\"%s\","
 					+ "\"siteX\":%d,\"siteY\":%d,\"siteZ\":%d,\"siteRoughness\":%.3f,\"flatFrameFraction\":%.4f,"
 					+ "\"loadedChunkFraction\":%.4f,\"visibleSections\":%d,"
 					+ "\"phases\":[%s]}%n",
-				this.backend, architecture, maxHeapMiB, collectors, resolution[0], resolution[1], this.renderDistance,
+				this.backend, architecture, maxHeapMiB, collectors, resolution[0], resolution[1],
+				this.drawableWidth, this.drawableHeight, this.renderDistance,
 				this.simulationDistance, this.seed, site.x(), site.groundY(), site.z(), site.roughness(),
 				flatFraction, loadedFraction, visibleSections, phases.stream().map(MetalFrameMetrics.Phase::toJson).collect(Collectors.joining(",")));
 			Path output = Path.of("benchmarks", "metalcraft-" + this.backend.toLowerCase(Locale.ROOT) + ".json");
@@ -535,9 +609,39 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	}
 
 	/**
-	 * Resolves the render resolution, defaulting to the primary display's native pixel dimensions.
-	 * A benchmark that renders a quarter of the pixels the player's session renders cannot predict
-	 * the player's frame rate, and on a Retina display a 1920x1080 target does exactly that.
+	 * The window's own pixels-per-point, read from the window rather than the monitor.
+	 *
+	 * <p>The monitor's content scale describes the display; this describes the surface the drawable
+	 * is actually made from, and the two disagree whenever the window sits on a second display.
+	 */
+	private static float contentScale(final Minecraft client) {
+		int[] framebuffer = framebufferSize(client);
+		int[] windowWidth = new int[1];
+		int[] windowHeight = new int[1];
+		GLFW.glfwGetWindowSize(client.getWindow().handle(), windowWidth, windowHeight);
+		if (framebuffer[0] <= 0 || windowWidth[0] <= 0) {
+			throw new AssertionError("The benchmark window reported no size, which happens while the "
+				+ "display is asleep or locked. Pass -PmetalBenchmarkResolution=WIDTHxHEIGHT.");
+		}
+		return (float)framebuffer[0] / windowWidth[0];
+	}
+
+	private static int[] framebufferSize(final Minecraft client) {
+		int[] width = new int[1];
+		int[] height = new int[1];
+		GLFW.glfwGetFramebufferSize(client.getWindow().handle(), width, height);
+		return new int[] {width[0], height[0]};
+	}
+
+	/**
+	 * Resolves the requested render resolution in pixels, defaulting to the primary display's native
+	 * pixel dimensions. A benchmark that renders a quarter of the pixels the player's session renders
+	 * cannot predict the player's frame rate, and on a Retina display a 1920x1080 target does exactly
+	 * that.
+	 *
+	 * <p>This is a request, not a result. A windowed frame cannot always reach the display's full
+	 * pixel count - macOS keeps one below the menu bar - so what the run reports is the size the
+	 * window manager granted, resolved in {@code awaitConfiguredDrawable}.
 	 */
 	private static int[] requestedResolution(final ClientGameTestContext context) {
 		String override = System.getProperty("metalcraft.benchmarkResolution", "native");

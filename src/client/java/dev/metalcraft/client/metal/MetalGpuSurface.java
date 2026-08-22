@@ -41,6 +41,7 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 			this.metal.setDisplaySyncEnabled(this.displaySyncEnabled);
 			LOGGER.info("MetalCraft surface configured: {}x{} presentMode={} displaySync={}",
 				config.width(), config.height(), config.presentMode(), this.displaySyncEnabled);
+			MetalSurfaceProbe.configured(config.width(), config.height());
 			this.configured = true;
 		} catch (RuntimeException error) {
 			throw new SurfaceException("Metal could not configure the window surface: " + error.getMessage());
