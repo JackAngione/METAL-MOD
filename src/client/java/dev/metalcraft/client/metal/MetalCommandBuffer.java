@@ -177,16 +177,17 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		}
 
 		MetalRenderPass.ColorAttachment color = descriptor.colorAttachment();
-		long colorTargetHandle;
-		boolean colorTargetIsDrawable;
-		if (color.target() instanceof MetalDrawable drawable) {
-			colorTargetHandle = drawable.requireOpenHandle();
-			colorTargetIsDrawable = true;
-		} else if (color.target() instanceof MetalTexture texture) {
-			colorTargetHandle = texture.requireOpenHandle();
-			colorTargetIsDrawable = false;
-		} else {
-			throw new IllegalArgumentException("Unsupported Metal color attachment target");
+		long colorTargetHandle = 0L;
+		boolean colorTargetIsDrawable = false;
+		if (color != null) {
+			if (color.target() instanceof MetalDrawable drawable) {
+				colorTargetHandle = drawable.requireOpenHandle();
+				colorTargetIsDrawable = true;
+			} else if (color.target() instanceof MetalTexture texture) {
+				colorTargetHandle = texture.requireOpenHandle();
+			} else {
+				throw new IllegalArgumentException("Unsupported Metal color attachment target");
+			}
 		}
 
 		MetalRenderPass.DepthAttachment depth = descriptor.depthAttachment();
@@ -194,13 +195,13 @@ public final class MetalCommandBuffer implements AutoCloseable {
 			this.requireEncodingHandle(),
 			colorTargetHandle,
 			colorTargetIsDrawable,
-			color.mipLevel(),
-			color.loadAction().ordinal(),
-			color.storeAction().ordinal(),
-			color.clearRed(),
-			color.clearGreen(),
-			color.clearBlue(),
-			color.clearAlpha(),
+			color == null ? 0 : color.mipLevel(),
+			color == null ? 0 : color.loadAction().ordinal(),
+			color == null ? 0 : color.storeAction().ordinal(),
+			color == null ? 0.0 : color.clearRed(),
+			color == null ? 0.0 : color.clearGreen(),
+			color == null ? 0.0 : color.clearBlue(),
+			color == null ? 0.0 : color.clearAlpha(),
 			depth == null ? 0L : depth.texture().requireOpenHandle(),
 			depth == null ? 0 : depth.mipLevel(),
 			depth == null ? 0 : depth.loadAction().ordinal(),

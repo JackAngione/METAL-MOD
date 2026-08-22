@@ -23,6 +23,10 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.IntBuffer;
+import java.nio.ShortBuffer;
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.HashMap;
 import java.util.List;
@@ -45,6 +49,16 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	private final DeviceInfo deviceInfo;
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> pipelineCache = new IdentityHashMap<>();
 	private final Map<ShaderKey, String> shaderSourceCache = new HashMap<>();
+	// Triangle-fan indices are a pure function of vertex count, and the pattern for a large fan
+	// contains the pattern for every smaller one as a prefix. One buffer filled once therefore
+	// serves every fan draw, replacing a create-map-fill-destroy cycle that ran per draw call.
+	private MetalBuffer fanShortIndices;
+	private int fanShortCapacity;
+	private MetalBuffer fanIntIndices;
+	private int fanIntCapacity;
+	// A superseded buffer may still be referenced by an in-flight command buffer, so growth retires
+	// the old one rather than closing it. Doubling means this happens a handful of times at most.
+	private final List<MetalBuffer> retiredFanIndices = new ArrayList<>();
 	private boolean closed;
 
 	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource) {
@@ -194,9 +208,62 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			this.commandEncoder.close();
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.pipelineCache.clear();
+			this.retiredFanIndices.forEach(MetalBuffer::close);
+			this.retiredFanIndices.clear();
+			if (this.fanShortIndices != null) {
+				this.fanShortIndices.close();
+				this.fanShortIndices = null;
+			}
+			if (this.fanIntIndices != null) {
+				this.fanIntIndices.close();
+				this.fanIntIndices = null;
+			}
 			this.commandQueue.close();
 			this.metal.close();
 		}
+	}
+
+	/** @return a shared index buffer whose first {@code (vertexCount - 2) * 3} indices fan {@code vertexCount} vertices */
+	synchronized MetalBuffer fanIndices(final int vertexCount, final boolean useShorts) {
+		int capacity = useShorts ? this.fanShortCapacity : this.fanIntCapacity;
+		MetalBuffer current = useShorts ? this.fanShortIndices : this.fanIntIndices;
+		if (current != null && capacity >= vertexCount) {
+			return current;
+		}
+
+		int grown = Math.max(Math.max(vertexCount, 1024), Math.multiplyExact(capacity, 2));
+		MetalBuffer replacement = this.createFanIndices(grown, useShorts);
+		if (current != null) {
+			this.retiredFanIndices.add(current);
+		}
+		if (useShorts) {
+			this.fanShortIndices = replacement;
+			this.fanShortCapacity = grown;
+		} else {
+			this.fanIntIndices = replacement;
+			this.fanIntCapacity = grown;
+		}
+		return replacement;
+	}
+
+	private MetalBuffer createFanIndices(final int vertexCapacity, final boolean useShorts) {
+		int indexCount = Math.multiplyExact(vertexCapacity - 2, 3);
+		int bytes = Math.multiplyExact(indexCount, useShorts ? Short.BYTES : Integer.BYTES);
+		MetalBuffer buffer = this.metal.createBuffer(bytes, MetalBuffer.StorageMode.SHARED);
+		try (MetalBuffer.Mapping mapping = buffer.map()) {
+			if (useShorts) {
+				ShortBuffer output = mapping.bytes().order(ByteOrder.nativeOrder()).asShortBuffer();
+				for (int vertex = 1; vertex < vertexCapacity - 1; vertex++) {
+					output.put((short)0).put((short)vertex).put((short)(vertex + 1));
+				}
+			} else {
+				IntBuffer output = mapping.bytes().order(ByteOrder.nativeOrder()).asIntBuffer();
+				for (int vertex = 1; vertex < vertexCapacity - 1; vertex++) {
+					output.put(0).put(vertex).put(vertex + 1);
+				}
+			}
+		}
+		return buffer;
 	}
 
 	@Override

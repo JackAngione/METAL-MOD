@@ -11,36 +11,122 @@ MetalCraft already removes the main graphics translation layers: Minecraft selec
 
 The largest remaining opportunities are therefore not another graphics API swap. They are: (1) make measurement trustworthy, (2) exploit unified memory with persistent shared arenas instead of allocation-and-copy churn, (3) make Java-to-native command submission coarse-grained and remove the globally locked object registry from the render hot path, and (4) reduce tile-memory flushes and repeated resource/pipeline creation. Shaderc -> SPIR-V -> SPIRV-Cross -> MSL (`MetalShaderTranslator.java:185-232,244-305`) is a load/reload-time compatibility path, not a per-frame translation layer; cache its results rather than replacing it before measured frame bottlenecks are known.
 
-## Current measurements are exploratory only
+## The previous measurements were invalid
 
-Fresh same-machine control runs on an Apple M4 Max reported:
+Earlier same-machine runs reported 228 FPS for Metal, 612 for OpenGL, and 224 for Vulkan/MoltenVK, with five immediately preceding Metal runs at 114-117. Those numbers should be discarded outright. The harness was not measuring a world the renderer had to draw, for four independent reasons, each verified against the code and the captured screenshot:
 
-| Backend | Reported FPS | Reported `getFrameTimeNs()` |
-|---|---:|---:|
-| Direct Metal | 228 | 1.927 ms |
-| OpenGL | 612 | 1.527 ms |
-| Vulkan/MoltenVK | 224 | 0.454 ms |
+- **The server never served the requested render distance.** The harness set `client.options.renderDistance()` but never called `Options.broadcastOptions()`. `ChunkMap` clamps delivery to `player.requestedViewDistance()`, which comes from the `ClientInformation` packet and is only re-sent on broadcast, so a benchmark asking for 21 chunks was served the 5 it joined with. The frame was mostly fog.
+- **The scene was empty.** A spectator was parked at Y=150 over a seed-1 coastline with structures off. Roughly three quarters of the frame was sky above flat ocean.
+- **The render target was a quarter of a real session.** 1920x1080 against a 3840x2160 display.
+- **No streaming work was in the capture.** The camera was static after a settle delay, so no chunk was generated, meshed, or uploaded during the 60-tick sample, and spectator mode kept the HUD and held item out of the frame.
 
-The evidence is in `run/logs/2026-08-20-6.log.gz:85,251`, `run/logs/2026-08-20-7.log.gz:85,318`, and `run/logs/latest.log:85,251`. Five immediately preceding Metal runs instead report only 114–117 FPS (`run/logs/2026-08-20-{1..5}.log.gz`, performance records at lines 227/249/248/226/250). A 2x Metal swing under the nominally identical harness is enough to disqualify these values from publication or optimization decisions.
+Two further effects distort any gametest-based capture and are now handled explicitly:
 
-The harness explains much of the uncertainty:
+- **Chunk delivery starves.** `PlayerChunkSender` paces sends from a rate the client measures in wall-clock nanoseconds per chunk (`ChunkBatchSizeCalculator`). The gametest harness parks the client thread between ticks, so the rate collapses to its `MIN_CHUNKS_PER_TICK` floor of 0.01. One run held 157 of 4225 chunks after twenty minutes. The benchmark now pins the rate to `MAX_CHUNKS_PER_TICK` every tick.
+- **Minecraft throttles an idle client to 30 FPS.** Under the default `InactivityFpsLimit.AFK`, `FramerateLimitTracker` clamps to `min(limit, 30)` after 60 seconds without input, and a benchmark whose camera holds still trips it by construction. It showed up unmistakably: the stationary and panning phases measured 29.9 FPS at exactly 33.333 ms per frame while spending 10 ms of CPU on each, and only the phase holding a movement key ran free. The benchmark now sets `InactivityFpsLimit.MINIMIZED`.
 
-- It samples only 60 times, once per game tick (`MetalLifecycleGameTest.java:23,115-123`), rather than recording every rendered frame. At 100+ FPS this misses most frames and cannot produce valid worst-frame or percentile statistics.
-- `getFps()` is updated in one-second buckets by Minecraft (`Minecraft.java:1421-1435,1514-1516` in the bundled source), yet the test averages repeated observations of it (`MetalLifecycleGameTest.java:115-123`). Sample-window phase and earlier work can therefore influence the result.
-- Minecraft assigns `frameTimeNs` from a CPU wall-clock interval before swap/presentation (`Minecraft.java:1390-1395,1518-1520` in the bundled source). The test labels the maximum sparse sample as "Metal render time" (`MetalLifecycleGameTest.java:132-134`) but records no begin/end GPU counter pair. This is not a GPU-time distribution and cannot identify whether Java, JNI, driver encoding, GPU execution, presentation, or a stall is limiting the frame.
-- The 100 FPS threshold implies a 10 ms average interval while the independent 5 ms sampled-frame threshold implies 200 FPS (`MetalLifecycleGameTest.java:24-26,126-134`). Those gates do not describe one coherent target.
-- The camera is static after teleport and a fixed settle delay (`MetalLifecycleGameTest.java:74-78`); it does not replay chunk upload, traversal, particles, UI, or shader-reload workloads. There are no repeated randomized runs, thermal-state controls, or 1%/0.1% lows.
+## Current methodology
 
-Replace this with per-frame CPU timestamps plus Metal counter samples bracketing each submitted frame, a deterministic camera/input trace, warmup followed by a substantially longer capture, at least 5 repeated runs per backend, and CSV/JSON output containing median, p95, p99, 1% low, 0.1% low, CPU encode time, GPU time, present interval, allocation counts, and thermal state. Verify native arm64/Rosetta state in the result header. Apple recommends a measure-analyze-improve loop and the Instruments Game Performance template, which correlates CPU, Metal, GPU, display, allocation, and thermal timelines ([graphics performance methodology](https://developer.apple.com/documentation/metal/improving-your-games-graphics-performance-and-settings), [Instruments Game Performance](https://developer.apple.com/documentation/xcode/analyzing-the-performance-of-your-metal-app), [GPU counters](https://developer.apple.com/documentation/metal/gpu-counters-and-counter-sample-buffers)). Add opt-in `MTLCaptureManager` scopes around representative frames for GPU-trace comparison ([MTLCaptureManager](https://developer.apple.com/documentation/metal/mtlcapturemanager)).
+`MetalLifecycleGameTest` with `-PmetalLifecycleBenchmark=true` generates ordinary terrain with structures on, then picks its camera site from generator noise rather than a hand-picked coordinate: `MetalBenchmarkScene` reads `ChunkGenerator.getBaseHeight` over a grid of candidates, rejects anything not comfortably inland, scores the rest on surface roughness and elevation, and chooses the heading whose terrain rises least above the camera so the view is open rather than buried in a hillside. The camera stands on that ground at eye height. Three phases are captured separately - stationary, a full 360-degree pan, and creative flight that forces continuous chunk generation, meshing, and upload - and each reports average, 1% low, 0.1% low, and CPU-time percentiles from every rendered frame, with frame pacing taken from consecutive render-loop end timestamps so presentation waits are counted rather than dropped.
+
+The scenario asserts its own validity before it reports anything: the server must be serving the requested view distance, at least 75% of the render distance must be loaded, and the renderer must be drawing a real section count. That last gate is what catches a blocked camera, and it earned its place - one run stood on a snow peak facing a wall of blocks two metres away, with a frame full of terrain that drew almost none of the world.
+
+### Results on the tested M4 Max
+
+3840x2160, 32 chunks, simulation distance 16, seed `metalcraft`, site -1536,173,-128, ~2590 sections drawn, 88% of the render distance loaded. Two runs of the identical scenario, roughly ten hours apart on the same machine:
+
+| Phase | Run A avg | Run B avg | Run A p50 CPU | Run B p50 CPU | Run A p50 interval | Run B p50 interval |
+|---|---:|---:|---:|---:|---:|---:|
+| Stationary | 105.7 | 69.1 | 8.901 ms | 9.105 ms | 9.064 ms | 15.678 ms |
+| Pan | 183.7 | 92.8 | 4.210 ms | 5.151 ms | 4.764 ms | 9.071 ms |
+| Traversal | 104.5 | 66.0 | 8.933 ms | 9.078 ms | 9.321 ms | 16.228 ms |
+
+Two findings, and the second is the more useful one.
+
+**The renderer is not CPU-bound, and the run-to-run variance is not CPU-side either.** Per-frame CPU time is nearly identical across the two runs - 8.90 against 9.11 ms at p50 for the stationary phase - while the frame interval nearly doubled. The CPU finishes its work in the same time and then waits longer. Whatever sets the frame rate here, and whatever moved between the two runs, is downstream of the measured CPU section: GPU execution, drawable acquisition, or presentation. macOS reported no thermal warning and the machine was on AC power for both; run B had a load average of 4.5, so external contention is the likeliest cause, which is itself the point.
+
+**A single pass is not a measurement.** A 1.5x swing with no code change is larger than most of the improvements in the plan below, so any before-and-after comparison drawn from one pass of each phase would be measuring the machine rather than the change. The scenario therefore repeats its phases (`-PmetalBenchmarkRepeats`, default 3, interleaved so drift spreads across phases rather than landing on whichever ran last) and reports median, minimum, maximum, and spread. Quote the median; read the spread before believing any difference.
+
+**The traversal stall reproduces regardless.** The worst frame was 158.9 ms in run A and 175.6 ms in run B, against a p99 CPU time under 13 ms in both. Streaming new terrain produces stalls an order of magnitude longer than any steady-state frame, and unlike the averages this does not move with machine state. That is the clearest defect the benchmark has surfaced, and it points at the allocation and upload churn in items 1 and 3 below.
+
+### What the frame time was actually going into
+
+Adding a timer around drawable acquisition (`MetalPresentProbe`, read per frame by the benchmark) resolved the gap between roughly 9 ms of per-frame CPU time and a 15 ms frame interval. Acquisition is inside the measured CPU section, and it was most of it:
+
+| Phase | Interval | CPU frame | of which acquire | Remaining CPU work |
+|---|---:|---:|---:|---:|
+| Stationary | 14.85 ms | 9.41 ms | 4.89 ms | ~4.5 ms |
+| Pan | 9.21 ms | 5.43 ms | 3.77 ms | ~1.7 ms |
+| Traversal | 16.26 ms | 9.44 ms | 5.97 ms | ~3.5 ms |
+
+The renderer was not CPU-bound. Actual per-frame CPU work was 1.7 to 4.5 ms inside a 15 ms frame, and the rest was a stalled acquire. This matters for the plan below: items 1 and 2 target CPU cost that was not the constraint.
+
+An earlier hypothesis in this document blamed the full-frame presentation blit. That was wrong and the arithmetic should have caught it sooner - roughly 66 MB per frame at 67 FPS is 4.4 GB/s against a memory system an order of magnitude faster, so the copy costs about 0.1 ms, not 15.
+
+The actual cause was allocation on the render path. `clearDepthTexture` created a full-size BGRA scratch render target for every depth clear, purely because the pass descriptor required a colour attachment - 33 MB allocated and released per call at 3840x2160. Supporting a depth-only `MTLRenderPassDescriptor` and deleting the scratch target dropped `p50AcquireMs` from 5.965 to 0.294, a factor of twenty, and took the traversal phase from 65.2 to 78.2 FPS in the first repeat after the change. Allocating a large texture per frame stalls the pipeline far more than the bandwidth it moves.
+
+### Measured effect of removing the depth-clear scratch target
+
+Three repeats of each phase before and after the change, same machine, same scene, same seed, 3840x2160 at 32 chunks:
+
+| Phase | Before | After | Change | 1% low before | 1% low after |
+|---|---:|---:|---:|---:|---:|
+| Stationary | 66.8 | 100.9 | +51% | 49.9 | 65.5 |
+| Pan | 68.8 | 104.2 | +51% | 52.7 | 70.2 |
+| Traversal | 67.2 | 99.7 | +48% | 43.7 | 57.8 |
+
+Drawable acquisition went from 4.893 ms to 0.012 ms at p50, a factor of roughly 400, and held that across every repeat.
+
+**The bottleneck has moved.** After the change the stationary phase shows a 9.805 ms frame interval against 9.607 ms of CPU time with acquisition at 0.012 ms, so essentially the whole frame is now inside the measured CPU section. The renderer is CPU-bound where it was previously stalled on presentation, which inverts the earlier conclusion: items 1 and 2 below - persistent shared arenas and coarse-grained JNI submission - are now the right targets, and they were not before. The remaining per-frame allocation churn they describe (`writeToBuffer` creating a shared buffer per call, `MetalTransientMemory` allocating per request, texel views and fan index buffers rebuilt per draw) is the same class of mistake that the depth-clear scratch target turned out to be, which is reason to expect more from them than their original estimates suggested.
+
+### Profiling the CPU-bound frame, and the registry fix
+
+With the frame CPU-bound, a 20-second `sample` of the render thread during the capture phases replaced guesswork. Two changes made by reading the code for obvious waste - a persistent triangle-fan index buffer and a texel-buffer view cache - had already produced no measurable movement (+1.2%, +0.3%, +1.3% against an 8-10% run spread), because fans and texel binds are rare in this scene. Both were kept as strictly-less-work, but they are unmeasured wins, not demonstrated ones.
+
+The profile pointed somewhere else entirely:
+
+| Symbol | Share of render-thread samples |
+|---|---:|
+| `mc_get_objects_same_device` | 19.4% |
+| ...of which `mc_root_device_handle_locked` | 13.1% |
+| ...of which `__CFNumberHash` alone | 3.1% |
+
+Handle resolution was the largest identifiable cost on the thread. `mc_root_device_handle_locked` walked the ownership chain on every command, doing a dictionary lookup with a boxed `NSNumber` key at each level, to re-derive a value that cannot change: ownership is fixed when an object is registered. Resolving the root device once at registration and storing it on the entry - and reading it from the entry the hot path had already fetched, rather than looking it up a second time - reduced the walk to a field read.
+
+| Phase | Before | After | Change |
+|---|---:|---:|---:|
+| Stationary | 102.1 | 141.2 | +38% |
+| Pan | 104.5 | 144.4 | +38% |
+| Traversal | 101.0 | 138.7 | +37% |
+
+Per-frame CPU time fell from 9.6 ms to 6.6 ms. The lesson is the same one the depth-clear scratch target taught: both measured wins came from a profile or a probe, and both hand-picked "obvious waste" fixes measured as noise.
+
+### Cumulative effect
+
+Against the first trustworthy measurement of this scenario, at 3840x2160 and 32 chunks:
+
+| Phase | Original | Now | Change | 1% low then | 1% low now |
+|---|---:|---:|---:|---:|---:|
+| Stationary | 66.8 | 141.2 | +111% | 49.9 | 78.5 |
+| Pan | 68.8 | 144.4 | +110% | 52.7 | 73.6 |
+| Traversal | 67.2 | 138.7 | +106% | 43.7 | 67.6 |
+
+Slightly more than double, from two changes: removing a per-frame full-size texture allocation, and not re-deriving a constant on every command.
+
+### Known gaps
+
+The harness still has no GPU-side timing, so it can localise a stall to "not the CPU" but not to a specific stage. Metal timestamp query pools already exist in the backend (`MetalCommandEncoder`), and bracketing each submitted frame with a begin/end counter pair is the next step; Apple's Instruments Game Performance template and GPU counters remain the reference. It also does not record thermal state or system load alongside the results, which would have explained the variance above rather than leaving it inferred.
+
+Only a floor is asserted on the numbers, because a target has to come from measurement rather than from the harness.
 
 ## Ranked implementation plan
 
 | Rank | Change | Expected impact | Complexity |
 |---:|---|---|---|
-| 0 | Replace the benchmark harness as above | Enables every other decision; no credible FPS claim without it | Medium |
-| 1 | Persistent triple-buffered shared upload/uniform/vertex arenas; reuse blit encoders | High CPU/allocation win; may also remove avoidable copies | Medium |
-| 2 | Batch the JNI render ABI and replace the locked/boxed handle registry hot path | High when CPU/draw-call bound | Medium-high |
-| 3 | Remove artificial render-pass/resource churn; correct load/store actions | High if clears/pass bandwidth occur per frame | Medium |
+| 0 | ~~Replace the benchmark harness~~ (done; see above) | Done. Established that the traversal tail, not steady-state draw cost, is the problem | Medium |
+| 1 | Persistent triple-buffered shared upload/uniform/vertex arenas; reuse blit encoders | High, and now the top target: the frame became CPU-bound once the depth-clear allocation was removed | Medium |
+| 2 | Batch the JNI render ABI and replace the locked/boxed handle registry hot path | **Partly done**: caching the root device per entry gave +38%. Remaining: the boxed-`NSNumber` dictionary itself, and command batching | Medium-high |
+| 3 | Remove artificial render-pass/resource churn; correct load/store actions | **Partly done**: the depth-clear scratch target is gone (20x acquire improvement). Remaining: load/store liveness, pass merging | Medium |
 | 4 | Cache shader libraries, pipeline variants, texel views, and translated outputs | Medium frame-hitch/startup win | Medium |
 | 5 | Argument buffers and indirect command buffers for stable draw groups | High for chunk/UI CPU submission; workload-dependent | High |
 | 6 | Render the final pass directly to the drawable when legal | Medium-high GPU bandwidth win | High |

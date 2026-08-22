@@ -129,12 +129,10 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	@Override
 	public void clearDepthTexture(final GpuTexture depthTexture, final double clearDepth) {
 		MetalGpuTexture depth = requireTexture(depthTexture);
-		MetalTexture scratch = this.device.metal().createTexture(new MetalTexture.Descriptor(
-			MetalTexture.Format.BGRA8_UNORM, depth.getWidth(0), depth.getHeight(0), 1, MetalTexture.USAGE_RENDER_TARGET
-		));
-		this.temporaryResources.add(scratch);
-		try (MetalRenderPass pass = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(
-			new MetalRenderPass.ColorAttachment(scratch, MetalRenderPass.LoadAction.DONT_CARE, MetalRenderPass.StoreAction.DONT_CARE, 0, 0, 0, 0),
+		// A depth-only pass. This previously created a full-size BGRA scratch render target for every
+		// clear purely to satisfy the descriptor, which at 3840x2160 allocated and released 33 MB of
+		// texture per call on the render path.
+		try (MetalRenderPass pass = this.commands().beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
 			new MetalRenderPass.DepthAttachment(depth.metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth)
 		))) {
 			// Beginning and ending the pass performs the clear.

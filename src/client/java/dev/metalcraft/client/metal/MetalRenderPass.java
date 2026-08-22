@@ -127,11 +127,19 @@ public final class MetalRenderPass implements AutoCloseable {
 		}
 	}
 
+	/** Either attachment may be absent, but a pass with neither would render nowhere. */
 	public record Descriptor(ColorAttachment colorAttachment, DepthAttachment depthAttachment) {
 		public Descriptor {
-			if (colorAttachment == null) {
-				throw new NullPointerException("colorAttachment");
+			if (colorAttachment == null && depthAttachment == null) {
+				throw new IllegalArgumentException("A Metal render pass requires at least one attachment");
 			}
+		}
+
+		public static Descriptor depthOnly(final DepthAttachment depthAttachment) {
+			if (depthAttachment == null) {
+				throw new NullPointerException("depthAttachment");
+			}
+			return new Descriptor(null, depthAttachment);
 		}
 
 		public Descriptor(final ColorAttachment colorAttachment) {
@@ -150,9 +158,11 @@ public final class MetalRenderPass implements AutoCloseable {
 			throw new IllegalArgumentException("A Metal render-pass handle cannot be zero");
 		}
 		this.commandBuffer = commandBuffer;
-		this.colorFormat = descriptor.colorAttachment().target() instanceof MetalTexture texture
-			? texture.descriptor().format()
-			: MetalTexture.Format.BGRA8_UNORM;
+		this.colorFormat = descriptor.colorAttachment() == null
+			? null
+			: descriptor.colorAttachment().target() instanceof MetalTexture texture
+				? texture.descriptor().format()
+				: MetalTexture.Format.BGRA8_UNORM;
 		this.depthFormat = descriptor.depthAttachment() == null
 			? null
 			: descriptor.depthAttachment().texture().descriptor().format();
@@ -162,6 +172,9 @@ public final class MetalRenderPass implements AutoCloseable {
 	public synchronized void setPipeline(final MetalRenderPipeline pipeline) {
 		if (pipeline == null) {
 			throw new NullPointerException("pipeline");
+		}
+		if (this.colorFormat == null) {
+			throw new IllegalStateException("A depth-only Metal render pass cannot bind a render pipeline");
 		}
 		if (pipeline.descriptor().colorTargets().size() != 1
 			|| pipeline.descriptor().colorFormat() != this.colorFormat

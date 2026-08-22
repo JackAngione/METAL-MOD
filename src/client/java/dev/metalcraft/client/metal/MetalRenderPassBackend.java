@@ -264,31 +264,18 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		}
 		int indexCount = Math.multiplyExact(vertexCount - 2, 3);
 		boolean useShorts = vertexCount <= 1 << 16;
-		int indexBytes = Math.multiplyExact(indexCount, useShorts ? Short.BYTES : Integer.BYTES);
-		try (MetalBuffer indices = this.device.metal().createBuffer(indexBytes, MetalBuffer.StorageMode.SHARED);
-			 MetalBuffer.Mapping mapping = indices.map()) {
-			if (useShorts) {
-				ShortBuffer output = mapping.bytes().order(ByteOrder.nativeOrder()).asShortBuffer();
-				for (int vertex = 1; vertex < vertexCount - 1; vertex++) {
-					output.put((short)0).put((short)vertex).put((short)(vertex + 1));
-				}
-			} else {
-				IntBuffer output = mapping.bytes().order(ByteOrder.nativeOrder()).asIntBuffer();
-				for (int vertex = 1; vertex < vertexCount - 1; vertex++) {
-					output.put(0).put(vertex).put(vertex + 1);
-				}
-			}
-			this.metal.drawIndexed(
-				MetalRenderPass.Primitive.TRIANGLE,
-				indices,
-				0L,
-				useShorts ? MetalRenderPass.IndexType.UINT16 : MetalRenderPass.IndexType.UINT32,
-				indexCount,
-				instanceCount,
-				firstVertex,
-				firstInstance
-			);
-		}
+		// The shared fan buffer is already filled; a smaller fan is a prefix of a larger one.
+		MetalBuffer indices = this.device.fanIndices(vertexCount, useShorts);
+		this.metal.drawIndexed(
+			MetalRenderPass.Primitive.TRIANGLE,
+			indices,
+			0L,
+			useShorts ? MetalRenderPass.IndexType.UINT16 : MetalRenderPass.IndexType.UINT32,
+			indexCount,
+			instanceCount,
+			firstVertex,
+			firstInstance
+		);
 	}
 
 	private void requireIndexBuffer() {

@@ -3,6 +3,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <jni.h>
+#import <objc/runtime.h>
 #import <pthread.h>
 #import <float.h>
 #import <math.h>
@@ -25,25 +26,90 @@ typedef NS_ENUM(NSUInteger, MCObjectType) {
 	MCObjectTypeTimestampQueryPool = 14
 };
 
+/**
+ * Texel-buffer views for one MTLBuffer, keyed by the range and format they view.
+ *
+ * <p>A view is a pure function of (buffer, offset, length, format) and stays valid as the buffer's
+ * contents change, so rebuilding one per bind - which is what the render path used to do - creates
+ * a Metal object per draw for no benefit. The cache is small and searched linearly because a buffer
+ * is typically viewed through one or two ranges.
+ */
+#define MC_TEXEL_VIEW_CACHE_CAPACITY 8
+
+@interface MCTexelViewCache : NSObject
+- (nullable id<MTLTexture>)viewForOffset:(NSUInteger)offset length:(NSUInteger)length format:(MTLPixelFormat)format;
+- (void)storeView:(id<MTLTexture>)view offset:(NSUInteger)offset length:(NSUInteger)length format:(MTLPixelFormat)format;
+@end
+
+@implementation MCTexelViewCache {
+	NSUInteger _offsets[MC_TEXEL_VIEW_CACHE_CAPACITY];
+	NSUInteger _lengths[MC_TEXEL_VIEW_CACHE_CAPACITY];
+	MTLPixelFormat _formats[MC_TEXEL_VIEW_CACHE_CAPACITY];
+	id<MTLTexture> _views[MC_TEXEL_VIEW_CACHE_CAPACITY];
+	NSUInteger _count;
+	NSUInteger _nextSlot;
+}
+
+- (nullable id<MTLTexture>)viewForOffset:(NSUInteger)offset length:(NSUInteger)length format:(MTLPixelFormat)format {
+	for (NSUInteger slot = 0; slot < _count; slot++) {
+		if (_offsets[slot] == offset && _lengths[slot] == length && _formats[slot] == format) {
+			return _views[slot];
+		}
+	}
+	return nil;
+}
+
+- (void)storeView:(id<MTLTexture>)view offset:(NSUInteger)offset length:(NSUInteger)length format:(MTLPixelFormat)format {
+	NSUInteger slot;
+	if (_count < MC_TEXEL_VIEW_CACHE_CAPACITY) {
+		slot = _count++;
+	} else {
+		slot = _nextSlot;
+		_nextSlot = (_nextSlot + 1) % MC_TEXEL_VIEW_CACHE_CAPACITY;
+	}
+	_offsets[slot] = offset;
+	_lengths[slot] = length;
+	_formats[slot] = format;
+	_views[slot] = view;
+}
+@end
+
+static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
+
 @interface MCNativeObject : NSObject
 
 @property(nonatomic, readonly) MCObjectType type;
 @property(nonatomic, strong, readonly) id object;
 @property(nonatomic, readonly) jlong ownerHandle;
+/**
+ * The device this object ultimately belongs to, resolved once at registration.
+ *
+ * <p>Ownership is fixed for an object's lifetime, so walking the owner chain on every command was
+ * re-deriving a constant. A profile of the render thread attributed 13% of its samples to that
+ * walk, most of it dictionary lookups and CFNumber hashing one level at a time.
+ */
+@property(nonatomic, readonly) jlong rootDeviceHandle;
 
-- (instancetype)initWithType:(MCObjectType)type object:(id)object ownerHandle:(jlong)ownerHandle;
+- (instancetype)initWithType:(MCObjectType)type
+	object:(id)object
+	ownerHandle:(jlong)ownerHandle
+	rootDeviceHandle:(jlong)rootDeviceHandle;
 
 @end
 
 
 @implementation MCNativeObject
 
-- (instancetype)initWithType:(MCObjectType)type object:(id)object ownerHandle:(jlong)ownerHandle {
+- (instancetype)initWithType:(MCObjectType)type
+	object:(id)object
+	ownerHandle:(jlong)ownerHandle
+	rootDeviceHandle:(jlong)rootDeviceHandle {
 	self = [super init];
 	if (self != nil) {
 		_type = type;
 		_object = object;
 		_ownerHandle = ownerHandle;
+		_rootDeviceHandle = rootDeviceHandle;
 	}
 	return self;
 }
@@ -860,7 +926,19 @@ static jlong mc_register_object(id object, MCObjectType type, jlong ownerHandle)
 	pthread_once(&mc_registry_once, mc_initialize_registry);
 	[mc_registry_lock lock];
 	jlong handle = mc_next_handle++;
-	mc_registry[@(handle)] = [[MCNativeObject alloc] initWithType:type object:object ownerHandle:ownerHandle];
+	// Resolved once here rather than on every command that touches the object.
+	jlong rootDeviceHandle = 0;
+	if (type == MCObjectTypeDevice) {
+		rootDeviceHandle = handle;
+	} else if (ownerHandle != 0) {
+		MCNativeObject *owner = mc_registry[@(ownerHandle)];
+		rootDeviceHandle = owner == nil ? 0 : owner.rootDeviceHandle;
+	}
+	mc_registry[@(handle)] = [[MCNativeObject alloc]
+		initWithType:type
+		object:object
+		ownerHandle:ownerHandle
+		rootDeviceHandle:rootDeviceHandle];
 	[mc_registry_lock unlock];
 	return handle;
 }
@@ -895,17 +973,11 @@ static id mc_get_object(JNIEnv *env, jlong handle, MCObjectType expectedType) {
 }
 
 static jlong mc_root_device_handle_locked(jlong handle) {
-	for (NSUInteger depth = 0; handle != 0 && depth < 16; depth++) {
-		MCNativeObject *entry = mc_registry[@(handle)];
-		if (entry == nil) {
-			return 0;
-		}
-		if (entry.type == MCObjectTypeDevice) {
-			return handle;
-		}
-		handle = entry.ownerHandle;
+	if (handle == 0) {
+		return 0;
 	}
-	return 0;
+	MCNativeObject *entry = mc_registry[@(handle)];
+	return entry == nil ? 0 : entry.rootDeviceHandle;
 }
 
 static BOOL mc_get_objects_same_device(
@@ -925,7 +997,7 @@ static BOOL mc_get_objects_same_device(
 			mc_throw_state(env, [NSString stringWithFormat:@"Unknown, released, or incorrectly typed %@", mc_type_name(types[index])]);
 			return NO;
 		}
-		jlong candidateRoot = mc_root_device_handle_locked(handles[index]);
+		jlong candidateRoot = entry.rootDeviceHandle;
 		if (candidateRoot == 0 || (rootDevice != 0 && candidateRoot != rootDevice)) {
 			[mc_registry_lock unlock];
 			mc_throw_state(env, @"Metal objects used by one command must belong to the same device");
@@ -2276,31 +2348,58 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 	jdouble clearDepth
 ) {
 	@autoreleasepool {
-		jlong handles[] = {commandBufferHandle, colorTargetHandle, depthTargetHandle};
-		MCObjectType types[] = {
-			MCObjectTypeCommandBuffer,
-			colorTargetIsDrawable ? MCObjectTypeDrawable : MCObjectTypeTexture,
-			MCObjectTypeTexture
-		};
+		// A pass may omit either attachment. A depth-only pass is how a depth clear is expressed
+		// without inventing a full-size colour target for the encoder to ignore.
+		if (colorTargetHandle == 0 && depthTargetHandle == 0) {
+			mc_throw_state(env, @"A Metal render pass requires at least one attachment");
+			return 0;
+		}
+		jlong handles[3];
+		MCObjectType types[3];
 		id objects[3];
-		NSUInteger objectCount = depthTargetHandle == 0 ? 2 : 3;
+		NSUInteger objectCount = 0;
+		NSInteger colorIndex = -1;
+		NSInteger depthIndex = -1;
+		handles[objectCount] = commandBufferHandle;
+		types[objectCount] = MCObjectTypeCommandBuffer;
+		objectCount++;
+		if (colorTargetHandle != 0) {
+			colorIndex = (NSInteger)objectCount;
+			handles[objectCount] = colorTargetHandle;
+			types[objectCount] = colorTargetIsDrawable ? MCObjectTypeDrawable : MCObjectTypeTexture;
+			objectCount++;
+		}
+		if (depthTargetHandle != 0) {
+			depthIndex = (NSInteger)objectCount;
+			handles[objectCount] = depthTargetHandle;
+			types[objectCount] = MCObjectTypeTexture;
+			objectCount++;
+		}
 		if (!mc_get_objects_same_device(env, handles, types, objects, objectCount)) {
 			return 0;
 		}
 
 		MCMetalCommandBuffer *commandBuffer = objects[0];
 		[commandBuffer endBlitEncoding];
-		id<MTLTexture> colorTexture = colorTargetIsDrawable
-			? [(id<CAMetalDrawable>)objects[1] texture]
-			: (id<MTLTexture>)objects[1];
-		id<MTLTexture> depthTexture = depthTargetHandle == 0 ? nil : (id<MTLTexture>)objects[2];
-		if (colorMipLevel < 0 || (NSUInteger)colorMipLevel >= colorTexture.mipmapLevelCount
-			|| colorTargetIsDrawable && colorMipLevel != 0
-			|| depthTexture != nil && (depthMipLevel < 0 || (NSUInteger)depthMipLevel >= depthTexture.mipmapLevelCount)) {
+		id<MTLTexture> colorTexture = nil;
+		if (colorIndex >= 0) {
+			colorTexture = colorTargetIsDrawable
+				? [(id<CAMetalDrawable>)objects[colorIndex] texture]
+				: (id<MTLTexture>)objects[colorIndex];
+		}
+		id<MTLTexture> depthTexture = depthIndex < 0 ? nil : (id<MTLTexture>)objects[depthIndex];
+		if (colorTexture != nil
+			&& (colorMipLevel < 0 || (NSUInteger)colorMipLevel >= colorTexture.mipmapLevelCount
+				|| colorTargetIsDrawable && colorMipLevel != 0)) {
 			mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
 			return 0;
 		}
-		if (mc_pixel_format_has_depth(colorTexture.pixelFormat) || mc_pixel_format_has_stencil(colorTexture.pixelFormat)) {
+		if (depthTexture != nil && (depthMipLevel < 0 || (NSUInteger)depthMipLevel >= depthTexture.mipmapLevelCount)) {
+			mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
+			return 0;
+		}
+		if (colorTexture != nil
+			&& (mc_pixel_format_has_depth(colorTexture.pixelFormat) || mc_pixel_format_has_stencil(colorTexture.pixelFormat))) {
 			mc_throw_state(env, @"A depth/stencil texture cannot be used as a Metal color attachment");
 			return 0;
 		}
@@ -2308,17 +2407,21 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			mc_throw_state(env, @"A Metal depth attachment requires a depth texture");
 			return 0;
 		}
-		NSUInteger colorWidth = MAX((NSUInteger)1, colorTexture.width >> colorMipLevel);
-		NSUInteger colorHeight = MAX((NSUInteger)1, colorTexture.height >> colorMipLevel);
-		NSUInteger depthWidth = depthTexture == nil ? colorWidth : MAX((NSUInteger)1, depthTexture.width >> depthMipLevel);
-		NSUInteger depthHeight = depthTexture == nil ? colorHeight : MAX((NSUInteger)1, depthTexture.height >> depthMipLevel);
-		if (depthTexture != nil && (depthWidth != colorWidth || depthHeight != colorHeight)) {
+		NSUInteger colorWidth = colorTexture == nil ? 0 : MAX((NSUInteger)1, colorTexture.width >> colorMipLevel);
+		NSUInteger colorHeight = colorTexture == nil ? 0 : MAX((NSUInteger)1, colorTexture.height >> colorMipLevel);
+		NSUInteger depthWidth = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.width >> depthMipLevel);
+		NSUInteger depthHeight = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.height >> depthMipLevel);
+		if (colorTexture != nil && depthTexture != nil && (depthWidth != colorWidth || depthHeight != colorHeight)) {
 			mc_throw_state(env, @"Metal render-pass attachments must have matching dimensions");
 			return 0;
 		}
+		if (colorTexture == nil) {
+			colorWidth = depthWidth;
+			colorHeight = depthHeight;
+		}
 
-		MTLLoadAction nativeColorLoadAction = mc_load_action(env, colorLoadAction);
-		MTLStoreAction nativeColorStoreAction = mc_store_action(env, colorStoreAction);
+		MTLLoadAction nativeColorLoadAction = colorTexture == nil ? MTLLoadActionDontCare : mc_load_action(env, colorLoadAction);
+		MTLStoreAction nativeColorStoreAction = colorTexture == nil ? MTLStoreActionDontCare : mc_store_action(env, colorStoreAction);
 		MTLLoadAction nativeDepthLoadAction = depthTexture == nil ? MTLLoadActionDontCare : mc_load_action(env, depthLoadAction);
 		MTLStoreAction nativeDepthStoreAction = depthTexture == nil ? MTLStoreActionDontCare : mc_store_action(env, depthStoreAction);
 		if ((*env)->ExceptionCheck(env)) {
@@ -2326,11 +2429,17 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 		}
 
 		MTLRenderPassDescriptor *descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-		descriptor.colorAttachments[0].texture = colorTexture;
-		descriptor.colorAttachments[0].level = (NSUInteger)colorMipLevel;
-		descriptor.colorAttachments[0].loadAction = nativeColorLoadAction;
-		descriptor.colorAttachments[0].storeAction = nativeColorStoreAction;
-		descriptor.colorAttachments[0].clearColor = MTLClearColorMake(clearRed, clearGreen, clearBlue, clearAlpha);
+		if (colorTexture != nil) {
+			descriptor.colorAttachments[0].texture = colorTexture;
+			descriptor.colorAttachments[0].level = (NSUInteger)colorMipLevel;
+			descriptor.colorAttachments[0].loadAction = nativeColorLoadAction;
+			descriptor.colorAttachments[0].storeAction = nativeColorStoreAction;
+			descriptor.colorAttachments[0].clearColor = MTLClearColorMake(clearRed, clearGreen, clearBlue, clearAlpha);
+		} else {
+			// Without a colour attachment Metal cannot infer the pass dimensions from one.
+			descriptor.renderTargetWidth = colorWidth;
+			descriptor.renderTargetHeight = colorHeight;
+		}
 		if (depthTexture != nil) {
 			descriptor.depthAttachment.texture = depthTexture;
 			descriptor.depthAttachment.level = (NSUInteger)depthMipLevel;
@@ -2346,7 +2455,9 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			}
 		}
 
-		[commandBuffer pin:objects[1]];
+		if (colorIndex >= 0) {
+			[commandBuffer pin:objects[colorIndex]];
+		}
 		if (depthTexture != nil) {
 			[commandBuffer pin:depthTexture];
 		}
@@ -2527,20 +2638,30 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexelBuffer(
 			return;
 		}
 
-		MTLTextureDescriptor *descriptor = [MTLTextureDescriptor
-			textureBufferDescriptorWithPixelFormat:pixelFormat
-			width:logicalBytes / bytesPerPixel
-			resourceOptions:buffer.resourceOptions
-			usage:MTLTextureUsageShaderRead];
-		id<MTLTexture> texture = [buffer
-			newTextureWithDescriptor:descriptor
-			offset:(NSUInteger)offset
-			bytesPerRow:bytesPerRow];
-		if (texture == nil) {
-			mc_throw_state(env, @"Metal could not create a texture-buffer view");
-			return;
+		// Views are cached on the buffer they belong to, so their lifetime ends with it.
+		MCTexelViewCache *viewCache = objc_getAssociatedObject(buffer, MCTexelViewCacheKey);
+		if (viewCache == nil) {
+			viewCache = [MCTexelViewCache new];
+			objc_setAssociatedObject(buffer, MCTexelViewCacheKey, viewCache, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		}
-		texture.label = @"MetalCraft texel-buffer view";
+		id<MTLTexture> texture = [viewCache viewForOffset:(NSUInteger)offset length:logicalBytes format:pixelFormat];
+		if (texture == nil) {
+			MTLTextureDescriptor *descriptor = [MTLTextureDescriptor
+				textureBufferDescriptorWithPixelFormat:pixelFormat
+				width:logicalBytes / bytesPerPixel
+				resourceOptions:buffer.resourceOptions
+				usage:MTLTextureUsageShaderRead];
+			texture = [buffer
+				newTextureWithDescriptor:descriptor
+				offset:(NSUInteger)offset
+				bytesPerRow:bytesPerRow];
+			if (texture == nil) {
+				mc_throw_state(env, @"Metal could not create a texture-buffer view");
+				return;
+			}
+			texture.label = @"MetalCraft texel-buffer view";
+			[viewCache storeView:texture offset:(NSUInteger)offset length:logicalBytes format:pixelFormat];
+		}
 		MCMetalRenderPass *renderPass = objects[0];
 		[renderPass.commandBuffer pin:buffer];
 		[renderPass.commandBuffer pin:texture];
