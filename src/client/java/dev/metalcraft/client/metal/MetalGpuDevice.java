@@ -291,7 +291,7 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		String fragment = this.resolveShader(pipeline.getFragmentShader(), ShaderType.FRAGMENT, pipeline.getShaderDefines(), shaderSource);
 		if (vertex == null || fragment == null) {
 			LOGGER.error("Couldn't find Metal shader sources for pipeline {}", pipeline.getLocation());
-			return new MetalCompiledRenderPipeline(pipeline, null, null);
+			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
 		}
 
 		try {
@@ -316,10 +316,10 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 				descriptor.colorTargets(), MetalTexture.Format.DEPTH32_FLOAT, descriptor.vertexDescriptor(), descriptor.depthState(), descriptor.rasterState()
 			);
 			MetalRenderPipeline withDepth = this.metal.createRenderPipeline(depthDescriptor);
-			return new MetalCompiledRenderPipeline(pipeline, withDepth, withoutDepth);
+			return new MetalCompiledRenderPipeline(pipeline, withDepth, withoutDepth, shaders);
 		} catch (RuntimeException error) {
 			LOGGER.error("Couldn't compile direct Metal pipeline {}", pipeline.getLocation(), error);
-			return new MetalCompiledRenderPipeline(pipeline, null, null);
+			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
 		}
 	}
 

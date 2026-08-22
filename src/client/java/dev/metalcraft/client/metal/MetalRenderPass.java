@@ -5,6 +5,18 @@ import java.nio.LongBuffer;
 
 /** A scoped {@code MTLRenderCommandEncoder}; closing it ends the render pass. */
 public final class MetalRenderPass implements AutoCloseable {
+	/**
+	 * Bits naming the shader stages a resource binding applies to.
+	 *
+	 * <p>Metal holds one argument table per stage, so a binding costs an encoder call per stage it
+	 * is made for. These let a caller that knows which stages read a slot pay only for those.
+	 */
+	public static final int STAGE_VERTEX = 1;
+	public static final int STAGE_FRAGMENT = 2;
+	public static final int STAGE_ALL = STAGE_VERTEX | STAGE_FRAGMENT;
+	/** Buffers and textures a Metal argument table addresses. */
+	public static final int RESOURCE_SLOTS = 16;
+
 	public enum LoadAction {
 		LOAD,
 		CLEAR,
@@ -200,12 +212,15 @@ public final class MetalRenderPass implements AutoCloseable {
 		MetalNative.nSetVertexBuffer(this.requireOpenHandle(), index, buffer.requireOpenHandle(), offset);
 	}
 
-	public synchronized void setUniformBuffer(final int index, final MetalBuffer buffer, final long offset) {
-		if (index < 0 || index >= 16) {
+	public synchronized void setUniformBuffer(final int index, final MetalBuffer buffer, final long offset, final int stages) {
+		if (index < 0 || index >= RESOURCE_SLOTS) {
 			throw new IllegalArgumentException("Metal uniform buffer index must be between 0 and 15");
 		}
+		if (checkedStages(stages) == 0) {
+			return;
+		}
 		MetalBuffer.checkRange(buffer.size(), offset, 1L, "uniform binding");
-		MetalNative.nSetUniformBuffer(this.requireOpenHandle(), index, buffer.requireOpenHandle(), offset);
+		MetalNative.nSetUniformBuffer(this.requireOpenHandle(), index, buffer.requireOpenHandle(), offset, stages);
 	}
 
 	public synchronized void setTexelBuffer(
@@ -213,32 +228,49 @@ public final class MetalRenderPass implements AutoCloseable {
 		final MetalBuffer buffer,
 		final long offset,
 		final long length,
-		final MetalTexture.Format format
+		final MetalTexture.Format format,
+		final int stages
 	) {
-		if (index < 0 || index >= 16) {
+		if (index < 0 || index >= RESOURCE_SLOTS) {
 			throw new IllegalArgumentException("Metal texel-buffer binding index must be between 0 and 15");
+		}
+		if (checkedStages(stages) == 0) {
+			return;
 		}
 		MetalBuffer.checkRange(buffer.size(), offset, length, "texel-buffer binding");
 		if (!format.hasColorAspect() || length % format.bytesPerPixel() != 0L) {
 			throw new IllegalArgumentException("Metal texel-buffer format must evenly cover the bound buffer range");
 		}
 		MetalNative.nSetTexelBuffer(
-			this.requireOpenHandle(), index, buffer.requireOpenHandle(), offset, length, format.nativeCode()
+			this.requireOpenHandle(), index, buffer.requireOpenHandle(), offset, length, format.nativeCode(), stages
 		);
 	}
 
-	public synchronized void setTexture(final int index, final MetalTextureView textureView) {
-		if (index < 0 || index >= 16) {
+	public synchronized void setTexture(final int index, final MetalTextureView textureView, final int stages) {
+		if (index < 0 || index >= RESOURCE_SLOTS) {
 			throw new IllegalArgumentException("Metal texture index must be between 0 and 15");
 		}
-		MetalNative.nSetTexture(this.requireOpenHandle(), index, textureView.requireOpenHandle());
+		if (checkedStages(stages) == 0) {
+			return;
+		}
+		MetalNative.nSetTexture(this.requireOpenHandle(), index, textureView.requireOpenHandle(), stages);
 	}
 
-	public synchronized void setSampler(final int index, final MetalSampler sampler) {
-		if (index < 0 || index >= 16) {
+	public synchronized void setSampler(final int index, final MetalSampler sampler, final int stages) {
+		if (index < 0 || index >= RESOURCE_SLOTS) {
 			throw new IllegalArgumentException("Metal sampler index must be between 0 and 15");
 		}
-		MetalNative.nSetSampler(this.requireOpenHandle(), index, sampler.requireOpenHandle());
+		if (checkedStages(stages) == 0) {
+			return;
+		}
+		MetalNative.nSetSampler(this.requireOpenHandle(), index, sampler.requireOpenHandle(), stages);
+	}
+
+	private static int checkedStages(final int stages) {
+		if ((stages & ~STAGE_ALL) != 0) {
+			throw new IllegalArgumentException("Metal resource bindings apply to the vertex and fragment stages only");
+		}
+		return stages;
 	}
 
 	public synchronized void writeTimestamp(final MetalTimestampQueryPool pool, final int index) {

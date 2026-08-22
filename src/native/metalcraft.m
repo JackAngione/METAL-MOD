@@ -10,6 +10,18 @@
 
 #define MC_EXPORT __attribute__((visibility("default")))
 
+/**
+ * Shader stages a resource binding applies to, matching MetalRenderPass.STAGE_*.
+ *
+ * <p>Metal keeps one argument table per stage, so every binding call reaches exactly one of them.
+ * These bindings used to be issued for both stages unconditionally because the backend had no way
+ * to know which stage read a slot; the translated shaders do know, and pass it down here.
+ */
+typedef NS_OPTIONS(uint32_t, MCShaderStage) {
+	MCShaderStageVertex = 1,
+	MCShaderStageFragment = 2
+};
+
 typedef NS_ENUM(NSUInteger, MCObjectType) {
 	MCObjectTypeDevice = 1,
 	MCObjectTypeCommandQueue = 2,
@@ -2595,7 +2607,8 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetUniformBuffer(
 	jlong renderPassHandle,
 	jint index,
 	jlong bufferHandle,
-	jlong offset
+	jlong offset,
+	jint stages
 ) {
 	@autoreleasepool {
 		jlong handles[] = {renderPassHandle, bufferHandle};
@@ -2609,8 +2622,12 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetUniformBuffer(
 		}
 		MCMetalRenderPass *renderPass = objects[0];
 		[renderPass.commandBuffer pin:buffer];
-		[renderPass.encoder setVertexBuffer:buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index];
-		[renderPass.encoder setFragmentBuffer:buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index];
+		if (stages & MCShaderStageVertex) {
+			[renderPass.encoder setVertexBuffer:buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index];
+		}
+		if (stages & MCShaderStageFragment) {
+			[renderPass.encoder setFragmentBuffer:buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index];
+		}
 	}
 }
 
@@ -2623,7 +2640,8 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexelBuffer(
 	jlong bufferHandle,
 	jlong offset,
 	jlong length,
-	jint format
+	jint format,
+	jint stages
 ) {
 	@autoreleasepool {
 		jlong handles[] = {renderPassHandle, bufferHandle};
@@ -2688,8 +2706,12 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexelBuffer(
 		MCMetalRenderPass *renderPass = objects[0];
 		[renderPass.commandBuffer pin:buffer];
 		[renderPass.commandBuffer pin:texture];
-		[renderPass.encoder setVertexTexture:texture atIndex:(NSUInteger)index];
-		[renderPass.encoder setFragmentTexture:texture atIndex:(NSUInteger)index];
+		if (stages & MCShaderStageVertex) {
+			[renderPass.encoder setVertexTexture:texture atIndex:(NSUInteger)index];
+		}
+		if (stages & MCShaderStageFragment) {
+			[renderPass.encoder setFragmentTexture:texture atIndex:(NSUInteger)index];
+		}
 	}
 }
 
@@ -2699,7 +2721,8 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexture(
 	jclass type,
 	jlong renderPassHandle,
 	jint index,
-	jlong textureViewHandle
+	jlong textureViewHandle,
+	jint stages
 ) {
 	@autoreleasepool {
 		jlong handles[] = {renderPassHandle, textureViewHandle};
@@ -2713,8 +2736,12 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexture(
 		MCMetalRenderPass *renderPass = objects[0];
 		id<MTLTexture> texture = objects[1];
 		[renderPass.commandBuffer pin:texture];
-		[renderPass.encoder setVertexTexture:texture atIndex:(NSUInteger)index];
-		[renderPass.encoder setFragmentTexture:texture atIndex:(NSUInteger)index];
+		if (stages & MCShaderStageVertex) {
+			[renderPass.encoder setVertexTexture:texture atIndex:(NSUInteger)index];
+		}
+		if (stages & MCShaderStageFragment) {
+			[renderPass.encoder setFragmentTexture:texture atIndex:(NSUInteger)index];
+		}
 	}
 }
 
@@ -2724,7 +2751,8 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetSampler(
 	jclass type,
 	jlong renderPassHandle,
 	jint index,
-	jlong samplerHandle
+	jlong samplerHandle,
+	jint stages
 ) {
 	@autoreleasepool {
 		jlong handles[] = {renderPassHandle, samplerHandle};
@@ -2738,8 +2766,12 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetSampler(
 		MCMetalRenderPass *renderPass = objects[0];
 		id<MTLSamplerState> sampler = objects[1];
 		[renderPass.commandBuffer pin:sampler];
-		[renderPass.encoder setVertexSamplerState:sampler atIndex:(NSUInteger)index];
-		[renderPass.encoder setFragmentSamplerState:sampler atIndex:(NSUInteger)index];
+		if (stages & MCShaderStageVertex) {
+			[renderPass.encoder setVertexSamplerState:sampler atIndex:(NSUInteger)index];
+		}
+		if (stages & MCShaderStageFragment) {
+			[renderPass.encoder setFragmentSamplerState:sampler atIndex:(NSUInteger)index];
+		}
 	}
 }
 

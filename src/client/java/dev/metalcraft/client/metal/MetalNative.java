@@ -233,13 +233,13 @@ public final class MetalNative {
 
 	static native void nSetVertexBuffer(long renderPassHandle, int index, long bufferHandle, long offset);
 
-	static native void nSetUniformBuffer(long renderPassHandle, int index, long bufferHandle, long offset);
+	static native void nSetUniformBuffer(long renderPassHandle, int index, long bufferHandle, long offset, int stages);
 
-	static native void nSetTexelBuffer(long renderPassHandle, int index, long bufferHandle, long offset, long length, int format);
+	static native void nSetTexelBuffer(long renderPassHandle, int index, long bufferHandle, long offset, long length, int format, int stages);
 
-	static native void nSetTexture(long renderPassHandle, int index, long textureViewHandle);
+	static native void nSetTexture(long renderPassHandle, int index, long textureViewHandle, int stages);
 
-	static native void nSetSampler(long renderPassHandle, int index, long samplerHandle);
+	static native void nSetSampler(long renderPassHandle, int index, long samplerHandle, int stages);
 
 	static native void nDraw(
 		long renderPassHandle,

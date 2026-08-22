@@ -168,6 +168,16 @@ public final class MetalShaderTranslationSmoke {
 			|| !bound.metalSource().contains("[[sampler(5)]]")) {
 			throw new AssertionError("SPIRV-Cross did not preserve explicit Metal resource bindings:\n" + bound.metalSource());
 		}
+		assertSlotMasks(bound, 1 << 3, 1 << 5);
+
+		// A texel buffer sampled only by the vertex stage. The render path binds resources to the
+		// stages that declare them, so this pair is what proves the two stages report separately
+		// rather than both reporting everything the pipeline has.
+		MetalShaderTranslator.PipelineTranslation texel = MetalShaderTranslator.translatePipeline(
+			TEXEL_VERTEX_GLSL, "smoke/texel.vert", TEXEL_FRAGMENT_GLSL, "smoke/texel.frag"
+		);
+		assertSlotMasks(texel.vertex(), 0, 1);
+		assertSlotMasks(texel.fragment(), 0, 0);
 
 		RenderPipeline mappedPipelineDefinition = mappedPipeline();
 		String mappedVertex = Blaze3DMetalMappings.vertexShaderWithLocations(
@@ -298,8 +308,10 @@ public final class MetalShaderTranslationSmoke {
 				 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
 					 MetalRenderPass.ColorAttachment.clear(color, 0.0, 0.0, 0.0, 1.0)))) {
 				pass.setPipeline(pipeline);
-				pass.setTexture(0, sourceView);
-				pass.setSampler(0, sampler);
+				// Bound to the fragment stage alone, which is the only stage that samples it. Getting
+				// the mip colour back is what proves stage-selective binding reaches the right table.
+				pass.setTexture(0, sourceView, MetalRenderPass.STAGE_FRAGMENT);
+				pass.setSampler(0, sampler, MetalRenderPass.STAGE_FRAGMENT);
 				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 				pass.close();
 				commands.commitAndWait();
@@ -350,7 +362,8 @@ public final class MetalShaderTranslationSmoke {
 				 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
 					 MetalRenderPass.ColorAttachment.clear(color, 0.0, 1.0, 0.0, 1.0)))) {
 				pass.setPipeline(pipeline);
-				pass.setTexelBuffer(0, values, 0L, 1L, MetalTexture.Format.R8_SINT);
+				// The mirror of the mip case: only the vertex stage fetches this one.
+				pass.setTexelBuffer(0, values, 0L, 1L, MetalTexture.Format.R8_SINT, MetalRenderPass.STAGE_VERTEX);
 				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 				pass.close();
 				commands.commitAndWait();
@@ -560,6 +573,27 @@ public final class MetalShaderTranslationSmoke {
 			if (!unsupported || !expected.getMessage().contains(format.name())) {
 				throw new AssertionError("Incorrect unsupported-format diagnostic for " + format, expected);
 			}
+		}
+	}
+
+	/**
+	 * Checks the reflected slot masks against the bindings the stage was written with.
+	 *
+	 * <p>The masks decide which stages a resource is bound to, so a wrong bit renders the wrong
+	 * thing rather than merely running slowly, and the mapping they rest on - that a GLSL
+	 * {@code binding} survives into the Metal slot of the same number - is a SPIRV-Cross option that
+	 * a version bump could change underneath us.
+	 */
+	private static void assertSlotMasks(
+		final MetalShaderTranslator.Translation translation,
+		final int expectedBuffers,
+		final int expectedTextures
+	) {
+		if (translation.bufferSlots() != expectedBuffers || translation.textureSlots() != expectedTextures) {
+			throw new AssertionError(String.format(
+				"%s reflected slots buffers=0x%X textures=0x%X, expected 0x%X/0x%X",
+				translation.sourceName(), translation.bufferSlots(), translation.textureSlots(),
+				expectedBuffers, expectedTextures));
 		}
 	}
 

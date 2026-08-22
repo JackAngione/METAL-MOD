@@ -284,10 +284,11 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 						throw new IllegalStateException("Metal texel-buffer uniform has no format: " + description.name());
 					}
 					this.pass().setTexelBuffer(
-						index, buffer, value.offset(), value.length(), Blaze3DMetalMappings.textureFormat(description.gpuFormat())
+						index, buffer, value.offset(), value.length(), Blaze3DMetalMappings.textureFormat(description.gpuFormat()),
+						this.pipeline.textureStages(index)
 					);
 				} else {
-					this.pass().setUniformBuffer(index, buffer, value.offset());
+					this.pass().setUniformBuffer(index, buffer, value.offset(), this.pipeline.bufferStages(index));
 				}
 				this.boundUniforms[index] = value;
 			}
@@ -302,8 +303,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			// Views and samplers have identity equality, so this is the same test the record's
 			// equals() performed, without boxing the slot to look the pair up.
 			if (this.boundTextureViews[resourceIndex] != value.view || this.boundSamplers[resourceIndex] != value.sampler) {
-				this.pass().setTexture(resourceIndex, value.view.metal());
-				this.pass().setSampler(resourceIndex, value.sampler.metal());
+				int stages = this.pipeline.textureStages(resourceIndex);
+				this.pass().setTexture(resourceIndex, value.view.metal(), stages);
+				this.pass().setSampler(resourceIndex, value.sampler.metal(), stages);
 				this.boundTextureViews[resourceIndex] = value.view;
 				this.boundSamplers[resourceIndex] = value.sampler;
 			}

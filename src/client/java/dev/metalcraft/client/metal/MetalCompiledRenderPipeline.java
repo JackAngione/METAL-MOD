@@ -22,17 +22,61 @@ final class MetalCompiledRenderPipeline implements CompiledRenderPipeline, AutoC
 	 */
 	private final List<BindGroupLayout.UniformDescription> uniformLayout;
 	private final List<String> samplerLayout;
+	/**
+	 * Which shader stages declare each resource slot, one entry per slot.
+	 *
+	 * <p>Metal keeps a separate argument table per stage, so binding a resource means one encoder
+	 * call per stage that reads it. The backend used to make both calls for every bind because it
+	 * had no way to know better; the translated shaders do know, so the answer is resolved once
+	 * here, when the pipeline is compiled.
+	 */
+	private final int[] bufferStages;
+	private final int[] textureStages;
 
 	MetalCompiledRenderPipeline(
 		final RenderPipeline info,
 		final @Nullable MetalRenderPipeline withDepth,
-		final @Nullable MetalRenderPipeline withoutDepth
+		final @Nullable MetalRenderPipeline withoutDepth,
+		final MetalShaderTranslator.@Nullable PipelineTranslation shaders
 	) {
 		this.info = info;
 		this.withDepth = withDepth;
 		this.withoutDepth = withoutDepth;
 		this.uniformLayout = List.copyOf(BindGroupLayout.flattenUniforms(info.getBindGroupLayouts()));
 		this.samplerLayout = List.copyOf(BindGroupLayout.flattenSamplers(info.getBindGroupLayouts()));
+		this.bufferStages = stagesPerSlot(
+			shaders == null ? -1 : shaders.vertex().bufferSlots(),
+			shaders == null ? -1 : shaders.fragment().bufferSlots()
+		);
+		this.textureStages = stagesPerSlot(
+			shaders == null ? -1 : shaders.vertex().textureSlots(),
+			shaders == null ? -1 : shaders.fragment().textureSlots()
+		);
+	}
+
+	/**
+	 * A pipeline that failed to compile is never drawn with, so its masks only have to be harmless:
+	 * every slot claims both stages, which is what the backend did before it could tell them apart.
+	 */
+	private static int[] stagesPerSlot(final int vertexSlots, final int fragmentSlots) {
+		int[] stages = new int[MetalRenderPass.RESOURCE_SLOTS];
+		for (int slot = 0; slot < stages.length; slot++) {
+			int mask = 0;
+			if ((vertexSlots >>> slot & 1) != 0) mask |= MetalRenderPass.STAGE_VERTEX;
+			if ((fragmentSlots >>> slot & 1) != 0) mask |= MetalRenderPass.STAGE_FRAGMENT;
+			stages[slot] = mask;
+		}
+		return stages;
+	}
+
+	/** The stages that read the buffer in this slot, as a {@code MetalRenderPass.STAGE_*} mask. */
+	int bufferStages(final int slot) {
+		return slot >= 0 && slot < this.bufferStages.length ? this.bufferStages[slot] : 0;
+	}
+
+	/** The stages that read the texture in this slot, as a {@code MetalRenderPass.STAGE_*} mask. */
+	int textureStages(final int slot) {
+		return slot >= 0 && slot < this.textureStages.length ? this.textureStages[slot] : 0;
 	}
 
 	RenderPipeline info() {

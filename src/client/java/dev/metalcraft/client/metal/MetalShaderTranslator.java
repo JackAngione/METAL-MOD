@@ -24,6 +24,7 @@ import static org.lwjgl.util.shaderc.Shaderc.shaderc_result_release;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_source_language_glsl;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_spirv_version_1_5;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_target_env_vulkan;
+import static org.lwjgl.util.spvc.Spv.SpvDecorationBinding;
 import static org.lwjgl.util.spvc.Spv.SpvExecutionModelFragment;
 import static org.lwjgl.util.spvc.Spv.SpvExecutionModelVertex;
 import static org.lwjgl.util.spvc.Spvc.SPVC_BACKEND_MSL;
@@ -33,9 +34,17 @@ import static org.lwjgl.util.spvc.Spvc.SPVC_COMPILER_OPTION_MSL_ENABLE_DECORATIO
 import static org.lwjgl.util.spvc.Spvc.SPVC_COMPILER_OPTION_FLIP_VERTEX_Y;
 import static org.lwjgl.util.spvc.Spvc.SPVC_COMPILER_OPTION_MSL_VERSION;
 import static org.lwjgl.util.spvc.Spvc.SPVC_MSL_PLATFORM_MACOS;
+import static org.lwjgl.util.spvc.Spvc.SPVC_RESOURCE_TYPE_SAMPLED_IMAGE;
+import static org.lwjgl.util.spvc.Spvc.SPVC_RESOURCE_TYPE_SEPARATE_IMAGE;
+import static org.lwjgl.util.spvc.Spvc.SPVC_RESOURCE_TYPE_STORAGE_BUFFER;
+import static org.lwjgl.util.spvc.Spvc.SPVC_RESOURCE_TYPE_STORAGE_IMAGE;
+import static org.lwjgl.util.spvc.Spvc.SPVC_RESOURCE_TYPE_SUBPASS_INPUT;
+import static org.lwjgl.util.spvc.Spvc.SPVC_RESOURCE_TYPE_UNIFORM_BUFFER;
 import static org.lwjgl.util.spvc.Spvc.SPVC_SUCCESS;
 import static org.lwjgl.util.spvc.Spvc.spvc_compiler_compile;
 import static org.lwjgl.util.spvc.Spvc.spvc_compiler_create_compiler_options;
+import static org.lwjgl.util.spvc.Spvc.spvc_compiler_create_shader_resources;
+import static org.lwjgl.util.spvc.Spvc.spvc_compiler_get_decoration;
 import static org.lwjgl.util.spvc.Spvc.spvc_compiler_get_cleansed_entry_point_name;
 import static org.lwjgl.util.spvc.Spvc.spvc_compiler_install_compiler_options;
 import static org.lwjgl.util.spvc.Spvc.spvc_compiler_options_set_bool;
@@ -45,6 +54,7 @@ import static org.lwjgl.util.spvc.Spvc.spvc_context_create_compiler;
 import static org.lwjgl.util.spvc.Spvc.spvc_context_destroy;
 import static org.lwjgl.util.spvc.Spvc.spvc_context_get_last_error_string;
 import static org.lwjgl.util.spvc.Spvc.spvc_context_parse_spirv;
+import static org.lwjgl.util.spvc.Spvc.spvc_resources_get_resource_list_for_type;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -56,6 +66,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.util.spvc.SpvcReflectedResource;
 import org.lwjgl.system.MemoryUtil;
 
 /** Compiles expanded GLSL to Vulkan SPIR-V, then translates that module to macOS MSL. */
@@ -83,13 +94,27 @@ public final class MetalShaderTranslator {
 		}
 	}
 
-	/** A translated stage. The returned SPIR-V byte array is always a defensive copy. */
+	/**
+	 * A translated stage. The returned SPIR-V byte array is always a defensive copy.
+	 *
+	 * <p>The two slot masks say which resource slots this stage actually declares, one bit per slot.
+	 * They exist so the render path can bind a resource to the stages that read it instead of to
+	 * both: Metal's vertex and fragment argument tables are separate, so binding a texture the
+	 * fragment stage alone samples was costing an encoder call per bind for nothing.
+	 *
+	 * <p>There is no separate sampler mask. A texel buffer reflects as a sampled image but compiles
+	 * to a texture with no sampler, so a sampler mask taken from reflection is an over-approximation
+	 * on exactly the slots where it would differ - and those slots are never given a sampler by the
+	 * render path anyway. Every slot that does take one takes it in the same stages as its texture.
+	 */
 	public record Translation(
 		Stage stage,
 		String sourceName,
 		String entryPoint,
 		byte[] spirv,
-		String metalSource
+		String metalSource,
+		int bufferSlots,
+		int textureSlots
 	) {
 		public Translation {
 			Objects.requireNonNull(stage, "stage");
@@ -301,11 +326,60 @@ public final class MetalShaderTranslator {
 				if (metalSource == null || metalSource.isBlank()) {
 					throw failure(stage, sourceName, "SPIRV-Cross returned empty MSL", null);
 				}
-				return new Translation(stage, sourceName, entryPoint, spirv, metalSource);
+				PointerBuffer resourcesPointer = stack.mallocPointer(1);
+				checkSpvc(spvc_compiler_create_shader_resources(compiler, resourcesPointer), context, stage, sourceName, "MSL resource reflection");
+				long resources = resourcesPointer.get(0);
+				int bufferSlots = slotMask(compiler, resources, context, stage, sourceName,
+					SPVC_RESOURCE_TYPE_UNIFORM_BUFFER, SPVC_RESOURCE_TYPE_STORAGE_BUFFER);
+				int textureSlots = slotMask(compiler, resources, context, stage, sourceName,
+					SPVC_RESOURCE_TYPE_SAMPLED_IMAGE, SPVC_RESOURCE_TYPE_SEPARATE_IMAGE,
+					SPVC_RESOURCE_TYPE_STORAGE_IMAGE, SPVC_RESOURCE_TYPE_SUBPASS_INPUT);
+				return new Translation(stage, sourceName, entryPoint, spirv, metalSource, bufferSlots, textureSlots);
 			} finally {
 				spvc_context_destroy(context);
 			}
 		}
+	}
+
+	/**
+	 * Collects the binding numbers this module declares for the given resource types into a bitmask.
+	 *
+	 * <p>Declared rather than active on purpose. The mask decides which stages a resource is bound
+	 * to, so a slot missing from it is never bound; being generous costs one redundant encoder call,
+	 * while being stingy renders the wrong thing. A binding above the sixteen slots Metal's argument
+	 * tables hold cannot be one of ours, so it is ignored rather than corrupting the mask.
+	 */
+	private static int slotMask(
+		final long compiler,
+		final long resources,
+		final long context,
+		final Stage stage,
+		final String sourceName,
+		final int... resourceTypes
+	) {
+		int mask = 0;
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			for (int resourceType : resourceTypes) {
+				PointerBuffer list = stack.mallocPointer(1);
+				PointerBuffer count = stack.mallocPointer(1);
+				checkSpvc(
+					spvc_resources_get_resource_list_for_type(resources, resourceType, list, count),
+					context, stage, sourceName, "MSL resource enumeration"
+				);
+				int size = (int)count.get(0);
+				if (size <= 0) {
+					continue;
+				}
+				SpvcReflectedResource.Buffer reflected = SpvcReflectedResource.create(list.get(0), size);
+				for (int index = 0; index < size; index++) {
+					int binding = spvc_compiler_get_decoration(compiler, reflected.get(index).id(), SpvDecorationBinding);
+					if (binding >= 0 && binding < Integer.SIZE) {
+						mask |= 1 << binding;
+					}
+				}
+			}
+		}
+		return mask;
 	}
 
 	private static void checkSpvc(
