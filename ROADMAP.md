@@ -1,6 +1,8 @@
 # MetalCraft roadmap
 
-Last updated: 2026-08-20
+Last updated: 2026-08-22
+
+Open performance work is described in detail, with reproduction steps and current evidence, in [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md).
 
 ## Milestone 0 — feasibility and toolchain
 

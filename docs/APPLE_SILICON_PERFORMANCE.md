@@ -240,6 +240,8 @@ Only a floor is asserted on the numbers, because a target has to come from measu
 
 ## Ranked implementation plan
 
+Current status of each item, and the work that is open now, is tracked in [NEXT_STEPS.md](NEXT_STEPS.md). Some descriptions below predate later changes; that file names which.
+
 | Rank | Change | Expected impact | Complexity |
 |---:|---|---|---|
 | 0 | ~~Replace the benchmark harness~~ (done; see above) | Done. Established that the traversal tail, not steady-state draw cost, is the problem | Medium |
