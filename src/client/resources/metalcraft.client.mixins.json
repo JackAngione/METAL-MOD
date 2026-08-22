@@ -5,6 +5,7 @@
   "client": [
     "MinecraftBackendAvailabilityMixin",
     "MinecraftFrameMetricsMixin",
+    "MinecraftTickPhaseMixin",
     "OptionsSubScreenAccessor",
     "PreferredGraphicsApiMixin",
     "ShaderManagerMixin",

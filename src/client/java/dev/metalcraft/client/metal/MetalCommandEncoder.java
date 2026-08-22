@@ -38,7 +38,11 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 
 	@Override
 	public void submit() {
+		// Timed because this runs after Minecraft stops its own frame timer, so nothing upstream can
+		// see it. Overlaps SUBMIT_WAIT, which is raised from inside when a readback forces a wait.
+		long startedNs = MetalStallProbe.begin();
 		this.finishSubmission(false);
+		MetalStallProbe.end(MetalStallProbe.Source.SUBMIT, startedNs);
 	}
 
 	@Override

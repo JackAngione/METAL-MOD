@@ -156,17 +156,19 @@ public final class MetalFrameMetrics {
 			StringBuilder text = new StringBuilder(String.format(Locale.ROOT,
 				"frame=%d intervalMs=%.3f cpuMs=%.3f outsideLoopMs=%.3f",
 				this.index, this.intervalMs, this.cpuMs, this.outsideLoopMs));
-			double attributed = 0.0;
+			double phases = 0.0;
 			for (StallTotal stall : this.stalls) {
 				text.append(' ').append(stall.describe());
-				// GPU time overlaps the render thread rather than blocking it, so it is reported
-				// beside the interval but never subtracted from it.
-				if (stall.source().blocksRenderThread()) {
-					attributed += stall.totalMs();
+				// Only the four phases partition the loop; details sit inside them and a collection
+				// pause can land in any of them, so summing everything would subtract time twice.
+				if (stall.source().isPhase()) {
+					phases += stall.totalMs();
 				}
 			}
-			return text.append(String.format(Locale.ROOT, " unattributedMs=%.3f",
-				this.intervalMs - this.outsideLoopMs - attributed)).toString();
+			// What is left of the loop once its four phases are removed: the odds and ends of
+			// runTick that no phase covers, such as sound and mouse handling.
+			return text.append(String.format(Locale.ROOT, " unphasedMs=%.3f",
+				this.intervalMs - this.outsideLoopMs - phases)).toString();
 		}
 
 		String toJson() {

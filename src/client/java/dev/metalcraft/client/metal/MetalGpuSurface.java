@@ -88,7 +88,11 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		if (this.drawable == null) {
 			throw new IllegalStateException("Metal surface has no acquired drawable");
 		}
+		// Also outside Minecraft's frame timer, and the counterpart to ACQUIRE: if presentation is
+		// pacing the frame, the cost lands in one of the two.
+		long startedNs = MetalStallProbe.begin();
 		this.drawable.close();
+		MetalStallProbe.end(MetalStallProbe.Source.PRESENT, startedNs);
 		this.drawable = null;
 	}
 

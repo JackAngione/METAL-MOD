@@ -67,7 +67,8 @@ This milestone proved that Minecraft 26.2's backend abstraction is usable, but i
 - [x] Bind each resource only to the shader stages that read it.
 - [x] Replace the boxed-handle registry with a slot+generation table.
 - [x] Stop allocating per-pass hash tables in the render-pass adapter.
-- [ ] Reduce the residual traversal tail, which is vanilla chunk-meshing allocation rather than renderer work: needs JVM heap/collector tuning measured with the stall probe.
+- [x] Divide the render loop into phases so a stall outside the render section is attributable.
+- [ ] Reduce the traversal tail, which is Minecraft's main-thread task queue rather than renderer work or collection: 170 ms of a 175 ms spike, with 0.015 ms of Metal work in it.
 - [ ] Batch the render ABI so a bind-and-draw sequence crosses JNI once rather than per command.
 - [ ] Propagate attachment liveness so dead attachments store `DontCare`, and merge compatible passes.
 - [ ] Localise GPU time to a stage with encoder-level counter samples, not just per command buffer.

@@ -41,6 +41,37 @@ public final class MetalStallProbe {
 		/** Allocating a direct {@code ByteBuffer} for Blaze3D to build one frame's data in. */
 		CPU_ALLOC,
 		/**
+		 * The whole of {@code Minecraft.renderFrame}, as a container rather than a leaf.
+		 *
+		 * <p>It encloses {@code ACQUIRE}, {@code SUBMIT}, {@code PRESENT}, {@code LEVEL_END_FRAME},
+		 * and Minecraft's own frame timer, so it is not counted toward the interval. It exists to
+		 * bisect: a spike frame whose {@code render_frame} matches its interval has its missing time
+		 * inside {@code renderFrame} but outside the frame timer, and one whose {@code render_frame}
+		 * matches {@code cpuMs} has it somewhere earlier in {@code runTick}.
+		 */
+		RENDER_FRAME,
+		/**
+		 * Committing the frame's Metal work, at the end of the render loop.
+		 *
+		 * <p>Overlaps {@code SUBMIT_WAIT}, which is raised from inside it when a pending readback
+		 * callback turns the submission into a blocking wait.
+		 */
+		SUBMIT,
+		/** Presenting the drawable, after Minecraft has already stopped its own frame timer. */
+		PRESENT,
+		/**
+		 * {@code LevelRenderer.endFrame()}, which also runs after Minecraft's frame timer stops.
+		 */
+		LEVEL_END_FRAME,
+		/** Draining the client's queued network packets, before any rendering happens. */
+		CLIENT_PACKETS,
+		/**
+		 * Running the main-thread task queue, which is what chunk mesh uploads are scheduled onto.
+		 */
+		CLIENT_TASKS,
+		/** One client game tick. A frame runs up to ten of them before it renders anything. */
+		CLIENT_TICK,
+		/**
 		 * GPU busy time from command buffers that completed during the frame.
 		 *
 		 * <p>Unlike every other source here this is not time the render thread spent blocked - the
@@ -62,15 +93,22 @@ public final class MetalStallProbe {
 		static final Source[] VALUES = values();
 
 		/**
-		 * Whether this source occupies the render thread, and so accounts for part of a frame's
-		 * interval.
+		 * Whether this source is one of the stretches that {@code runTick} is divided into.
 		 *
-		 * <p>Every source but one does. GPU time runs alongside the render thread rather than
-		 * blocking it, so subtracting it from the interval to find what is left unexplained would
-		 * count the same milliseconds twice and can drive the remainder negative.
+		 * <p>Sources come in three kinds, and confusing them is what made the frame interval
+		 * impossible to balance. These four <em>phases</em> partition the render loop end to end.
+		 * Everything else is a <em>detail</em> that happens inside one of them - an acquire and a
+		 * present sit inside {@code RENDER_FRAME}, a buffer map sits inside whichever phase asked
+		 * for it, and a collection pause can land in any of them. {@code GPU_FRAME} is neither: it
+		 * runs on the GPU while the render thread carries on.
+		 *
+		 * <p>So the unexplained remainder of a frame is its interval minus the phases, never minus
+		 * every source. Summing details as well subtracts the same milliseconds two or three times:
+		 * the frame that finally explained the traversal stall spent 170 ms in {@code CLIENT_TASKS}
+		 * with a 47 ms collection inside it, and counting both drove the remainder to -42 ms.
 		 */
-		public boolean blocksRenderThread() {
-			return this != GPU_FRAME;
+		public boolean isPhase() {
+			return this == CLIENT_PACKETS || this == CLIENT_TASKS || this == CLIENT_TICK || this == RENDER_FRAME;
 		}
 	}
 

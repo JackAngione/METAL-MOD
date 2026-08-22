@@ -122,7 +122,7 @@ its worst frame took 36 ms while the CPU section reported 8 ms, but nothing said
 blocking or allocating - drawable acquisition, both GPU waits, buffer/texture/pipeline creation,
 buffer mapping, object release, staging copies, direct-buffer allocation - and the frame recorder
 snapshots the accumulators once per frame. Each phase now reports its eight worst frames with their
-own breakdown and an `unattributedMs` residual, so a spike either names its cause or proves the
+own breakdown and a residual, so a spike either names its cause or proves the
 cause is somewhere not yet instrumented.
 
 Only events raised on the render thread are counted. Chunk meshing and resource loading create Metal
@@ -297,6 +297,48 @@ usually after those.
 
 This is also the first measurement that could distinguish "the GPU is the bottleneck" from "the
 render thread is waiting on presentation". Before `GPU_FRAME`, both looked identical from the CPU.
+
+### The traversal stall is not garbage collection
+
+This document, and the handoff beside it, said the residual traversal tail was garbage collection.
+That was wrong, and the way it was wrong is worth recording.
+
+The evidence for it was that collection dominated the worst-1% totals of a traversal repeat: 208 ms
+of the 215 ms attributed. Two things falsify it.
+
+**Running the same capture under ZGC removed collection from the tail and left the spike.** Across
+the worst 1% of traversal frames, collection fell from 154 ms under G1 to 0.000 ms. The worst frame
+was still 158 ms, of which 158.3 ms was unattributed. A collector change that eliminates the
+supposed cause and leaves the effect intact is about as clean a refutation as this harness produces.
+
+**The worst single frame never attributed most of itself to collection anyway.** Under G1 it was
+47 ms of 175 ms. The worst-1% total was misleading because it aggregates many frames, and because
+collection time overlaps whatever was running rather than replacing it.
+
+Finding the real cause meant instrumenting the parts of `runTick` that Minecraft's own frame timer
+does not cover - which is most of it. `getFrameTimeNs()` starts after the drawable is acquired and
+stops before submit and present, so a 175 ms frame reporting 4 ms of CPU time was not a
+contradiction, just an unmeasured stretch. Adding phases for queued packet processing, the
+main-thread task queue, the client tick loop, and `renderFrame` as a whole settled it in one run:
+
+```
+frame=955 intervalMs=175.731 cpuMs=3.956 outsideLoopMs=0.040 client_tasks=170.137ms/1 \
+  jvm_gc=47.000ms/3 render_frame=4.016ms/1 gpu_frame=3.506ms/1 client_tick=1.210ms/1 \
+  acquire=0.027ms/1 submit=0.015ms/1 buffer_map=0.010ms/15 0.6MiB upload_copy=0.005ms/2
+```
+
+170 of the 175 ms is `Minecraft.runAllTasks()`, the main-thread task queue, which during terrain
+streaming is dominated by chunk mesh uploads scheduled from worker threads. The frame rendered in
+4 ms. The Metal work inside those 170 ms is 0.015 ms. The collection pauses happen *inside* the
+queue, driven by the same meshing that fills it - a correlate, not a cause.
+
+This also forced the attribution model to grow a distinction it had been missing. Sources are now
+phases, which partition the loop and are the only ones subtracted from the interval; details, which
+sit inside a phase and explain it, collection pauses among them; and `gpu_frame`, which runs
+concurrently. Summing all three drove the residual to -42 ms on the frame above. With phases alone
+the frames balance to within about 0.01 ms, and a stall outside every phase - one 50 ms frame turned
+out to spend 46 ms in the sound and mouse handling between the tick loop and `renderFrame` - is now
+visible instead of hidden in a residual.
 
 ### Known gaps
 

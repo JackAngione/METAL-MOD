@@ -43,26 +43,38 @@ Each phase logs `Metal benchmark stall:` lines - a whole-phase total, a worst-1%
 eight worst individual frames:
 
 ```
-phase=stationary frame=799 intervalMs=11.840 cpuMs=7.192 outsideLoopMs=0.016 \
-  acquire=4.590ms/1 gpu_frame=3.022ms/1 jvm_gc=3.000ms/1 buffer_map=0.011ms/15 0.7MiB \
-  unattributedMs=1.198
+phase=traversal frame=955 intervalMs=175.731 cpuMs=3.956 outsideLoopMs=0.040 \
+  client_tasks=170.137ms/1 jvm_gc=47.000ms/3 render_frame=4.016ms/1 gpu_frame=3.506ms/1 \
+  client_tick=1.210ms/1 acquire=0.027ms/1 submit=0.015ms/1 unphasedMs=0.328
 ```
 
 - `intervalMs` - render-loop tail to tail, the number a player feels.
-- `cpuMs` - Minecraft's own `getFrameTimeNs()`. **It does not cover all of `runTick`.** A frame can
-  show 5 ms here inside a 170 ms interval.
+- `cpuMs` - Minecraft's own `getFrameTimeNs()`. **It covers only the render section**, and not even
+  all of that: it starts after the drawable is acquired and stops before submit and present. A frame
+  can show 4 ms here inside a 175 ms interval, which is what made the traversal stall so hard to
+  find.
 - `outsideLoopMs` - between the previous loop ending and this one starting. Near zero means the
   render thread was inside `runTick` the whole time.
-- `gpu_frame` - GPU busy time from command buffers that *completed* during the frame. It is the one
-  source that does not block the render thread, so it is reported beside the interval and never
-  subtracted from it. Command buffers overlap on the GPU and are attributed to whichever frame they
-  finished in, so read it as occupancy, not as this frame's GPU cost.
-- `unattributedMs` - `interval - outsideLoop - everything that blocked the render thread`. Ordinary
-  rendering work lives here too, so a few ms is normal; a large value on a spike frame means the
-  cause is not yet instrumented.
+- `unphasedMs` - `interval - outsideLoop - the four phases`. What is left of the loop that no phase
+  covers, such as sound and mouse handling. It should be small.
 
-Sources are defined in `MetalStallProbe.Source`. Adding one is three lines: an enum constant, a
-`begin()`/`end()` pair at the call site. Only render-thread events are recorded, deliberately.
+**Sources come in three kinds, and mixing them up is what made the interval impossible to balance.**
+
+*Phases* partition `runTick` end to end: `client_packets`, `client_tasks`, `client_tick`, and
+`render_frame`. Only these are subtracted to get `unphasedMs`.
+
+*Details* happen inside a phase and explain it: `acquire`, `submit`, `present`,
+`level_end_frame`, `buffer_map`, `upload_copy`, `jvm_gc`, and the rest. A collection pause can land
+in any phase, so it is a detail, not a phase. Summing details as well as phases subtracts the same
+milliseconds twice - it drove the residual to -42 ms on the frame quoted above.
+
+*Concurrent*: `gpu_frame` alone. The GPU runs while the render thread does; it is reported beside
+the interval and never subtracted from it. Command buffers overlap on the GPU and are attributed to
+whichever frame they finished in, so read it as occupancy, not as this frame's GPU cost.
+
+Sources are defined in `MetalStallProbe.Source`, and `isPhase()` is what sorts them. Adding a detail
+is three lines: an enum constant and a `begin()`/`end()` pair at the call site. Only render-thread
+events are recorded, deliberately.
 
 ## Environment pitfalls that have already cost time
 
@@ -79,36 +91,70 @@ Sources are defined in `MetalStallProbe.Source`. Adding one is three lines: an e
 
 ## Open work
 
-### 1. The residual traversal tail is garbage collection, and it is not ours
+### 1. The traversal stall is Minecraft's main-thread task queue
 
-**Status:** diagnosed, not fixed. This is the largest remaining item and the reason the original
-"traversal stall" ticket is not closed. It survived the render-path CPU work unchanged, which is
-what the diagnosis predicts: the worst traversal frame is still 175 ms.
+**Status:** located, not fixed. Still the largest remaining item, and the previous diagnosis was
+wrong.
 
-**Evidence:** the heap cycles roughly 4 GB per 150 ms; the worst frames take three to five
-collections apiece. Longest single GC pause and longest safepoint in a full nine-phase run are both
-about 49 ms, so the pauses alone do not cover a 171 ms frame - the rest is the render thread running
-slowly under allocation pressure rather than being stopped by it.
+**What it is.** The worst traversal frame of a run, with the render loop fully divided into phases:
 
-**MetalCraft accounts for 0.6% of allocation during traversal**, and less now. The rest is vanilla
-chunk meshing: `RenderPass$Draw`, `BlockPos`, `SectionRenderDispatcher$RenderSectionBufferSlice`,
-and the `Object[]` and `long[]` behind them. No change to the Metal backend will move it.
+```
+frame=955 intervalMs=175.731 cpuMs=3.956 outsideLoopMs=0.040 client_tasks=170.137ms/1 \
+  jvm_gc=47.000ms/3 render_frame=4.016ms/1 gpu_frame=3.506ms/1 client_tick=1.210ms/1 \
+  acquire=0.027ms/1 submit=0.015ms/1 buffer_map=0.010ms/15 0.6MiB upload_copy=0.005ms/2
+```
+
+170 of the 175 ms is `Minecraft.runAllTasks()` - the main-thread task queue, which during terrain
+streaming is dominated by chunk mesh uploads scheduled from worker threads. Rendering the frame took
+4 ms. The Metal calls inside that 170 ms are negligible: 0.010 ms of buffer mapping across fifteen
+maps, 0.005 ms of upload copying. **The stall is neither the render path nor the collector.**
+
+**Why the previous diagnosis was wrong, and how to avoid repeating it.** The handoff before this one
+said the tail was garbage collection, on the strength of collection dominating the worst-1% totals -
+208 ms of 215 ms. Two things falsify that:
+
+1. Running the identical capture under ZGC removed collection from the tail almost entirely: 0.000 ms
+   attributed across the worst 1% of traversal frames, against 154 ms under G1. **The spike survived
+   at 158 ms.** A collector change that eliminates the supposed cause and leaves the effect intact is
+   about as clean a refutation as this harness can produce.
+2. Even under G1, the worst single frame attributed only 47 ms of its 175 ms to collection. The
+   worst-1% *total* was misleading because it aggregates many frames, and because collection time
+   overlaps whatever was running - the pauses land inside the task queue rather than instead of it.
+
+Collection was a correlate: allocation pressure from the same meshing work that fills the queue.
 
 **What to try, in order:**
 
-1. JVM tuning, measured with the probe rather than assumed. The run uses G1 with a 16 GiB heap by
-   default. Worth testing: a larger young generation (`-XX:G1NewSizePercent`), a larger region size
-   (`-XX:G1HeapRegionSize=16m` or `32m`, given the large `Object[]`/`long[]` churn), a pause target
-   (`-XX:MaxGCPauseMillis`), and generational ZGC (`-XX:+UseZGC -XX:+ZGenerational`) which trades
-   throughput for much shorter pauses. Use `-PmetalJvmArgs`.
-2. If a configuration wins, decide what to do with it. A renderer mod cannot set the user's JVM
-   flags, so the outcome is a documented recommendation plus a benchmark default - not a code change.
-3. Only then consider whether anything upstream is worth reporting or working around.
+1. Find out what those tasks are. `runAllTasks` drains `Minecraft`'s queue; the interesting question
+   is which submitters dominate during traversal. A JFR recording filtered to the render thread
+   during a spike, or a temporary counter keyed by task class, will name them.
+2. If they are chunk mesh uploads, the question becomes whether the backend can accept them without
+   the main thread - Blaze3D's threading rules decide that, not us - or whether the batch can be
+   bounded per frame. A frame that uploads 170 ms of mesh is a frame that should have uploaded some
+   of it later.
+3. JVM tuning is still worth measuring, but as a second-order effect now. ZGC did not fix the spike;
+   it may still help the 1% low, which it did not obviously do either. G1 knobs left untested:
+   `-XX:G1NewSizePercent`, `-XX:G1HeapRegionSize=16m` or `32m`, `-XX:MaxGCPauseMillis`. Note that
+   ZGC is generational by default on the JDK 25 this builds against; `-XX:+ZGenerational` was removed
+   in 24 and is ignored with a warning.
 
-**Do not** spend effort shaving MetalCraft's remaining allocation for the sake of this item; it
-cannot move the tail.
+**MetalCraft is not in this path.** It accounts for 0.6% of allocation during traversal and
+0.015 ms of the 170 ms spike. Do not spend effort shaving the renderer for the sake of this item.
 
-### 2. Command batching
+### 2. A second stall outside every phase
+
+**Status:** newly visible, uninvestigated.
+
+With the loop divided into phases, one 50 ms frame in a pan capture attributed almost nothing to any
+of them - `render_frame=4.036ms`, `client_tick=0.703ms`, tasks and packets at zero - and 45.8 ms to
+`unphasedMs`. That is the stretch of `runTick` no phase covers: the presence handler, gizmo
+collection, `soundManager.updateSource`, and `mouseHandler.handleAccumulatedMovement`.
+
+It is a smaller and rarer stall than item 1 and it is also not ours, but it was invisible before and
+it is cheap to chase: bracket that section the way the four phases are bracketed, in
+`MinecraftTickPhaseMixin`.
+
+### 3. Command batching
 
 **Status:** open, and now the largest item that is actually ours.
 
@@ -132,7 +178,7 @@ The registry's lookup lock is also still a single global `NSLock`, taken on ever
 lookups behind it are now cheap, so the lock is the remaining shared cost; shard it or remove it
 from the render-thread path.
 
-### 3. GPU timing below the command buffer
+### 4. GPU timing below the command buffer
 
 **Status:** partly done.
 
@@ -152,7 +198,7 @@ While you are there: the near-constant ~4.55 ms acquire in that run is worth its
 sync was off and the frame rate was uncapped, so a constant wait points at `CAMetalLayer`'s drawable
 pool rather than at the display. `maximumDrawableCount` is not currently set.
 
-### 4. Ranked plan items still open
+### 5. Ranked plan items still open
 
 From `APPLE_SILICON_PERFORMANCE.md`, with current status:
 
@@ -166,7 +212,7 @@ From `APPLE_SILICON_PERFORMANCE.md`, with current status:
 - **Items 4-7.** Shader library/PSO caching and binary archives; argument buffers and ICBs;
   direct-to-drawable final pass; private heaps and aliasing. All untouched, all still ranked.
 
-### 5. Milestone 3, shader-ready API
+### 6. Milestone 3, shader-ready API
 
 Three items remain open in [ROADMAP.md](../ROADMAP.md) and are unrelated to performance: an example
 shader add-on rendering a full-screen pass, per-extension error isolation with failed-pipeline
