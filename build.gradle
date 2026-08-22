@@ -88,6 +88,12 @@ def benchmarkProperties = [
 ]
 
 tasks.named('runClient') {
+	// Lets a benchmark vary the JVM it measures. Heap pressure shows up in the frame-time tail as
+	// collection pauses, so a run that cannot state its heap size cannot be compared with another.
+	def extraJvmArgs = providers.gradleProperty('metalJvmArgs')
+	if (extraJvmArgs.isPresent()) {
+		jvmArgs extraJvmArgs.get().split(' ').findAll { !it.isEmpty() }
+	}
 	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
 		systemProperty 'fabric.client.gametest', 'true'
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'

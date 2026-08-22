@@ -3,6 +3,8 @@ package dev.metalcraft.client.test;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
+import java.lang.management.GarbageCollectorMXBean;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -410,6 +412,9 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			String name = this.repeats == 1 ? baseName : baseName + "#" + repeat;
 			MetalFrameMetrics.Phase phase = this.context.computeOnClient(ignored -> MetalFrameMetrics.endCapture(name));
 			LOGGER.info("Metal benchmark: {}", phase.toLogLine());
+			for (String line : phase.toAttributionLines()) {
+				LOGGER.info("Metal benchmark stall: {}", line);
+			}
 			if (phase.frames() < 120) {
 				throw new AssertionError("Metal benchmark phase " + name
 					+ " captured too few complete render frames: " + phase.frames());
@@ -443,10 +448,16 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				final double flatFraction, final double loadedFraction, final int visibleSections,
 				final List<MetalFrameMetrics.Phase> phases) {
 			String architecture = System.getProperty("os.arch", "unknown");
+			// The tail of this benchmark is sensitive to heap pressure, so a result that does not
+			// state the heap it ran on is not comparable with another result.
+			long maxHeapMiB = Runtime.getRuntime().maxMemory() / (1024L * 1024L);
+			String collectors = ManagementFactory.getGarbageCollectorMXBeans().stream()
+				.map(GarbageCollectorMXBean::getName)
+				.collect(Collectors.joining("+"));
 			String header = String.format(Locale.ROOT,
-				"backend=%s arch=%s resolution=%dx%d renderDistance=%d simulationDistance=%d seed=%s "
+				"backend=%s arch=%s maxHeapMiB=%d gc=%s resolution=%dx%d renderDistance=%d simulationDistance=%d seed=%s "
 					+ "site=%d,%d,%d roughness=%s flatFrameFraction=%s loadedChunkFraction=%s visibleSections=%d",
-				this.backend, architecture, resolution[0], resolution[1], this.renderDistance,
+				this.backend, architecture, maxHeapMiB, collectors, resolution[0], resolution[1], this.renderDistance,
 				this.simulationDistance, this.seed, site.x(), site.groundY(), site.z(),
 				format(site.roughness()), format(flatFraction), format(loadedFraction), visibleSections);
 			LOGGER.info("Metal benchmark result: {}", header);
@@ -463,12 +474,12 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			}
 
 			String json = String.format(Locale.ROOT,
-				"{\"backend\":\"%s\",\"arch\":\"%s\",\"width\":%d,\"height\":%d,"
+				"{\"backend\":\"%s\",\"arch\":\"%s\",\"maxHeapMiB\":%d,\"gc\":\"%s\",\"width\":%d,\"height\":%d,"
 					+ "\"renderDistance\":%d,\"simulationDistance\":%d,\"seed\":\"%s\","
 					+ "\"siteX\":%d,\"siteY\":%d,\"siteZ\":%d,\"siteRoughness\":%.3f,\"flatFrameFraction\":%.4f,"
 					+ "\"loadedChunkFraction\":%.4f,\"visibleSections\":%d,"
 					+ "\"phases\":[%s]}%n",
-				this.backend, architecture, resolution[0], resolution[1], this.renderDistance,
+				this.backend, architecture, maxHeapMiB, collectors, resolution[0], resolution[1], this.renderDistance,
 				this.simulationDistance, this.seed, site.x(), site.groundY(), site.z(), site.roughness(),
 				flatFraction, loadedFraction, visibleSections, phases.stream().map(MetalFrameMetrics.Phase::toJson).collect(Collectors.joining(",")));
 			Path output = Path.of("benchmarks", "metalcraft-" + this.backend.toLowerCase(Locale.ROOT) + ".json");

@@ -5,16 +5,21 @@ import com.mojang.blaze3d.systems.GpuSurface;
 import com.mojang.blaze3d.systems.GpuSurfaceBackend;
 import com.mojang.blaze3d.systems.SurfaceException;
 import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.logging.LogUtils;
 import java.util.Collection;
 import java.util.List;
+import org.slf4j.Logger;
 
 /** CAMetalLayer-backed implementation of Minecraft's presentation interface. */
 final class MetalGpuSurface implements GpuSurfaceBackend {
+	private static final Logger LOGGER = LogUtils.getLogger();
+
 	private final MetalGpuDevice device;
 	private final long windowHandle;
 	private MetalSurface metal;
 	private MetalDrawable drawable;
 	private boolean configured;
+	private boolean displaySyncEnabled;
 
 	MetalGpuSurface(final MetalGpuDevice device, final long windowHandle) {
 		this.device = device;
@@ -29,11 +34,22 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 			} else {
 				this.metal.resize(config.width(), config.height());
 			}
-			this.metal.setDisplaySyncEnabled(config.presentMode() != GpuSurface.PresentMode.IMMEDIATE);
+			// Logged because a benchmark that silently runs display-synced produces frame intervals
+			// pinned to the refresh rate, which absorbs exactly the stalls the capture exists to
+			// find and is indistinguishable from a healthy result unless the mode is recorded.
+			this.displaySyncEnabled = config.presentMode() != GpuSurface.PresentMode.IMMEDIATE;
+			this.metal.setDisplaySyncEnabled(this.displaySyncEnabled);
+			LOGGER.info("MetalCraft surface configured: {}x{} presentMode={} displaySync={}",
+				config.width(), config.height(), config.presentMode(), this.displaySyncEnabled);
 			this.configured = true;
 		} catch (RuntimeException error) {
 			throw new SurfaceException("Metal could not configure the window surface: " + error.getMessage());
 		}
+	}
+
+	/** Whether presentation is currently paced by the display, which caps every measured interval. */
+	boolean isDisplaySyncEnabled() {
+		return this.displaySyncEnabled;
 	}
 
 	@Override
@@ -47,11 +63,9 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 			throw new SurfaceException("Metal surface is not configured");
 		}
 		// Timed because a blocked acquire is invisible to any CPU-side frame measurement.
-		long acquireStartedNs = MetalPresentProbe.isEnabled() ? System.nanoTime() : 0L;
+		long acquireStartedNs = MetalStallProbe.begin();
 		this.drawable = this.metal.acquireDrawable().orElseThrow(() -> new SurfaceException("Metal did not provide a drawable"));
-		if (acquireStartedNs != 0L) {
-			MetalPresentProbe.recordAcquire(System.nanoTime() - acquireStartedNs);
-		}
+		MetalStallProbe.end(MetalStallProbe.Source.ACQUIRE, acquireStartedNs);
 	}
 
 	@Override

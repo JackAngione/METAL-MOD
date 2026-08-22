@@ -10,6 +10,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /** Captures complete render-loop intervals while the lifecycle benchmark is recording. */
 @Mixin(Minecraft.class)
 abstract class MinecraftFrameMetricsMixin {
+	/**
+	 * Marks when the render loop resumed.
+	 *
+	 * <p>The interval is measured tail-to-tail, so it also contains whatever happened while the
+	 * render thread was not in the render loop at all. The worst frames of a traversal capture turn
+	 * out to be almost entirely that: 8 ms of loop inside a 279 ms interval. Without this timestamp
+	 * that gap is invisible, and a stall outside the loop is indistinguishable from a slow frame.
+	 */
+	@Inject(method = "runTick", at = @At("HEAD"))
+	private void metalcraft$beginFrameMetrics(final boolean advanceGameTime, final CallbackInfo callback) {
+		MetalFrameMetrics.recordFrameStart(System.nanoTime());
+	}
+
 	@Inject(method = "runTick", at = @At("TAIL"))
 	private void metalcraft$finishFrameMetrics(final boolean advanceGameTime, final CallbackInfo callback) {
 		Minecraft client = (Minecraft)(Object)this;

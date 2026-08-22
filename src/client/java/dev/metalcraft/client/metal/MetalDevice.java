@@ -69,7 +69,9 @@ public final class MetalDevice implements AutoCloseable {
 	}
 
 	public synchronized MetalBuffer createBuffer(final long size, final MetalBuffer.StorageMode storageMode) {
+		long startedNs = MetalStallProbe.begin();
 		long bufferHandle = MetalNative.nCreateBuffer(this.requireOpenHandle(), size, storageMode.ordinal());
+		MetalStallProbe.end(MetalStallProbe.Source.BUFFER_CREATE, startedNs, size);
 		if (bufferHandle == 0L) {
 			throw new IllegalStateException("Metal did not create the requested buffer");
 		}
@@ -79,6 +81,7 @@ public final class MetalDevice implements AutoCloseable {
 	}
 
 	public synchronized MetalTexture createTexture(final MetalTexture.Descriptor descriptor) {
+		long startedNs = MetalStallProbe.begin();
 		long textureHandle = MetalNative.nCreateTexture(
 			this.requireOpenHandle(),
 			descriptor.format().nativeCode(),
@@ -89,6 +92,7 @@ public final class MetalDevice implements AutoCloseable {
 			descriptor.usage(),
 			descriptor.cubemap()
 		);
+		MetalStallProbe.end(MetalStallProbe.Source.TEXTURE_CREATE, startedNs, descriptor.byteSize());
 		if (textureHandle == 0L) {
 			throw new IllegalStateException("Metal did not create the requested texture");
 		}
@@ -201,6 +205,7 @@ public final class MetalDevice implements AutoCloseable {
 		}
 
 		MetalRenderPipeline.DepthState depth = descriptor.depthState();
+		long startedNs = MetalStallProbe.begin();
 		long pipelineHandle = MetalNative.nCreateRenderPipeline(
 			this.requireOpenHandle(),
 			descriptor.vertexSource(),
@@ -232,6 +237,7 @@ public final class MetalDevice implements AutoCloseable {
 			layoutStrides,
 			layoutStepRates
 		);
+		MetalStallProbe.end(MetalStallProbe.Source.PIPELINE_CREATE, startedNs);
 		if (pipelineHandle == 0L) {
 			throw new IllegalStateException("Metal did not create the requested render pipeline");
 		}

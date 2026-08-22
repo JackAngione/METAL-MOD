@@ -113,9 +113,128 @@ Against the first trustworthy measurement of this scenario, at 3840x2160 and 32 
 
 Slightly more than double, from two changes: removing a per-frame full-size texture allocation, and not re-deriving a constant on every command.
 
+### Finding the traversal stall: per-frame attribution
+
+The traversal tail - worst frames of 30-330 ms against a p99 CPU time under 13 ms - was the clearest
+defect this benchmark had surfaced, and percentiles could not explain it. A phase could report that
+its worst frame took 36 ms while the CPU section reported 8 ms, but nothing said where the other
+28 ms went. `MetalStallProbe` closes that gap: it times every render-path operation capable of
+blocking or allocating - drawable acquisition, both GPU waits, buffer/texture/pipeline creation,
+buffer mapping, object release, staging copies, direct-buffer allocation - and the frame recorder
+snapshots the accumulators once per frame. Each phase now reports its eight worst frames with their
+own breakdown and an `unattributedMs` residual, so a spike either names its cause or proves the
+cause is somewhere not yet instrumented.
+
+Only events raised on the render thread are counted. Chunk meshing and resource loading create Metal
+objects from worker threads; that work does not stall the frame, and attributing it to whichever
+frame happened to be in flight would be worse than not measuring it.
+
+Three things the probe established before any code changed:
+
+- **The spikes are not Metal work.** On every spike frame, `acquire` and every Metal source read
+  essentially zero. The steady-state streaming cost is real but small: one 20-second traversal phase
+  spends 79 ms in staging copies across 12,826 calls moving 423 MiB, and 19 ms in 32,042 buffer
+  mappings. Neither is within an order of magnitude of explaining a 200 ms frame.
+- **The spikes are inside `runTick`, but outside what Minecraft times.** A `runTick` HEAD timestamp
+  was added to separate the two, because the first hypothesis - that the render thread was parked
+  outside the render loop - was wrong. A 219 ms frame measured `outsideLoopMs=0.026`, while
+  `Minecraft.getFrameTimeNs()` reported 7.1 ms for the same frame.
+- **The spikes are garbage collection.** `-Xlog:gc*` and `-Xlog:safepoint` put the longest pause and
+  the longest safepoint of an entire nine-phase run at ~49 ms each, so no single pause covers a
+  219 ms frame. The heap cycles from ~2.3 GB to ~6.4 GB between young collections - roughly 4 GB per
+  150 ms - and the worst frames take three to five collections apiece. The remainder is the render
+  thread running slowly under allocation pressure rather than being stopped by it, which is why it
+  registers as neither collection time nor a safepoint.
+
+Two measurement gaps the same work closed, both of the "the harness was not measuring what it said"
+class this document has already been burned by twice. The surface now logs its present mode and
+display-sync state at configuration: one run paced every phase to exactly 8.33 ms and looked like a
+20% regression, when the machine was simply GPU-bound and `acquire` was absorbing the slack. And the
+report header now records heap size and collector names, because a tail this sensitive to allocation
+is not comparable between runs that cannot state the heap they ran on. `-PmetalJvmArgs` passes JVM
+flags through so the heap can be varied deliberately.
+
+### The per-draw allocation that fed the stall
+
+An allocation profile (JFR, `settings=profile`) of one traversal capture attributed **4.31 GB - 18.2%
+of everything the JVM allocated - to MetalCraft**, and 4.18 GB of that to a single method. During the
+stationary phase it was 4.53 GB, or 43.8%: nearly half of all allocation in a scene that is not
+moving.
+
+`MetalRenderPassBackend.bindResources` called `BindGroupLayout.flattenUniforms` and
+`flattenSamplers` before **every draw**, and each builds fresh lists:
+
+| Allocation | Call chain |
+|---:|---|
+| 1.51 GB | `List12.toArray` <- `ArrayList.addAll` <- `flattenUniforms` <- `bindResources` |
+| 0.89 GB | `ArrayList.grow` <- `addAll` <- `flattenUniforms` <- `bindResources` |
+| 0.65 GB | `ArrayList.grow` <- `addAll` <- `flattenSamplers` <- `bindResources` |
+| 0.40 GB | `List12.toArray` <- `addAll` <- `flattenSamplers` <- `bindResources` |
+| 0.73 GB | `AbstractImmutableList.iterator` <- both flatten calls |
+
+A pipeline's bind-group layouts are fixed once it is compiled, so this was rebuilding a constant
+thousands of times per frame - the same mistake as the depth-clear scratch target and the re-derived
+root device. Both flattened lists are now resolved in `MetalCompiledRenderPipeline`'s constructor and
+read as fields.
+
+| Phase | MetalCraft allocation before | after | Share of all JVM allocation | Total process allocation |
+|---|---:|---:|---|---:|
+| Traversal | 4.306 GB | 0.101 GB | 18.2% -> 0.6% | 23.72 -> 17.68 GB |
+| Stationary | 4.527 GB | 0.079 GB | 43.8% -> 1.5% | 10.34 -> 5.41 GB |
+
+### Removing the O(live objects) release scan
+
+Independently, the probe measured `mc_release_object` at 31.9-34.7 us per call, 201 ms in a single
+stationary phase across 6,292 releases on the render thread. It answered "does anything still name
+this object as its owner?" by copying and walking every value in the registry - and the renderer
+releases thousands of chunk buffers while streaming. Each entry now carries a child count maintained
+at registration and release; the scan survives only on the error path, where it still names the
+offending child's type. There is exactly one registry-removal site, so the count cannot drift.
+
+| | releases | total | per release |
+|---|---:|---:|---:|
+| Before | 6,292 | 201.0 ms | 31.9 us |
+| Before | 1,660 | 52.9 ms | 31.9 us |
+| Before | 1,413 | 47.2 ms | 33.4 us |
+| After | 5,627 | 35.1 ms | 6.2 us |
+| After | 4,339 | 33.6 ms | 7.7 us |
+| After | 1,338 | 8.3 ms | 6.2 us |
+
+### Measured effect
+
+Same machine, same scene, same configured surface, before as one pass and after as three interleaved
+repeats. Quote the median; the pan phase's 89.7% spread in this set is a reminder of why.
+
+| Phase | Before avg | After median | Change | 1% low before | 1% low after |
+|---|---:|---:|---:|---:|---:|
+| Stationary | 153.7 | 193.2 | +25.7% | 113.8 | 127.3 |
+| Traversal | 159.9 | 191.2 | +19.6% | 51.6 | 104.7 |
+
+Per-frame CPU time fell from 5.877 ms to 5.079 ms at p50 for traversal and from 6.320 ms to 4.974 ms
+for stationary. The traversal 1% low roughly doubled, which is the number that describes the stutter.
+
+**The tail is reduced but not eliminated, and what remains is not ours.** Two of three traversal
+repeats now have a worst frame under 23 ms, against 197 ms before. The third still spikes to 171 ms,
+and its attribution is unambiguous: 208 ms of the 215 ms attributed across that repeat's worst 1% of
+frames is collection time. After the fix, MetalCraft accounts for 0.6% of allocation during
+traversal; the rest is vanilla chunk meshing - `RenderPass$Draw`, `BlockPos`,
+`SectionRenderDispatcher$RenderSectionBufferSlice`, and the `Object[]` and `long[]` behind them. No
+further change to the Metal backend can move that. Reducing the residual stall means JVM heap and
+collector tuning, or upstream changes to how Minecraft meshes chunks, and either should be measured
+with the same probe rather than assumed.
+
+Note that the harness requests 3840x2160 but configures a 7680x2104 drawable, roughly twice the
+intended pixel count. The comparisons above are unaffected because both sides configured the same
+surface, but absolute resolution claims in this document are not currently trustworthy.
+
 ### Known gaps
 
-The harness still has no GPU-side timing, so it can localise a stall to "not the CPU" but not to a specific stage. Metal timestamp query pools already exist in the backend (`MetalCommandEncoder`), and bracketing each submitted frame with a begin/end counter pair is the next step; Apple's Instruments Game Performance template and GPU counters remain the reference. It also does not record thermal state or system load alongside the results, which would have explained the variance above rather than leaving it inferred.
+Per-frame attribution now covers the render path, the JVM's collection time, and time spent outside
+the render loop, but the harness still has no GPU-side timing, so it can localise a stall to "not the
+CPU" but not to a specific GPU stage. Metal timestamp query pools already exist in the backend (`MetalCommandEncoder`), and bracketing each submitted frame with a begin/end counter pair is the next step; Apple's Instruments Game Performance template and GPU counters remain the reference. It records heap size and collector names but still not thermal state or system load, which would
+have explained the variance above rather than leaving it inferred - and which matters more than this
+document previously assumed: across one afternoon the same scenario ran anywhere from 117 to 361 FPS
+depending on machine and display state.
 
 Only a floor is asserted on the numbers, because a target has to come from measurement rather than from the harness.
 
@@ -125,7 +244,8 @@ Only a floor is asserted on the numbers, because a target has to come from measu
 |---:|---|---|---|
 | 0 | ~~Replace the benchmark harness~~ (done; see above) | Done. Established that the traversal tail, not steady-state draw cost, is the problem | Medium |
 | 1 | Persistent triple-buffered shared upload/uniform/vertex arenas; reuse blit encoders | High, and now the top target: the frame became CPU-bound once the depth-clear allocation was removed | Medium |
-| 2 | Batch the JNI render ABI and replace the locked/boxed handle registry hot path | **Partly done**: caching the root device per entry gave +38%. Remaining: the boxed-`NSNumber` dictionary itself, and command batching | Medium-high |
+| 2 | Batch the JNI render ABI and replace the locked/boxed handle registry hot path | **Partly done**: caching the root device per entry gave +38%; replacing the O(live objects) release scan with a child count made releases 4-5x cheaper. Remaining: the boxed-`NSNumber` dictionary itself, and command batching | Medium-high |
+| 2b | ~~Stop rebuilding the flattened bind-group layout per draw~~ (done) | Done. Removed 98% of the renderer's Java allocation and gave +20-26%; see above | Low |
 | 3 | Remove artificial render-pass/resource churn; correct load/store actions | **Partly done**: the depth-clear scratch target is gone (20x acquire improvement). Remaining: load/store liveness, pass merging | Medium |
 | 4 | Cache shader libraries, pipeline variants, texel views, and translated outputs | Medium frame-hitch/startup win | Medium |
 | 5 | Argument buffers and indirect command buffers for stable draw groups | High for chunk/UI CPU submission; workload-dependent | High |

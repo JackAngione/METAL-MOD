@@ -41,7 +41,11 @@ final class MetalTransientMemory implements TransientMemory, AutoCloseable {
 	@Override
 	public ByteBuffer allocateCpu(final long size, final long alignment, final long minimumAllocation, final long elementSize) {
 		validateAlignment(alignment);
-		return ByteBuffer.allocateDirect(toInt(allocationSize(size, minimumAllocation, elementSize))).order(ByteOrder.nativeOrder());
+		int bytes = toInt(allocationSize(size, minimumAllocation, elementSize));
+		long startedNs = MetalStallProbe.begin();
+		ByteBuffer allocation = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder());
+		MetalStallProbe.end(MetalStallProbe.Source.CPU_ALLOC, startedNs, bytes);
+		return allocation;
 	}
 
 	@Override
@@ -209,7 +213,9 @@ final class MetalTransientMemory implements TransientMemory, AutoCloseable {
 
 		private void retire() {
 			if (this.inFlight == null) return;
+			long startedNs = MetalStallProbe.begin();
 			this.inFlight.waitUntilCompleted();
+			MetalStallProbe.end(MetalStallProbe.Source.ARENA_WAIT, startedNs);
 			this.inFlight.close();
 			this.inFlight = null;
 		}

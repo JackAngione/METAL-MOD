@@ -141,6 +141,17 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 				throw new IllegalArgumentException("Metal texture usage contains unknown bits");
 			}
 		}
+
+		/** Approximate device footprint of every mip level and layer, for allocation telemetry. */
+		public long byteSize() {
+			long total = 0L;
+			for (int level = 0; level < this.mipLevels; level++) {
+				long levelWidth = Math.max(1, this.width >> level);
+				long levelHeight = Math.max(1, this.height >> level);
+				total = Math.addExact(total, levelWidth * levelHeight * this.format.bytesPerPixel());
+			}
+			return Math.multiplyExact(total, this.depthOrLayers);
+		}
 	}
 
 	private final MetalDevice device;
@@ -243,7 +254,9 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 			view.close();
 		}
 		synchronized (this) {
+			long startedNs = MetalStallProbe.begin();
 			MetalNative.nReleaseTexture(this.handle);
+			MetalStallProbe.end(MetalStallProbe.Source.RESOURCE_RELEASE, startedNs, this.descriptor.byteSize());
 			this.handle = 0L;
 			this.views.clear();
 			this.closing = false;

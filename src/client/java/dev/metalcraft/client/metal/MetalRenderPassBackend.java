@@ -215,7 +215,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	private void bindResources() {
 		if (this.pipeline == null || !this.pipeline.isValid()) throw new IllegalStateException("A valid Metal pipeline must be bound before drawing");
-		List<BindGroupLayout.UniformDescription> uniformLayout = BindGroupLayout.flattenUniforms(this.pipeline.info().getBindGroupLayouts());
+		List<BindGroupLayout.UniformDescription> uniformLayout = this.pipeline.uniformLayout();
 		for (int index = 0; index < uniformLayout.size(); index++) {
 			BindGroupLayout.UniformDescription description = uniformLayout.get(index);
 			GpuBufferSlice value = this.uniforms.get(description.name());
@@ -235,7 +235,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 				this.boundUniforms.put(index, value);
 			}
 		}
-		List<String> samplerLayout = BindGroupLayout.flattenSamplers(this.pipeline.info().getBindGroupLayouts());
+		List<String> samplerLayout = this.pipeline.samplerLayout();
 		for (int index = 0; index < samplerLayout.size(); index++) {
 			String name = samplerLayout.get(index);
 			TextureBinding value = this.textures.get(name);

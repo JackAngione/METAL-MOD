@@ -56,7 +56,9 @@ public final class MetalBuffer implements AutoCloseable {
 		if (length > Integer.MAX_VALUE) {
 			throw new IllegalArgumentException("A Java buffer mapping cannot exceed Integer.MAX_VALUE bytes");
 		}
+		long startedNs = MetalStallProbe.begin();
 		ByteBuffer bytes = MetalNative.nMappedBufferBytes(this.requireOpenHandle(), offset, length);
+		MetalStallProbe.end(MetalStallProbe.Source.BUFFER_MAP, startedNs, length);
 		if (bytes == null) {
 			throw new IllegalStateException("Metal did not expose the mapped buffer bytes");
 		}
@@ -83,7 +85,9 @@ public final class MetalBuffer implements AutoCloseable {
 			mapping.close();
 		}
 		synchronized (this) {
+			long startedNs = MetalStallProbe.begin();
 			MetalNative.nReleaseBuffer(this.handle);
+			MetalStallProbe.end(MetalStallProbe.Source.RESOURCE_RELEASE, startedNs, this.size);
 			this.handle = 0L;
 			this.mappings.clear();
 			this.closing = false;

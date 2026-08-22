@@ -143,10 +143,12 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	public void writeToBuffer(final GpuBufferSlice destination, final ByteBuffer data) {
 		MetalGpuBuffer target = requireBuffer(destination.buffer());
 		int length = data.remaining();
+		long startedNs = MetalStallProbe.begin();
 		try (GpuBufferSlice.MappedView mapping = this.transientMemory.allocateStaging(
 			length, 16L, GpuBuffer.USAGE_COPY_SRC, length, 1L
 		)) {
 			mapping.data().put(data.duplicate());
+			MetalStallProbe.end(MetalStallProbe.Source.UPLOAD_COPY, startedNs, length);
 			GpuBufferSlice staging = mapping.slice();
 			this.commands().copyBuffer(
 				requireBuffer(staging.buffer()).metal(), staging.offset(), target.metal(), destination.offset(), length
@@ -176,10 +178,12 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		int tightRow = Math.multiplyExact(width, destination.getFormat().blockSize());
 		int paddedRow = alignedRow(tightRow);
 		long stagingSize = Math.multiplyExact((long)paddedRow, height);
+		long startedNs = MetalStallProbe.begin();
 		try (GpuBufferSlice.MappedView mapping = this.transientMemory.allocateStaging(
 			stagingSize, 256L, GpuBuffer.USAGE_COPY_SRC, stagingSize, 1L
 		)) {
 			copyRows(source.duplicate(), mapping.data(), tightRow, paddedRow, height);
+			MetalStallProbe.end(MetalStallProbe.Source.UPLOAD_COPY, startedNs, stagingSize);
 			GpuBufferSlice staging = mapping.slice();
 			this.commands().copyBufferToTextureRegion(
 				requireBuffer(staging.buffer()).metal(), staging.offset(), paddedRow,
@@ -326,7 +330,11 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		boolean completed = wait || !this.completionCallbacks.isEmpty();
 		if (submitted != null) {
 			submitted.commit();
-			if (completed) submitted.waitUntilCompleted();
+			if (completed) {
+				long startedNs = MetalStallProbe.begin();
+				submitted.waitUntilCompleted();
+				MetalStallProbe.end(MetalStallProbe.Source.SUBMIT_WAIT, startedNs);
+			}
 		}
 		boolean retainedByTransientMemory = this.transientMemory.finishSubmission(submitted, completed);
 		if (submitted != null && !retainedByTransientMemory) submitted.close();

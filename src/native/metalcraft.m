@@ -89,6 +89,16 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
  * walk, most of it dictionary lookups and CFNumber hashing one level at a time.
  */
 @property(nonatomic, readonly) jlong rootDeviceHandle;
+/**
+ * How many registered objects name this one as their owner.
+ *
+ * <p>Release has to refuse an object that still owns children. It used to answer that by walking
+ * every value in the registry, which copies the whole value array and costs O(live objects) per
+ * release - and the renderer releases thousands of chunk buffers while streaming terrain. The
+ * count answers the same question in constant time; the scan survives only on the error path,
+ * where it still names the offending child's type.
+ */
+@property(nonatomic) NSUInteger childCount;
 
 - (instancetype)initWithType:(MCObjectType)type
 	object:(id)object
@@ -928,12 +938,13 @@ static jlong mc_register_object(id object, MCObjectType type, jlong ownerHandle)
 	jlong handle = mc_next_handle++;
 	// Resolved once here rather than on every command that touches the object.
 	jlong rootDeviceHandle = 0;
+	MCNativeObject *owner = ownerHandle == 0 ? nil : mc_registry[@(ownerHandle)];
 	if (type == MCObjectTypeDevice) {
 		rootDeviceHandle = handle;
-	} else if (ownerHandle != 0) {
-		MCNativeObject *owner = mc_registry[@(ownerHandle)];
-		rootDeviceHandle = owner == nil ? 0 : owner.rootDeviceHandle;
+	} else if (owner != nil) {
+		rootDeviceHandle = owner.rootDeviceHandle;
 	}
+	owner.childCount += 1;
 	mc_registry[@(handle)] = [[MCNativeObject alloc]
 		initWithType:type
 		object:object
@@ -1064,15 +1075,27 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
 		return;
 	}
 
-	for (MCNativeObject *candidate in mc_registry.allValues) {
-		if (candidate.ownerHandle == handle) {
-			[mc_registry_lock unlock];
-			mc_throw_state(env, [NSString stringWithFormat:@"Cannot release a %@ while it still owns a %@", mc_type_name(expectedType), mc_type_name(candidate.type)]);
-			return;
+	if (entry.childCount != 0) {
+		// Only here is the scan worth its cost, and only to name the child in the message.
+		MCObjectType childType = expectedType;
+		for (MCNativeObject *candidate in mc_registry.allValues) {
+			if (candidate.ownerHandle == handle) {
+				childType = candidate.type;
+				break;
+			}
 		}
+		[mc_registry_lock unlock];
+		mc_throw_state(env, [NSString stringWithFormat:@"Cannot release a %@ while it still owns a %@", mc_type_name(expectedType), mc_type_name(childType)]);
+		return;
 	}
 
 	[mc_registry removeObjectForKey:@(handle)];
+	if (entry.ownerHandle != 0) {
+		MCNativeObject *owner = mc_registry[@(entry.ownerHandle)];
+		if (owner != nil && owner.childCount != 0) {
+			owner.childCount -= 1;
+		}
+	}
 	[mc_registry_lock unlock];
 
 	if (expectedType == MCObjectTypeSurface) {
