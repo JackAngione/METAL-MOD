@@ -46,7 +46,12 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		if (!this.configured || this.metal == null) {
 			throw new SurfaceException("Metal surface is not configured");
 		}
+		// Timed because a blocked acquire is invisible to any CPU-side frame measurement.
+		long acquireStartedNs = MetalPresentProbe.isEnabled() ? System.nanoTime() : 0L;
 		this.drawable = this.metal.acquireDrawable().orElseThrow(() -> new SurfaceException("Metal did not provide a drawable"));
+		if (acquireStartedNs != 0L) {
+			MetalPresentProbe.recordAcquire(System.nanoTime() - acquireStartedNs);
+		}
 	}
 
 	@Override

@@ -30,7 +30,13 @@ Minecraft / Blaze3D → MetalCraft Metal backend → Apple Metal
 - Adds a dedicated **Video Settings → MetalCraft Settings** screen. Its half-resolution option renders at macOS logical resolution while keeping the Metal drawable at native Retina size, reducing the rendered pixel count by 75% before presentation upscaling.
 - Provides the `metalcraft-shaders` Fabric entrypoint and reload-aware pipeline precompilation API for shader add-ons.
 
-No performance number is promised yet. The Metal path removes reliance on Apple's deprecated OpenGL implementation, but “optimal” needs repeatable frame-time measurements; that benchmark milestone is tracked in [ROADMAP.md](ROADMAP.md).
+No performance number is promised yet. The Metal path removes reliance on Apple's deprecated OpenGL implementation, but “optimal” needs repeatable frame-time measurements. The benchmark scenario now renders ordinary generated terrain from a ground-level camera at the display's native resolution and 32 chunks, and validates that it is drawing a real world before reporting; see [docs/APPLE_SILICON_PERFORMANCE.md](docs/APPLE_SILICON_PERFORMANCE.md) for the methodology and current numbers, and [ROADMAP.md](ROADMAP.md) for tracked work.
+
+```bash
+./gradlew runClient -PmetalLifecycleTest -PmetalLifecycleBenchmark=true
+```
+
+The scenario defaults to the primary display's native resolution, 32 chunks, and simulation distance 16. Each phase is captured three times and reported with its median and spread; override with `-PmetalBenchmarkRepeats`. Other knobs are `-PmetalBenchmarkResolution=3840x2160`, `-PmetalBenchmarkRenderDistance`, `-PmetalBenchmarkSimulationDistance`, `-PmetalBenchmarkPhaseTicks`, and `-PmetalBenchmarkSeed`. Results are written to `run/benchmarks/metalcraft-<backend>.json`. The first run of a seed generates a 32-chunk radius of fresh terrain, which takes a few minutes.
 
 ## Install
 

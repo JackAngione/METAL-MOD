@@ -74,12 +74,32 @@ tasks.named('check') {
 	dependsOn tasks.named('shaderTranslationSmoke')
 }
 
+// Benchmark knobs, forwarded from -P<gradle property> to -D<system property>.
+def benchmarkProperties = [
+	metalBenchmarkSeed: 'metalcraft.benchmarkSeed',
+	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
+	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',
+	metalBenchmarkResolution: 'metalcraft.benchmarkResolution',
+	metalBenchmarkPhaseTicks: 'metalcraft.benchmarkPhaseTicks',
+	metalBenchmarkMinimumFps: 'metalcraft.benchmarkMinimumFps',
+	metalBenchmarkMinimumOnePercentLow: 'metalcraft.benchmarkMinimumOnePercentLow',
+	metalBenchmarkMinimumVisibleSections: 'metalcraft.benchmarkMinimumVisibleSections',
+	metalBenchmarkRepeats: 'metalcraft.benchmarkRepeats'
+]
+
 tasks.named('runClient') {
 	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
 		systemProperty 'fabric.client.gametest', 'true'
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')
+
+		benchmarkProperties.each { gradleProperty, systemPropertyName ->
+			def value = providers.gradleProperty(gradleProperty)
+			if (value.isPresent()) {
+				systemProperty systemPropertyName, value.get()
+			}
+		}
 	}
 }
 
