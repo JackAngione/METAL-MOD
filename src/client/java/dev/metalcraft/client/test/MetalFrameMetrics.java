@@ -103,6 +103,7 @@ public final class MetalFrameMetrics {
 			collections - previousCollectionCount, 0L);
 		previousCollectionCount = collections;
 		previousCollectionMillis = collectionMillis;
+		MetalStallProbe.recordCompletedGpuWork();
 		// Read unconditionally so the accumulators reset even for frames that are not retained.
 		MetalStallProbe.takeFrame(stalls, size * slots);
 		long interval = previousFrameEndNs == 0L ? 0L : frameEndNs - previousFrameEndNs;
@@ -158,7 +159,11 @@ public final class MetalFrameMetrics {
 			double attributed = 0.0;
 			for (StallTotal stall : this.stalls) {
 				text.append(' ').append(stall.describe());
-				attributed += stall.totalMs();
+				// GPU time overlaps the render thread rather than blocking it, so it is reported
+				// beside the interval but never subtracted from it.
+				if (stall.source().blocksRenderThread()) {
+					attributed += stall.totalMs();
+				}
 			}
 			return text.append(String.format(Locale.ROOT, " unattributedMs=%.3f",
 				this.intervalMs - this.outsideLoopMs - attributed)).toString();

@@ -41,6 +41,16 @@ public final class MetalStallProbe {
 		/** Allocating a direct {@code ByteBuffer} for Blaze3D to build one frame's data in. */
 		CPU_ALLOC,
 		/**
+		 * GPU busy time from command buffers that completed during the frame.
+		 *
+		 * <p>Unlike every other source here this is not time the render thread spent blocked - the
+		 * GPU runs while the CPU does. It is here because a frame whose interval is not explained by
+		 * anything on the CPU is usually explained by the GPU, and until now that could only be
+		 * asserted. Command buffers can overlap on the GPU and are attributed to whichever frame
+		 * they finished in, so read it as an occupancy signal, not as this frame's GPU cost.
+		 */
+		GPU_FRAME,
+		/**
 		 * Time the JVM spent collecting during the frame.
 		 *
 		 * <p>Not a Metal call, but a collection pause lands in the frame interval exactly like a
@@ -50,6 +60,18 @@ public final class MetalStallProbe {
 		JVM_GC;
 
 		static final Source[] VALUES = values();
+
+		/**
+		 * Whether this source occupies the render thread, and so accounts for part of a frame's
+		 * interval.
+		 *
+		 * <p>Every source but one does. GPU time runs alongside the render thread rather than
+		 * blocking it, so subtracting it from the interval to find what is left unexplained would
+		 * count the same milliseconds twice and can drive the remainder negative.
+		 */
+		public boolean blocksRenderThread() {
+			return this != GPU_FRAME;
+		}
 	}
 
 	/** Values recorded per source: elapsed nanoseconds, event count, and bytes moved or allocated. */
@@ -60,6 +82,8 @@ public final class MetalStallProbe {
 
 	private static final int SLOTS = Source.VALUES.length * FIELDS;
 	private static final AtomicLongArray ACCUMULATORS = new AtomicLongArray(SLOTS);
+	/** Only ever touched by the render thread, under the {@link #isEnabled()} guard. */
+	private static final long[] GPU_WORK = new long[2];
 	private static volatile Thread renderThread;
 
 	private MetalStallProbe() {
@@ -109,6 +133,22 @@ public final class MetalStallProbe {
 		ACCUMULATORS.addAndGet(base + FIELD_COUNT, count);
 		if (bytes != 0L) {
 			ACCUMULATORS.addAndGet(base + FIELD_BYTES, bytes);
+		}
+	}
+
+	/**
+	 * Folds the GPU time of command buffers that have completed since the last call into this frame.
+	 *
+	 * <p>Drained here rather than recorded by the completion handler itself, because handlers run on
+	 * Metal's threads and this probe deliberately counts only what the render thread can see.
+	 */
+	public static void recordCompletedGpuWork() {
+		if (!isEnabled() || !MetalNative.isLoaded()) {
+			return;
+		}
+		MetalNative.nTakeGpuWork(GPU_WORK);
+		if (GPU_WORK[1] != 0L) {
+			record(Source.GPU_FRAME, GPU_WORK[0], GPU_WORK[1], 0L);
 		}
 	}
 

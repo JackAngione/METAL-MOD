@@ -228,6 +228,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				}
 
 				this.report(resolution, site, flatFraction, loadedFraction, visibleSections, phases);
+				this.warnIfDisplayPaced(phases);
 				this.assertThresholds(phases);
 			}
 
@@ -594,6 +595,38 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		 * Only a floor is enforced. The scenario's job is to produce a number that tracks real play,
 		 * and a target for that number has to come from measurement rather than from the harness.
 		 */
+		/**
+		 * Warns when a phase's frames arrive at the display's refresh interval.
+		 *
+		 * <p>Presentation is requested in immediate mode and the frame limiter is off, so this should
+		 * not happen - but it does, on the same machine that free-runs at 300 FPS an hour earlier,
+		 * and a paced run absorbs exactly the stalls the capture exists to find. A run pinned to the
+		 * refresh rate reports a frame rate that describes the display rather than the renderer, and
+		 * comparing it against a free-running run is how a change gets credited or blamed for
+		 * something it did not do.
+		 *
+		 * <p>A warning rather than a failure: the phase's CPU time, GPU time, and stall attribution
+		 * are all still meaningful, and those are the numbers a diagnostic run is usually after.
+		 */
+		private void warnIfDisplayPaced(final List<MetalFrameMetrics.Phase> phases) {
+			double refreshMs = this.context.computeOnClient(MetalLifecycleGameTest::refreshIntervalMs);
+			if (refreshMs <= 0.0) {
+				return;
+			}
+			for (MetalFrameMetrics.Phase phase : phases) {
+				// Pinned means the median sits on the refresh interval and the spread to p99 is small;
+				// a free-running phase that merely averages near it will have a much wider tail.
+				boolean atRefresh = Math.abs(phase.p50IntervalMs() - refreshMs) / refreshMs < 0.05;
+				boolean tight = phase.p99IntervalMs() < refreshMs * 1.25;
+				if (atRefresh && tight) {
+					LOGGER.warn("Metal benchmark: phase {} ran at the display's {} Hz refresh despite "
+						+ "immediate presentation and no frame limit, so its frame rate describes the "
+						+ "display, not the renderer. Do not compare it against a free-running run. {}",
+						phase.name(), Math.round(1000.0 / refreshMs), phase.toLogLine());
+				}
+			}
+		}
+
 		private void assertThresholds(final List<MetalFrameMetrics.Phase> phases) {
 			for (MetalFrameMetrics.Phase phase : phases) {
 				if (phase.averageFps() < this.minimumFps) {
@@ -624,6 +657,13 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				+ "display is asleep or locked. Pass -PmetalBenchmarkResolution=WIDTHxHEIGHT.");
 		}
 		return (float)framebuffer[0] / windowWidth[0];
+	}
+
+	/** @return the primary display's refresh interval in milliseconds, or {@code 0} if unknown */
+	private static double refreshIntervalMs(final Minecraft client) {
+		long monitor = GLFW.glfwGetPrimaryMonitor();
+		GLFWVidMode mode = monitor == 0L ? null : GLFW.glfwGetVideoMode(monitor);
+		return mode == null || mode.refreshRate() <= 0 ? 0.0 : 1000.0 / mode.refreshRate();
 	}
 
 	private static int[] framebufferSize(final Minecraft client) {

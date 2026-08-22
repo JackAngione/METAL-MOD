@@ -5,6 +5,7 @@
 #import <jni.h>
 #import <objc/runtime.h>
 #import <pthread.h>
+#import <stdatomic.h>
 #import <float.h>
 #import <math.h>
 
@@ -293,6 +294,23 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 @end
 
 
+/**
+ * GPU busy time reported by completed command buffers, waiting to be drained by the render thread.
+ *
+ * <p>The stall probe can say a frame was not spent on the CPU, but not what the GPU was doing with
+ * it, which leaves a whole class of runs describable only as "GPU-bound". Metal hands every command
+ * buffer its own GPU start and end time once it completes, so the interval is free to collect here
+ * rather than costing an encoder-level counter sample per pass.
+ *
+ * <p>Completion handlers run on Metal's own threads, so the counters are atomic and the render
+ * thread drains them once per frame. What that yields is the GPU time of the command buffers that
+ * *completed* during a frame, not the GPU time of that frame's own work - and command buffers can
+ * overlap on the GPU, so the sum can exceed the wall clock. It answers "is the GPU busy", not "how
+ * long did this frame take on the GPU".
+ */
+static _Atomic uint64_t mc_gpu_nanos;
+static _Atomic uint64_t mc_gpu_command_buffers;
+
 @implementation MCMetalCommandBuffer {
 	MCInFlightResources *_resources;
 	id<MTLBlitCommandEncoder> _blitEncoder;
@@ -306,6 +324,13 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 		MCInFlightResources *resources = _resources;
 		[commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
 			[resources complete];
+			// Zero on a device or capture mode that does not report them, hence the ordering check
+			// rather than a plain subtraction.
+			CFTimeInterval elapsed = completed.GPUEndTime - completed.GPUStartTime;
+			if (elapsed > 0.0) {
+				atomic_fetch_add_explicit(&mc_gpu_nanos, (uint64_t)(elapsed * 1.0e9), memory_order_relaxed);
+				atomic_fetch_add_explicit(&mc_gpu_command_buffers, 1, memory_order_relaxed);
+			}
 		}];
 	}
 	return self;
@@ -1334,6 +1359,18 @@ Java_dev_metalcraft_client_metal_MetalNative_nPresentDrawable(
 			[commandBuffer.commandBuffer presentDrawable:drawable];
 		}
 	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nTakeGpuWork(JNIEnv *env, jclass type, jlongArray destination) {
+	if (destination == NULL || (*env)->GetArrayLength(env, destination) < 2) {
+		mc_throw_state(env, @"Draining Metal GPU timing needs an array of at least two values");
+		return;
+	}
+	jlong values[2];
+	values[0] = (jlong)atomic_exchange_explicit(&mc_gpu_nanos, 0, memory_order_relaxed);
+	values[1] = (jlong)atomic_exchange_explicit(&mc_gpu_command_buffers, 0, memory_order_relaxed);
+	(*env)->SetLongArrayRegion(env, destination, 0, 2, values);
 }
 
 MC_EXPORT JNIEXPORT void JNICALL

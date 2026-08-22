@@ -46,6 +46,11 @@ public final class MetalNative {
 		return Optional.ofNullable(loadFailure);
 	}
 
+	/** Whether the native bridge is loaded, without attempting to load it. */
+	public static boolean isLoaded() {
+		return loaded;
+	}
+
 	public static boolean isSupported() {
 		return load() && nIsSupported();
 	}
@@ -65,6 +70,9 @@ public final class MetalNative {
 	static native long nCreateCommandQueue(long deviceHandle);
 
 	static native long nCreateCommandBuffer(long queueHandle);
+
+	/** Drains GPU busy time from completed command buffers into {@code destination} as {nanos, count}. */
+	static native void nTakeGpuWork(long[] destination);
 
 	static native long nCreateSurface(long deviceHandle, long cocoaViewHandle, int width, int height);
 
