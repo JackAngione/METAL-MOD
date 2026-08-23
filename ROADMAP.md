@@ -70,7 +70,8 @@ This milestone proved that Minecraft 26.2's backend abstraction is usable, but i
 - [x] Divide the render loop into phases so a stall outside the render section is attributable.
 - [x] Make those phases exhaustive, so no part of a frame falls into an unattributed remainder.
 - [x] Name the tasks in Minecraft's main-thread queue, with a positive-control assertion so a silent census cannot read as an empty one.
-- [ ] Reduce the traversal tail, which is Minecraft's main-thread task queue rather than renderer work or collection: 170 ms of a 175 ms spike, with 0.015 ms of Metal work in it.
+- [x] Separate the client gametest harness's frame handoff from Minecraft's task queue: the 170 ms traversal spike was the harness parking the render thread, and the queue's own drain measures 0.000 ms on that frame.
+- [ ] Reduce the real traversal tail, which is collection: 15-20 ms frames of which 12-17 ms is a pause, driven by vanilla chunk meshing's allocation rather than by this renderer.
 - [ ] Batch the render ABI so a bind-and-draw sequence crosses JNI once rather than per command.
 - [ ] Propagate attachment liveness so dead attachments store `DontCare`, and merge compatible passes.
 - [ ] Localise GPU time to a stage with encoder-level counter samples, not just per command buffer.

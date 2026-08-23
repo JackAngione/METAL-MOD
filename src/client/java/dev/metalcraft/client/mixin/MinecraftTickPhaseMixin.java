@@ -34,11 +34,33 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 abstract class MinecraftTickPhaseMixin {
 	/** Nanoseconds at the last phase boundary, or {@code 0} while the probe is disabled. */
 	private long metalcraft$cursorNs;
+	/** Whether the stretch after the task drain is still open; see {@code CLIENT_POST_TASKS}. */
+	private boolean metalcraft$postTasksOpen;
 	private long metalcraft$levelEndFrameStartedNs;
 
 	@Inject(method = "runTick", at = @At("HEAD"))
 	private void metalcraft$beginTick(final boolean advanceGameTime, final CallbackInfo callback) {
 		this.metalcraft$cursorNs = MetalStallProbe.begin();
+		this.metalcraft$postTasksOpen = false;
+	}
+
+	/**
+	 * Closes whichever of the two stretches is open, since both end at the same two boundaries.
+	 *
+	 * <p>The stretch after the task drain ends at the tick section, and the tick section starts at
+	 * whichever comes first: the frame's first {@code tick()}, or - on a frame with no tick to run,
+	 * which at 300 FPS is most of them - the per-frame gizmo collection. Keying on which boundary is
+	 * crossed first rather than on which boundary it is keeps the split exact either way.
+	 */
+	private void metalcraft$closeTickSectionStretch() {
+		if (this.metalcraft$postTasksOpen) {
+			this.metalcraft$postTasksOpen = false;
+			this.metalcraft$cursorNs =
+				MetalStallProbe.split(MetalStallProbe.Source.CLIENT_POST_TASKS, this.metalcraft$cursorNs);
+		} else {
+			this.metalcraft$cursorNs =
+				MetalStallProbe.split(MetalStallProbe.Source.CLIENT_GIZMOS, this.metalcraft$cursorNs);
+		}
 	}
 
 	@Inject(
@@ -66,6 +88,7 @@ abstract class MinecraftTickPhaseMixin {
 	private void metalcraft$endTasks(final boolean advanceGameTime, final CallbackInfo callback) {
 		this.metalcraft$cursorNs =
 			MetalStallProbe.split(MetalStallProbe.Source.CLIENT_TASKS, this.metalcraft$cursorNs);
+		this.metalcraft$postTasksOpen = true;
 	}
 
 	// Inside the tick loop, so both boundaries are crossed once per tick the frame catches up on.
@@ -74,8 +97,7 @@ abstract class MinecraftTickPhaseMixin {
 		at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;tick()V")
 	)
 	private void metalcraft$endGizmos(final boolean advanceGameTime, final CallbackInfo callback) {
-		this.metalcraft$cursorNs =
-			MetalStallProbe.split(MetalStallProbe.Source.CLIENT_GIZMOS, this.metalcraft$cursorNs);
+		this.metalcraft$closeTickSectionStretch();
 	}
 
 	@Inject(
@@ -94,8 +116,7 @@ abstract class MinecraftTickPhaseMixin {
 		at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/extract/LevelExtractor;collectPerFrameMainThreadGizmos()Lnet/minecraft/gizmos/Gizmos$TemporaryCollection;")
 	)
 	private void metalcraft$endTickSection(final boolean advanceGameTime, final CallbackInfo callback) {
-		this.metalcraft$cursorNs =
-			MetalStallProbe.split(MetalStallProbe.Source.CLIENT_GIZMOS, this.metalcraft$cursorNs);
+		this.metalcraft$closeTickSectionStretch();
 	}
 
 	@Inject(

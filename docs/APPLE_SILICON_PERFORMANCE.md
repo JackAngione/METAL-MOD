@@ -337,10 +337,11 @@ frame=955 intervalMs=175.731 cpuMs=3.956 outsideLoopMs=0.040 client_tasks=170.13
   acquire=0.027ms/1 submit=0.015ms/1 buffer_map=0.010ms/15 0.6MiB upload_copy=0.005ms/2
 ```
 
-170 of the 175 ms is `Minecraft.runAllTasks()`, the main-thread task queue, which during terrain
-streaming is dominated by chunk mesh uploads scheduled from worker threads. The frame rendered in
-4 ms. The Metal work inside those 170 ms is 0.015 ms. The collection pauses happen *inside* the
-queue, driven by the same meshing that fills it - a correlate, not a cause.
+170 of the 175 ms is bracketed by `Minecraft.runAllTasks()`, and the frame rendered in 4 ms with
+0.015 ms of Metal work in it. The reading offered here - that the queue was full of chunk mesh
+uploads scheduled from worker threads - was an inference from the bracket's name, and it is wrong:
+see *The traversal stall was the test harness* below. What survives is the part that was measured,
+that the stall is neither the render path nor the collector.
 
 This also forced the attribution model to grow a distinction it had been missing. Sources are now
 phases, which partition the loop and are the only ones subtracted from the interval; details, which
@@ -402,6 +403,50 @@ capture waits for terrain to settle first, and in three runs out of four whateve
 already finished by then. The stall lives in the streaming window the harness deliberately skips
 past, which is where the census should be pointed next; the lifecycle capture already sits in that
 window and now prints its attribution.
+
+### The traversal stall was the test harness
+
+The queue being empty was the clue, and it took one more step to read. `CLIENT_TASKS` is bracketed
+in `runTick` at `INVOKE runAllTasks` with `shift = AFTER`. So is Fabric's client gametest harness:
+its `postRunTasksHook` runs at the same instruction, and `postRunTasks` marks the client as able to
+accept tasks, enters a `Phaser` phase, and then blocks on `ThreadingImpl.CLIENT_SEMAPHORE.acquire()`
+until the test thread hands the frame back. Applied closer to the call than this project's boundary,
+the entire park fell inside a phase named for Minecraft's task queue.
+
+How unstable that was is worth stating plainly: the spike moved from `CLIENT_TASKS` to
+`CLIENT_GIZMOS` when an unrelated mixin was added to this mod, because the two injections at that one
+instruction are ordered by Mixin's application order and nothing else.
+
+The stretch is now its own phase. On the worst traversal frame of a three-repeat run:
+
+```
+frame=2319 intervalMs=166.046 cpuMs=4.038 client_post_tasks=161.086ms/1 jvm_gc=45.000ms/3 \
+  render_frame=4.097ms/1 gpu_frame=2.162ms/1 client_tick=0.835ms/1 \
+  client_tasks=0.000ms/1 task_drain=0.000ms/1
+```
+
+161 of 166 ms is the harness. `task_drain` - the queue's own work, timed from inside `runAllTasks`
+where the park cannot reach it - is 0.000 ms, and the census names no tasks at all.
+
+**What this invalidates.** Every traversal worst-frame figure and every traversal 1% low in this
+document that predates this section was measured through that park. They are not measurements of
+Minecraft and should not be used. Medians, per-frame CPU time, and whole-phase averages are
+unaffected: the park spikes roughly one frame per run rather than costing every frame. The
+before/after comparison in *Cutting the per-frame CPU cost of binding and handle lookup* rests on
+medians and CPU time and stands.
+
+**What is left.** Once the harness frame is set aside, the worst genuine frames of a traversal repeat
+are 15 to 20 ms, and each is a collection pause:
+
+```
+frame=3689 intervalMs=19.873 cpuMs=19.823 render_frame=19.855ms/1 jvm_gc=17.000ms/1 \
+  gpu_frame=2.055ms/1 submit=0.012ms/1 buffer_map=0.007ms/14 0.6MiB
+```
+
+Two repeats of that run had worst intervals of 16.0 and 21.5 ms. So collection is the real remaining
+tail after all - not of the 170 ms spike, which it never was, but of a tail an order of magnitude
+smaller than this document has been quoting. The allocation behind it is vanilla chunk meshing;
+MetalCraft is 0.6% of allocation during traversal.
 
 ### Known gaps
 

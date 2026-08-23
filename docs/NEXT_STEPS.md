@@ -1,6 +1,6 @@
 # Next steps
 
-Last updated: 2026-08-23, after making the render-loop phases exhaustive on `metal-benchmark-and-perf`.
+Last updated: 2026-08-23, after finding that the traversal tail was the test harness, on `metal-benchmark-and-perf`.
 
 A handoff for whoever picks up the performance work. It records what is known, what is measured,
 what is still open, and which claims elsewhere in this repository are now out of date. Read
@@ -43,10 +43,10 @@ Each phase logs `Metal benchmark stall:` lines - a whole-phase total, a worst-1%
 eight worst individual frames:
 
 ```
-phase=traversal frame=349 intervalMs=151.931 cpuMs=4.214 outsideLoopMs=0.044 \
-  client_tasks=146.167ms/1 jvm_gc=50.000ms/4 render_frame=4.289ms/1 gpu_frame=4.182ms/1 \
-  client_tick=1.050ms/1 client_gizmos=0.372ms/2 acquire=0.030ms/1 submit=0.016ms/1 \
-  unphasedMs=-0.004
+phase=traversal frame=2319 intervalMs=166.046 cpuMs=4.038 outsideLoopMs=0.025 \
+  client_post_tasks=161.086ms/1 jvm_gc=45.000ms/3 render_frame=4.097ms/1 gpu_frame=2.162ms/1 \
+  client_tick=0.835ms/1 acquire=0.029ms/1 submit=0.013ms/1 client_tasks=0.000ms/1 \
+  task_drain=0.000ms/1 unphasedMs=-0.002
 ```
 
 - `intervalMs` - render-loop tail to tail, the number a player feels.
@@ -65,9 +65,16 @@ phase=traversal frame=349 intervalMs=151.931 cpuMs=4.214 outsideLoopMs=0.044 \
 
 *Phases* partition `runTick` end to end, and only these are subtracted to get `unphasedMs`. In the
 order the loop crosses them: `client_pre_render` (the close check, a pending reload, the presence
-handler), `client_packets`, `client_tasks`, then `client_gizmos` and `client_tick` alternating once
-per tick the frame catches up on, then `client_pre_frame` (the per-frame gizmo collection, sound, and
-mouse), `render_frame`, and `client_post_render`.
+handler), `client_packets`, `client_tasks`, `client_post_tasks`, then `client_tick` and
+`client_gizmos` alternating once per tick the frame catches up on, then `client_pre_frame` (the
+per-frame gizmo collection, sound, and mouse), `render_frame`, and `client_post_render`.
+
+**`client_post_tasks` is the test harness, not the game.** Fabric's client gametest harness hands
+each frame to the test thread there, blocking the render thread on a semaphore, and it is where the
+tail this project spent months attributing to Minecraft's task queue actually lives. Every
+measurement here runs under that harness, so treat a large `client_post_tasks` as the harness unless
+you have a reason not to. `harness_handoff` covers only the phaser part of the handoff, which is the
+small part; the semaphore wait dominates and shows up in the phase.
 
 They are recorded by a cursor rather than by a begin/end pair each - `MetalStallProbe.split` closes
 one stretch and opens the next at the same instant. That is what makes them exhaustive: pairs leave
@@ -83,10 +90,14 @@ milliseconds twice - it drove the residual to -42 ms on the frame quoted above.
 the interval and never subtracted from it. Command buffers overlap on the GPU and are attributed to
 whichever frame they finished in, so read it as occupancy, not as this frame's GPU cost.
 
+Read `task_drain` rather than `client_tasks` for the task queue itself: it is timed from inside
+`runAllTasks`, which is the one place the harness's park cannot reach.
+
 Each phase also logs a `tasks` line, from `MetalTaskCensus`: a total, then the kinds of task the
 main-thread queue ran, keyed by the submitting class. `tasks total=0.000ms/0` means the queue was
 empty, not that the census failed - the lifecycle test asserts against that by submitting four empty
-tasks and requiring them back.
+tasks, from the test thread so that they go through the queue rather than running inline, and
+requiring them back.
 
 Sources are defined in `MetalStallProbe.Source`, and `isPhase()` is what sorts them. Adding a detail
 is three lines: an enum constant and a `begin()`/`end()` pair at the call site. Adding a *phase*
@@ -109,82 +120,61 @@ Only render-thread events are recorded, deliberately.
 
 ## Open work
 
-### 1. The traversal stall is Minecraft's main-thread task queue
+### 1. The remaining tail is collection, and it is 15-20 ms rather than 170 ms
 
-**Status:** located, not fixed. Still the largest remaining item, and the previous diagnosis was
-wrong.
+**Status:** measured. Much smaller than this file has said all along, because the number it was
+being compared against was not real.
 
-**What it is.** The worst traversal frame of a run, with the render loop fully divided into phases:
+**What the traversal tail actually is.** With the benchmark harness's own stall separated out (see
+below), the worst genuine frames of a traversal repeat look like this:
 
 ```
-frame=955 intervalMs=175.731 cpuMs=3.956 outsideLoopMs=0.040 client_tasks=170.137ms/1 \
-  jvm_gc=47.000ms/3 render_frame=4.016ms/1 gpu_frame=3.506ms/1 client_tick=1.210ms/1 \
-  acquire=0.027ms/1 submit=0.015ms/1 buffer_map=0.010ms/15 0.6MiB upload_copy=0.005ms/2
+frame=3689 intervalMs=19.873 cpuMs=19.823 outsideLoopMs=0.015 render_frame=19.855ms/1 \
+  jvm_gc=17.000ms/1 gpu_frame=2.055ms/1 submit=0.012ms/1 buffer_map=0.007ms/14 0.6MiB
 ```
 
-170 of the 175 ms is `Minecraft.runAllTasks()` - the main-thread task queue, which during terrain
-streaming is dominated by chunk mesh uploads scheduled from worker threads. Rendering the frame took
-4 ms. The Metal calls inside that 170 ms are negligible: 0.010 ms of buffer mapping across fifteen
-maps, 0.005 ms of upload copying. **The stall is neither the render path nor the collector.**
+15 to 20 ms intervals, of which 12 to 17 ms is a collection pause, landing inside `render_frame`
+because that is where the allocation is. Two repeats of a three-repeat run had worst intervals of
+16.0 and 21.5 ms. That is the whole of the remaining tail.
 
-**Why the previous diagnosis was wrong, and how to avoid repeating it.** The handoff before this one
-said the tail was garbage collection, on the strength of collection dominating the worst-1% totals -
-208 ms of 215 ms. Two things falsify that:
+**The 170 ms spike was the test harness.** It is gone from this list because it was never the game.
+`CLIENT_TASKS` closed at `INVOKE runAllTasks` with `shift = AFTER`, and Fabric's client gametest
+harness parks the render thread at that exact instruction - `postRunTasks` hands the frame to the
+test thread and blocks on `ThreadingImpl.CLIENT_SEMAPHORE.acquire()`. Being applied closer to the
+call, its park fell inside a phase named for Minecraft's task queue.
 
-1. Running the identical capture under ZGC removed collection from the tail almost entirely: 0.000 ms
-   attributed across the worst 1% of traversal frames, against 154 ms under G1. **The spike survived
-   at 158 ms.** A collector change that eliminates the supposed cause and leaves the effect intact is
-   about as clean a refutation as this harness can produce.
-2. Even under G1, the worst single frame attributed only 47 ms of its 175 ms to collection. The
-   worst-1% *total* was misleading because it aggregates many frames, and because collection time
-   overlaps whatever was running - the pauses land inside the task queue rather than instead of it.
+The stretch is now its own phase, `client_post_tasks`, and the frame reads unambiguously:
 
-Collection was a correlate: allocation pressure from the same meshing work that fills the queue.
+```
+frame=2319 intervalMs=166.046 cpuMs=4.038 client_post_tasks=161.086ms/1 jvm_gc=45.000ms/3 \
+  render_frame=4.097ms/1 gpu_frame=2.162ms/1 client_tick=0.835ms/1 \
+  client_tasks=0.000ms/1 task_drain=0.000ms/1
+```
 
-**The instrument for step 1 now exists, and the stall did not reproduce under it.**
-`MetalTaskCensus`, fed by `BlockableEventLoopTaskCensusMixin` on `BlockableEventLoop.doRunTask`,
-counts every task the render thread runs during a capture, keyed by the task's own class - which for
-Minecraft's lambdas names the method that submitted it. Each phase now logs a `tasks` line beside its
-stall lines, totals first.
+161 of 166 ms is the harness. The task queue's own drain, timed from inside `runAllTasks` where the
+park cannot reach it, is **0.000 ms**. Across five runs the task census counted zero tasks in any
+phase, and a poll counter put the queue at zero deliveries in some 24,000 polls.
 
-Across three benchmark runs it recorded **nothing**: `tasks total=0.000ms/0` in every phase, with
-`client_tasks` at 0.24-0.63 ms across roughly 2350 drains, which is the cost of peeking at an empty
-queue and returning. The 170 ms spike did not occur in any of those runs. Two things follow.
+**What this invalidates.** Every traversal worst-frame and 1% low this project has published was
+measured through that park, so the tail figures in
+[APPLE_SILICON_PERFORMANCE.md](APPLE_SILICON_PERFORMANCE.md) predating this are not measurements of
+Minecraft. Medians, CPU per frame, and the phase averages are unaffected - the park is a spike on
+roughly one frame per run, not a distributed cost.
 
-*The census is not silently broken.* That was the first suspicion, and it is ruled out rather than
-assumed: the lifecycle test submits four empty tasks through `Minecraft.execute` during its capture
-and asserts the census counted at least four. It reports
-`tasks total=0.013ms/4 dev.metalcraft.client.test.MetalLifecycleGameTest$$Lambda=0.013ms/4`, so both
-the counting and the naming work. That assertion is also the guard for the real risk here: this hooks
-an internal event-loop method rather than anything Blaze3D promises, and if Minecraft ever routes
-tasks elsewhere the instrument would otherwise go quiet and read as good news.
+**What to do about the collection tail:**
 
-*The stall is not a property of the settled traversal phase.* The capture that produced the 170 ms
-frame and the captures that produced nothing are the same scenario on the same machine; the harness
-waits for terrain to settle before every capture, and whatever fills the queue had finished by then
-in three runs out of four. So the next step is not more of the same run - it is to capture *during*
-streaming, before the settle wait, where the queue is by construction busy. The lifecycle capture
-already sits in that window and now prints its attribution, which makes it the cheapest place to
-start.
-
-**What to try, in order:**
-
-1. Capture with the census while terrain is still streaming, not after it settles, and read the
-   `tasks` line. Everything needed for this is in place.
-2. If they are chunk mesh uploads, the question becomes whether the backend can accept them without
-   the main thread - Blaze3D's threading rules decide that, not us - or whether the batch can be
-   bounded per frame. A frame that uploads 170 ms of mesh is a frame that should have uploaded some
-   of it later.
-3. JVM tuning is still worth measuring, but as a second-order effect now. ZGC did not fix the spike.
-   It may well help the 1% low - the traversal 1% low was 45.3 under G1 and 89.0 under ZGC - but
-   **that pair is not a valid comparison**: the G1 side was a single-repeat diagnostic run and both
-   were display-paced. Re-run it properly, three repeats each, back to back, before believing it.
+1. It is vanilla chunk meshing's allocation, not this renderer's - MetalCraft accounts for 0.6% of
+   allocation during traversal. The lever is JVM tuning, and it is now worth measuring properly
+   because the effect being looked for is 15 ms rather than being lost beside a 170 ms artefact.
+2. ZGC removed collection from the tail entirely in an earlier capture. The 1% low comparison that
+   went with it - 45.3 under G1 against 89.0 under ZGC - **is still not valid**: the G1 side was a
+   single-repeat diagnostic and both were display-paced. Re-run it three repeats each, back to back.
    G1 knobs left untested: `-XX:G1NewSizePercent`, `-XX:G1HeapRegionSize=16m` or `32m`,
-   `-XX:MaxGCPauseMillis`. Note that ZGC is generational by default on the JDK 25 this builds
-   against; `-XX:+ZGenerational` was removed in 24 and is ignored with a warning.
-
-**MetalCraft is not in this path.** It accounts for 0.6% of allocation during traversal and
-0.015 ms of the 170 ms spike. Do not spend effort shaving the renderer for the sake of this item.
+   `-XX:MaxGCPauseMillis`. ZGC is generational by default on the JDK 25 this builds against;
+   `-XX:+ZGenerational` was removed in 24 and is ignored with a warning.
+3. A cleaner measurement would be a harness that does not park the render thread at all. Nothing here
+   needs it now that the park is attributed, but it is the only way to see the tail a real player
+   sees rather than the tail plus a test artefact.
 
 ### 2. Command batching
 

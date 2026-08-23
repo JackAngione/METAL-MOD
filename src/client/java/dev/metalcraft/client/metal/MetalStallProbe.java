@@ -101,10 +101,25 @@ public final class MetalStallProbe {
 		/** One client game tick. A frame runs up to ten of them before it renders anything. */
 		CLIENT_TICK,
 		/**
+		 * Between the task drain returning and the tick section starting.
+		 *
+		 * <p>Minecraft puts little here - profiler bookkeeping, the texture manager's tick, and the
+		 * first per-tick gizmo collection. Under the Fabric client gametest harness it is where the
+		 * frame is handed to the test thread, and that dominates it: {@code postRunTasks} sets the
+		 * client to accept tasks, enters a {@code Phaser} phase, and then blocks on
+		 * {@code CLIENT_SEMAPHORE.acquire()} until the test thread gives the frame back. The
+		 * semaphore wait is the long part - {@link #HARNESS_HANDOFF} covers only the phaser - and on
+		 * a 177 ms traversal frame this phase held 170.8 ms of it.
+		 *
+		 * <p>Every measurement this project has taken runs under that harness, so read this phase as
+		 * the harness unless the run is not a gametest.
+		 */
+		CLIENT_POST_TASKS,
+		/**
 		 * The tick section's own overhead, outside the ticks themselves.
 		 *
-		 * <p>The per-tick gizmo collections opened and closed around each {@code tick()}, the
-		 * texture manager's tick, and draining the gizmos the ticks produced.
+		 * <p>The per-tick gizmo collections opened and closed around each {@code tick()} after the
+		 * first, and draining the gizmos the ticks produced.
 		 */
 		CLIENT_GIZMOS,
 		/**
@@ -157,8 +172,8 @@ public final class MetalStallProbe {
 		 */
 		public boolean isPhase() {
 			return switch (this) {
-				case CLIENT_PRE_RENDER, CLIENT_PACKETS, CLIENT_TASKS, CLIENT_TICK, CLIENT_GIZMOS,
-					CLIENT_PRE_FRAME, RENDER_FRAME, CLIENT_POST_RENDER -> true;
+				case CLIENT_PRE_RENDER, CLIENT_PACKETS, CLIENT_TASKS, CLIENT_POST_TASKS, CLIENT_TICK,
+					CLIENT_GIZMOS, CLIENT_PRE_FRAME, RENDER_FRAME, CLIENT_POST_RENDER -> true;
 				default -> false;
 			};
 		}
