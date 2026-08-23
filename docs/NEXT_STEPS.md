@@ -132,11 +132,13 @@ Collection was a correlate: allocation pressure from the same meshing work that 
    the main thread - Blaze3D's threading rules decide that, not us - or whether the batch can be
    bounded per frame. A frame that uploads 170 ms of mesh is a frame that should have uploaded some
    of it later.
-3. JVM tuning is still worth measuring, but as a second-order effect now. ZGC did not fix the spike;
-   it may still help the 1% low, which it did not obviously do either. G1 knobs left untested:
-   `-XX:G1NewSizePercent`, `-XX:G1HeapRegionSize=16m` or `32m`, `-XX:MaxGCPauseMillis`. Note that
-   ZGC is generational by default on the JDK 25 this builds against; `-XX:+ZGenerational` was removed
-   in 24 and is ignored with a warning.
+3. JVM tuning is still worth measuring, but as a second-order effect now. ZGC did not fix the spike.
+   It may well help the 1% low - the traversal 1% low was 45.3 under G1 and 89.0 under ZGC - but
+   **that pair is not a valid comparison**: the G1 side was a single-repeat diagnostic run and both
+   were display-paced. Re-run it properly, three repeats each, back to back, before believing it.
+   G1 knobs left untested: `-XX:G1NewSizePercent`, `-XX:G1HeapRegionSize=16m` or `32m`,
+   `-XX:MaxGCPauseMillis`. Note that ZGC is generational by default on the JDK 25 this builds
+   against; `-XX:+ZGenerational` was removed in 24 and is ignored with a warning.
 
 **MetalCraft is not in this path.** It accounts for 0.6% of allocation during traversal and
 0.015 ms of the 170 ms spike. Do not spend effort shaving the renderer for the sake of this item.
