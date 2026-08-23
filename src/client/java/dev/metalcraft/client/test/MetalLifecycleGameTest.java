@@ -20,6 +20,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.client.GraphicsPreset;
 import net.minecraft.client.InactivityFpsLimit;
+import dev.metalcraft.client.metal.MetalTaskCensus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.TextureFilteringMethod;
@@ -42,6 +43,8 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 
 	/** Frames discarded at the start of every capture while the client resumes free running. */
 	private static final int CAPTURE_WARMUP_FRAMES = 30;
+	/** Empty tasks submitted during the lifecycle capture to prove the task census records. */
+	private static final int CENSUS_PROBE_TASKS = 4;
 	private static final int CHUNK_LOAD_TIMEOUT_TICKS = 24000;
 	private static final double MINIMUM_LOADED_CHUNK_FRACTION = 0.75;
 	/**
@@ -118,9 +121,39 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			LOGGER.info("Metal lifecycle validation: screenshot written to {}", screenshot.toAbsolutePath());
 
 			context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
+			// A known task through the real queue, so the census is proved to be recording rather
+			// than merely silent. Benchmark phases wait for terrain to settle and then routinely
+			// drain an empty queue, which reads identically to a census whose injection point has
+			// drifted onto a method Minecraft no longer routes tasks through - and that is the
+			// failure this instrument is most exposed to, because it hooks an internal event-loop
+			// method rather than anything Blaze3D promises. The tasks are empty, so they cost the
+			// surrounding measurement nothing.
+			context.runOnClient(client -> {
+				for (int submission = 0; submission < CENSUS_PROBE_TASKS; submission++) {
+					client.execute(() -> { });
+				}
+			});
 			context.waitTicks(PERFORMANCE_SAMPLE_TICKS);
 			MetalFrameMetrics.Phase metrics = context.computeOnClient(ignored -> MetalFrameMetrics.endCapture("lifecycle"));
 			LOGGER.info("Metal lifecycle performance: backend={} {}", backend, metrics.toLogLine());
+			// The lifecycle capture runs while the world is still streaming, which the benchmark
+			// phases deliberately do not - they wait for terrain to settle first. So this is the one
+			// place in the suite where the main-thread task queue is reliably busy, and printing its
+			// attribution here is what makes a quiet benchmark readable as a quiet queue rather than
+			// as a probe that stopped working.
+			for (String line : metrics.toAttributionLines()) {
+				LOGGER.info("Metal lifecycle stall: {}", line);
+			}
+			long censusTasks = metrics.taskKinds().stream()
+				.filter(kind -> "total".equals(kind.name()))
+				.mapToLong(MetalTaskCensus.TaskKind::count)
+				.findFirst()
+				.orElse(0L);
+			if (censusTasks < CENSUS_PROBE_TASKS) {
+				throw new AssertionError("The main-thread task census recorded " + censusTasks
+					+ " tasks, fewer than the " + CENSUS_PROBE_TASKS
+					+ " submitted to prove it records at all; its injection point has probably moved");
+			}
 			if (metrics.frames() < 120) {
 				throw new AssertionError("Lifecycle captured too few complete render frames: " + metrics.frames());
 			}

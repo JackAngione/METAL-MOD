@@ -1,6 +1,7 @@
 package dev.metalcraft.client.test;
 
 import dev.metalcraft.client.metal.MetalStallProbe;
+import dev.metalcraft.client.metal.MetalTaskCensus;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
@@ -73,6 +74,7 @@ public final class MetalFrameMetrics {
 		frameStartNs = 0L;
 		previousCollectionCount = collectionCount();
 		previousCollectionMillis = collectionMillis();
+		MetalTaskCensus.reset();
 		MetalStallProbe.setEnabled(true);
 	}
 
@@ -128,9 +130,12 @@ public final class MetalFrameMetrics {
 
 	public static synchronized Phase endCapture(final String name) {
 		capturing = false;
+		// Taken before the probe is disabled, because the census is guarded on the same flag.
+		List<MetalTaskCensus.TaskKind> tasks = MetalTaskCensus.take();
 		MetalStallProbe.setEnabled(false);
 		return Phase.of(name, Arrays.copyOf(cpuFrameTimes, size), Arrays.copyOf(frameIntervals, size),
-			Arrays.copyOf(outsideLoopTimes, size), Arrays.copyOf(stalls, size * MetalStallProbe.slots()));
+			Arrays.copyOf(outsideLoopTimes, size), Arrays.copyOf(stalls, size * MetalStallProbe.slots()),
+			tasks);
 	}
 
 	/** One source's contribution to a set of frames. */
@@ -159,14 +164,16 @@ public final class MetalFrameMetrics {
 			double phases = 0.0;
 			for (StallTotal stall : this.stalls) {
 				text.append(' ').append(stall.describe());
-				// Only the four phases partition the loop; details sit inside them and a collection
-				// pause can land in any of them, so summing everything would subtract time twice.
+				// Only phases partition the loop; details sit inside them and a collection pause can
+				// land in any of them, so summing everything would subtract time twice.
 				if (stall.source().isPhase()) {
 					phases += stall.totalMs();
 				}
 			}
-			// What is left of the loop once its four phases are removed: the odds and ends of
-			// runTick that no phase covers, such as sound and mouse handling.
+			// What is left of the loop once its phases are removed. The phases cover runTick from
+			// its first statement to its last, so this is only the sliver outside runTick itself,
+			// and it reads as a few microseconds either side of zero. Anything larger means a
+			// boundary has stopped matching the code it was aimed at.
 			return text.append(String.format(Locale.ROOT, " unphasedMs=%.3f",
 				this.intervalMs - this.outsideLoopMs - phases)).toString();
 		}
@@ -199,13 +206,15 @@ public final class MetalFrameMetrics {
 		double p99OutsideLoopMs,
 		List<StallTotal> phaseStalls,
 		List<StallTotal> tailStalls,
-		List<FrameDetail> worstFrames
+		List<FrameDetail> worstFrames,
+		List<MetalTaskCensus.TaskKind> taskKinds
 	) {
 		static Phase of(final String name, final long[] cpuFrameTimesNs, final long[] frameIntervalsNs,
-				final long[] outsideLoopNs, final long[] stallsNs) {
+				final long[] outsideLoopNs, final long[] stallsNs,
+				final List<MetalTaskCensus.TaskKind> taskKinds) {
 			if (cpuFrameTimesNs.length == 0) {
 				return new Phase(name, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-					List.of(), List.of(), List.of());
+					List.of(), List.of(), List.of(), taskKinds);
 			}
 			long total = 0L;
 			for (long interval : frameIntervalsNs) {
@@ -266,7 +275,8 @@ public final class MetalFrameMetrics {
 				percentile(sortedOutside, 0.99) / 1_000_000.0,
 				sum(stallsNs, all),
 				sum(stallsNs, tail),
-				List.copyOf(worstFrames)
+				List.copyOf(worstFrames),
+				taskKinds
 			);
 		}
 
@@ -340,6 +350,8 @@ public final class MetalFrameMetrics {
 			List<String> lines = new ArrayList<>();
 			lines.add("phase=" + this.name + " whole-phase " + describe(this.phaseStalls));
 			lines.add("phase=" + this.name + " worst-1% " + describe(this.tailStalls));
+			lines.add("phase=" + this.name + " tasks "
+				+ String.join(" ", this.taskKinds.stream().map(MetalTaskCensus.TaskKind::describe).toList()));
 			for (FrameDetail frame : this.worstFrames) {
 				lines.add("phase=" + this.name + " " + frame.describe());
 			}
@@ -360,14 +372,16 @@ public final class MetalFrameMetrics {
 					+ "\"p50IntervalMs\":%.3f,\"p99IntervalMs\":%.3f,\"worstIntervalMs\":%.3f,"
 					+ "\"p50AcquireMs\":%.3f,\"p99AcquireMs\":%.3f,"
 					+ "\"p50OutsideLoopMs\":%.3f,\"p99OutsideLoopMs\":%.3f,"
-					+ "\"phaseStalls\":[%s],\"worstOnePercentStalls\":[%s],\"worstFrames\":[%s]}",
+					+ "\"phaseStalls\":[%s],\"worstOnePercentStalls\":[%s],\"worstFrames\":[%s],"
+					+ "\"tasks\":[%s]}",
 				this.name, this.frames, this.durationSeconds, this.averageFps, this.onePercentLowFps,
 				this.pointOnePercentLowFps, this.p50CpuMs, this.p95CpuMs, this.p99CpuMs,
 				this.p50IntervalMs, this.p99IntervalMs, this.worstIntervalMs, this.p50AcquireMs, this.p99AcquireMs,
 				this.p50OutsideLoopMs, this.p99OutsideLoopMs,
 				String.join(",", this.phaseStalls.stream().map(StallTotal::toJson).toList()),
 				String.join(",", this.tailStalls.stream().map(StallTotal::toJson).toList()),
-				String.join(",", this.worstFrames.stream().map(FrameDetail::toJson).toList()));
+				String.join(",", this.worstFrames.stream().map(FrameDetail::toJson).toList()),
+				String.join(",", this.taskKinds.stream().map(MetalTaskCensus.TaskKind::toJson).toList()));
 		}
 	}
 }

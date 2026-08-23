@@ -1,6 +1,6 @@
 # Next steps
 
-Last updated: 2026-08-22, after the render-path CPU work on `metal-benchmark-and-perf`.
+Last updated: 2026-08-23, after making the render-loop phases exhaustive on `metal-benchmark-and-perf`.
 
 A handoff for whoever picks up the performance work. It records what is known, what is measured,
 what is still open, and which claims elsewhere in this repository are now out of date. Read
@@ -43,9 +43,10 @@ Each phase logs `Metal benchmark stall:` lines - a whole-phase total, a worst-1%
 eight worst individual frames:
 
 ```
-phase=traversal frame=955 intervalMs=175.731 cpuMs=3.956 outsideLoopMs=0.040 \
-  client_tasks=170.137ms/1 jvm_gc=47.000ms/3 render_frame=4.016ms/1 gpu_frame=3.506ms/1 \
-  client_tick=1.210ms/1 acquire=0.027ms/1 submit=0.015ms/1 unphasedMs=0.328
+phase=traversal frame=349 intervalMs=151.931 cpuMs=4.214 outsideLoopMs=0.044 \
+  client_tasks=146.167ms/1 jvm_gc=50.000ms/4 render_frame=4.289ms/1 gpu_frame=4.182ms/1 \
+  client_tick=1.050ms/1 client_gizmos=0.372ms/2 acquire=0.030ms/1 submit=0.016ms/1 \
+  unphasedMs=-0.004
 ```
 
 - `intervalMs` - render-loop tail to tail, the number a player feels.
@@ -55,13 +56,23 @@ phase=traversal frame=955 intervalMs=175.731 cpuMs=3.956 outsideLoopMs=0.040 \
   find.
 - `outsideLoopMs` - between the previous loop ending and this one starting. Near zero means the
   render thread was inside `runTick` the whole time.
-- `unphasedMs` - `interval - outsideLoop - the four phases`. What is left of the loop that no phase
-  covers, such as sound and mouse handling. It should be small.
+- `unphasedMs` - `interval - outsideLoop - the phases`. The phases now partition `runTick` from its
+  first statement to its last, so this is only the sliver of the loop outside `runTick` itself. It
+  measures between -0.004 and -0.001 ms per frame; anything larger means a phase boundary has
+  stopped matching the code it was aimed at.
 
 **Sources come in three kinds, and mixing them up is what made the interval impossible to balance.**
 
-*Phases* partition `runTick` end to end: `client_packets`, `client_tasks`, `client_tick`, and
-`render_frame`. Only these are subtracted to get `unphasedMs`.
+*Phases* partition `runTick` end to end, and only these are subtracted to get `unphasedMs`. In the
+order the loop crosses them: `client_pre_render` (the close check, a pending reload, the presence
+handler), `client_packets`, `client_tasks`, then `client_gizmos` and `client_tick` alternating once
+per tick the frame catches up on, then `client_pre_frame` (the per-frame gizmo collection, sound, and
+mouse), `render_frame`, and `client_post_render`.
+
+They are recorded by a cursor rather than by a begin/end pair each - `MetalStallProbe.split` closes
+one stretch and opens the next at the same instant. That is what makes them exhaustive: pairs leave
+the gaps between them uncounted, and a pair whose end sits behind a branch never fires at all, which
+matters because `runTick` skips packets, tasks and ticks entirely when `advanceGameTime` is false.
 
 *Details* happen inside a phase and explain it: `acquire`, `submit`, `present`,
 `level_end_frame`, `buffer_map`, `upload_copy`, `jvm_gc`, and the rest. A collection pause can land
@@ -72,9 +83,16 @@ milliseconds twice - it drove the residual to -42 ms on the frame quoted above.
 the interval and never subtracted from it. Command buffers overlap on the GPU and are attributed to
 whichever frame they finished in, so read it as occupancy, not as this frame's GPU cost.
 
+Each phase also logs a `tasks` line, from `MetalTaskCensus`: a total, then the kinds of task the
+main-thread queue ran, keyed by the submitting class. `tasks total=0.000ms/0` means the queue was
+empty, not that the census failed - the lifecycle test asserts against that by submitting four empty
+tasks and requiring them back.
+
 Sources are defined in `MetalStallProbe.Source`, and `isPhase()` is what sorts them. Adding a detail
-is three lines: an enum constant and a `begin()`/`end()` pair at the call site. Only render-thread
-events are recorded, deliberately.
+is three lines: an enum constant and a `begin()`/`end()` pair at the call site. Adding a *phase*
+means splitting an existing one, in `MinecraftTickPhaseMixin` - insert a boundary that splits the
+cursor into the new source, never a fresh begin/end pair, or the partition stops being exhaustive.
+Only render-thread events are recorded, deliberately.
 
 ## Environment pitfalls that have already cost time
 
@@ -123,11 +141,36 @@ said the tail was garbage collection, on the strength of collection dominating t
 
 Collection was a correlate: allocation pressure from the same meshing work that fills the queue.
 
+**The instrument for step 1 now exists, and the stall did not reproduce under it.**
+`MetalTaskCensus`, fed by `BlockableEventLoopTaskCensusMixin` on `BlockableEventLoop.doRunTask`,
+counts every task the render thread runs during a capture, keyed by the task's own class - which for
+Minecraft's lambdas names the method that submitted it. Each phase now logs a `tasks` line beside its
+stall lines, totals first.
+
+Across three benchmark runs it recorded **nothing**: `tasks total=0.000ms/0` in every phase, with
+`client_tasks` at 0.24-0.63 ms across roughly 2350 drains, which is the cost of peeking at an empty
+queue and returning. The 170 ms spike did not occur in any of those runs. Two things follow.
+
+*The census is not silently broken.* That was the first suspicion, and it is ruled out rather than
+assumed: the lifecycle test submits four empty tasks through `Minecraft.execute` during its capture
+and asserts the census counted at least four. It reports
+`tasks total=0.013ms/4 dev.metalcraft.client.test.MetalLifecycleGameTest$$Lambda=0.013ms/4`, so both
+the counting and the naming work. That assertion is also the guard for the real risk here: this hooks
+an internal event-loop method rather than anything Blaze3D promises, and if Minecraft ever routes
+tasks elsewhere the instrument would otherwise go quiet and read as good news.
+
+*The stall is not a property of the settled traversal phase.* The capture that produced the 170 ms
+frame and the captures that produced nothing are the same scenario on the same machine; the harness
+waits for terrain to settle before every capture, and whatever fills the queue had finished by then
+in three runs out of four. So the next step is not more of the same run - it is to capture *during*
+streaming, before the settle wait, where the queue is by construction busy. The lifecycle capture
+already sits in that window and now prints its attribution, which makes it the cheapest place to
+start.
+
 **What to try, in order:**
 
-1. Find out what those tasks are. `runAllTasks` drains `Minecraft`'s queue; the interesting question
-   is which submitters dominate during traversal. A JFR recording filtered to the render thread
-   during a spike, or a temporary counter keyed by task class, will name them.
+1. Capture with the census while terrain is still streaming, not after it settles, and read the
+   `tasks` line. Everything needed for this is in place.
 2. If they are chunk mesh uploads, the question becomes whether the backend can accept them without
    the main thread - Blaze3D's threading rules decide that, not us - or whether the batch can be
    bounded per frame. A frame that uploads 170 ms of mesh is a frame that should have uploaded some
@@ -143,20 +186,7 @@ Collection was a correlate: allocation pressure from the same meshing work that 
 **MetalCraft is not in this path.** It accounts for 0.6% of allocation during traversal and
 0.015 ms of the 170 ms spike. Do not spend effort shaving the renderer for the sake of this item.
 
-### 2. A second stall outside every phase
-
-**Status:** newly visible, uninvestigated.
-
-With the loop divided into phases, one 50 ms frame in a pan capture attributed almost nothing to any
-of them - `render_frame=4.036ms`, `client_tick=0.703ms`, tasks and packets at zero - and 45.8 ms to
-`unphasedMs`. That is the stretch of `runTick` no phase covers: the presence handler, gizmo
-collection, `soundManager.updateSource`, and `mouseHandler.handleAccumulatedMovement`.
-
-It is a smaller and rarer stall than item 1 and it is also not ours, but it was invisible before and
-it is cheap to chase: bracket that section the way the four phases are bracketed, in
-`MinecraftTickPhaseMixin`.
-
-### 3. Command batching
+### 2. Command batching
 
 **Status:** open, and now the largest item that is actually ours.
 
@@ -176,11 +206,17 @@ overload loops in Java and crosses JNI per draw, and the Java multi-draw paths b
 primitive arrays before crossing. Nothing in Minecraft 26.2 calls either - `drawMultipleIndexed` is
 the only multi-draw entry point the client uses. Fix them when a caller appears.
 
-The registry's lookup lock is also still a single global `NSLock`, taken on every command. The
-lookups behind it are now cheap, so the lock is the remaining shared cost; shard it or remove it
-from the render-thread path.
+The registry's lookup lock is a single global lock taken on every command, and it is now an
+`os_unfair_lock` rather than an `NSLock`. With the lookups behind it reduced to a bounds check and a
+few field reads, the `objc_msgSend` plus `pthread_mutex` round-trip that `NSLock` charges was most of
+what a lookup cost; the replacement is an atomic compare-and-swap when uncontended, and it dropped
+the `pthread_once` that guarded the lock's lazy allocation off the same path. **This was not measured
+as a win** - it is below what the harness can resolve against an 8-10% spread, and it is recorded
+here as a cost removed, not as a speedup. What is still open is whether the lock should exist on the
+render-thread path at all: sharding it by slot, or giving lookups a lock-free read path, is the next
+step if command batching does not make the question moot by taking the lock once per batch.
 
-### 4. GPU timing below the command buffer
+### 3. GPU timing below the command buffer
 
 **Status:** partly done.
 
@@ -198,9 +234,14 @@ reference.
 
 While you are there: the near-constant ~4.55 ms acquire in that run is worth its own look. Display
 sync was off and the frame rate was uncapped, so a constant wait points at `CAMetalLayer`'s drawable
-pool rather than at the display. `maximumDrawableCount` is not currently set.
+pool rather than at the display. **The obvious knob is not available**: an earlier draft of this file
+said `maximumDrawableCount` was unset, and it is not - `MCMetalSurface`'s initialiser has set it to
+`3` since the initial commit, and `3` is both the default and the largest value `CAMetalLayer`
+accepts. There is no deeper pool to ask for, so the wait has to be explained some other way: three
+drawables in flight and a constant wait means the presentation side is retiring them at a fixed
+rate, which points at the compositor, not at pool depth.
 
-### 5. Ranked plan items still open
+### 4. Ranked plan items still open
 
 From `APPLE_SILICON_PERFORMANCE.md`, with current status:
 
@@ -214,7 +255,7 @@ From `APPLE_SILICON_PERFORMANCE.md`, with current status:
 - **Items 4-7.** Shader library/PSO caching and binary archives; argument buffers and ICBs;
   direct-to-drawable final pass; private heaps and aliasing. All untouched, all still ranked.
 
-### 6. Milestone 3, shader-ready API
+### 5. Milestone 3, shader-ready API
 
 Three items remain open in [ROADMAP.md](../ROADMAP.md) and are unrelated to performance: an example
 shader add-on rendering a full-screen pass, per-extension error isolation with failed-pipeline

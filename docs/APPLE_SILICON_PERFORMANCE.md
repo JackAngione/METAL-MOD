@@ -264,6 +264,16 @@ and nothing else, and it fell by about a quarter in every phase.
 repeats is still 175 ms. That tail is collection time driven by vanilla chunk meshing, and no change
 to the Metal backend addresses it.
 
+A fourth change followed from the second, and is recorded here without a measurement. Once a lookup
+was a bounds check and a few struct loads, the lock around it was the larger cost: an `NSLock` charges
+an `objc_msgSend` and a `pthread_mutex` round-trip on each of the two calls that guard every command,
+plus a `pthread_once` to construct it lazily. It is now an `os_unfair_lock` with a static
+initialiser - an atomic compare-and-swap when uncontended, and no `pthread_once` on the path at all.
+**This is a cost removed, not a demonstrated speedup.** The effect is well below what this harness
+resolves against an 8-10% spread, and no attempt was made to claim otherwise. The lock is still
+global, and whether it should be on the render-thread path at all is left open beside command
+batching, which would take it once per batch instead of once per command.
+
 ### The first GPU-side numbers, and a run that was neither CPU- nor GPU-bound
 
 `GPU_FRAME` was added to the stall probe from `MTLCommandBuffer`'s own GPU start and end times, and
@@ -336,9 +346,62 @@ This also forced the attribution model to grow a distinction it had been missing
 phases, which partition the loop and are the only ones subtracted from the interval; details, which
 sit inside a phase and explain it, collection pauses among them; and `gpu_frame`, which runs
 concurrently. Summing all three drove the residual to -42 ms on the frame above. With phases alone
-the frames balance to within about 0.01 ms, and a stall outside every phase - one 50 ms frame turned
-out to spend 46 ms in the sound and mouse handling between the tick loop and `renderFrame` - is now
-visible instead of hidden in a residual.
+the frames balanced to within about 0.01 ms - except for one 50 ms pan frame that attributed 45.8 ms
+to the residual and almost nothing to any phase.
+
+### Making the phases exhaustive, and what the residual was not
+
+The four phases above did not cover `runTick`; they covered four calls inside it. Everything between
+them - the presence handler, the per-tick gizmo collections opened and closed around each `tick()`,
+the per-frame gizmo collection, `soundManager.updateSource`, `mouseHandler.handleAccumulatedMovement`
+- fell into the residual, and so the 45.8 ms frame had four candidate explanations and no way to
+choose between them. This document previously named one of them, the sound and mouse handling, as
+though it had been measured. It had not been.
+
+Bracketing them the same way would not have fixed that. A begin/end pair per stretch still discards
+the gaps between the pairs, and `runTick` skips packets, tasks and ticks wholesale when
+`advanceGameTime` is false, so a pair whose end sits inside that branch never fires and leaves its
+start to be consumed by some later frame. The phases are recorded by a cursor instead: each boundary
+closes the stretch that ended and opens the next at the same instant, via `MetalStallProbe.split`.
+Every nanosecond between the first boundary and the last then lands in exactly one phase, whichever
+branches the frame took.
+
+Measured over a full run, the residual it leaves is between -0.004 and -0.001 ms per frame, against
+45.8 ms before. And the stretch this document had guessed at is not where time goes: across 2353
+traversal frames, `client_pre_frame` - the per-frame gizmo collection, sound, and mouse together -
+totalled 7.3 ms, or 0.003 ms per frame, and its worst single frame was 0.005 ms. `client_gizmos`, the
+tick section's own overhead, totalled 102.5 ms across 2748 crossings. Neither is capable of a 45.8 ms
+spike. That capture was display-paced at 120 FPS and did not reproduce the spike, so this rules the
+stretch out as a routine cost rather than explaining the one frame; what it settles is that the
+residual is no longer a place a stall can hide.
+
+### Naming the tasks in the queue
+
+`CLIENT_TASKS` established that the traversal spike is the main-thread queue, and then could say
+nothing further: it brackets `runAllTasks` as a whole, and the queue is a `Queue<Runnable>` that any
+thread may submit to. `MetalTaskCensus` counts one level below it, keyed by the class of the runnable
+- Minecraft submits almost everything as a lambda, and a lambda's class names the method that created
+it. It hangs off `BlockableEventLoop.doRunTask`, the single point every queued task passes through,
+guarded on the render thread and on a capture being active, and counted only at the outermost level
+so that a task which drains the queue from inside itself is not charged twice.
+
+Three benchmark runs with it recorded nothing at all: `tasks total=0.000ms/0` in every phase, with
+`CLIENT_TASKS` at 0.24-0.63 ms across roughly 2350 drains - the cost of peeking at an empty queue.
+None of those runs reproduced the 170 ms spike either.
+
+An instrument that reports nothing is worth less than no instrument, because it reads as good news.
+So the lifecycle test submits four empty tasks through `Minecraft.execute` during its capture and
+asserts the census counted at least four; it reports
+`tasks total=0.013ms/4 dev.metalcraft.client.test.MetalLifecycleGameTest$$Lambda=0.013ms/4`. Counting
+and naming both work, and the assertion will fail loudly if a future version routes tasks past
+`doRunTask` - the real exposure, since this hooks an internal event-loop method rather than anything
+Blaze3D promises.
+
+What the silence means is that the queue is empty during the phases this harness measures. Every
+capture waits for terrain to settle first, and in three runs out of four whatever fills the queue had
+already finished by then. The stall lives in the streaming window the harness deliberately skips
+past, which is where the census should be pointed next; the lifecycle capture already sits in that
+window and now prints its attribution.
 
 ### Known gaps
 

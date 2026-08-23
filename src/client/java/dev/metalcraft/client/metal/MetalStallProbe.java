@@ -63,6 +63,13 @@ public final class MetalStallProbe {
 		 * {@code LevelRenderer.endFrame()}, which also runs after Minecraft's frame timer stops.
 		 */
 		LEVEL_END_FRAME,
+		/**
+		 * Everything in {@code runTick} before the packet queue is drained.
+		 *
+		 * <p>The close-request check, a pending resource reload, the social presence handler, and
+		 * advancing the delta tracker.
+		 */
+		CLIENT_PRE_RENDER,
 		/** Draining the client's queued network packets, before any rendering happens. */
 		CLIENT_PACKETS,
 		/**
@@ -71,6 +78,24 @@ public final class MetalStallProbe {
 		CLIENT_TASKS,
 		/** One client game tick. A frame runs up to ten of them before it renders anything. */
 		CLIENT_TICK,
+		/**
+		 * The tick section's own overhead, outside the ticks themselves.
+		 *
+		 * <p>The per-tick gizmo collections opened and closed around each {@code tick()}, the
+		 * texture manager's tick, and draining the gizmos the ticks produced.
+		 */
+		CLIENT_GIZMOS,
+		/**
+		 * Between the last tick and {@code renderFrame}: the per-frame main-thread gizmo
+		 * collection, {@code soundManager.updateSource}, and {@code mouseHandler
+		 * .handleAccumulatedMovement}.
+		 *
+		 * <p>This is the stretch that a 50 ms pan frame attributed 45.8 ms to when it was still
+		 * lumped into the unphased remainder.
+		 */
+		CLIENT_PRE_FRAME,
+		/** After {@code renderFrame} returns: the pause transition and the delta tracker's state. */
+		CLIENT_POST_RENDER,
 		/**
 		 * GPU busy time from command buffers that completed during the frame.
 		 *
@@ -96,7 +121,8 @@ public final class MetalStallProbe {
 		 * Whether this source is one of the stretches that {@code runTick} is divided into.
 		 *
 		 * <p>Sources come in three kinds, and confusing them is what made the frame interval
-		 * impossible to balance. These four <em>phases</em> partition the render loop end to end.
+		 * impossible to balance. These <em>phases</em> partition the render loop end to end, from
+		 * {@code runTick}'s first statement to its last.
 		 * Everything else is a <em>detail</em> that happens inside one of them - an acquire and a
 		 * present sit inside {@code RENDER_FRAME}, a buffer map sits inside whichever phase asked
 		 * for it, and a collection pause can land in any of them. {@code GPU_FRAME} is neither: it
@@ -108,7 +134,11 @@ public final class MetalStallProbe {
 		 * with a 47 ms collection inside it, and counting both drove the remainder to -42 ms.
 		 */
 		public boolean isPhase() {
-			return this == CLIENT_PACKETS || this == CLIENT_TASKS || this == CLIENT_TICK || this == RENDER_FRAME;
+			return switch (this) {
+				case CLIENT_PRE_RENDER, CLIENT_PACKETS, CLIENT_TASKS, CLIENT_TICK, CLIENT_GIZMOS,
+					CLIENT_PRE_FRAME, RENDER_FRAME, CLIENT_POST_RENDER -> true;
+				default -> false;
+			};
 		}
 	}
 
@@ -192,6 +222,28 @@ public final class MetalStallProbe {
 
 	public static void end(final Source source, final long startedNs) {
 		end(source, startedNs, 0L);
+	}
+
+	/**
+	 * Closes one stretch and opens the next at the same instant.
+	 *
+	 * <p>What {@link #begin()} and {@link #end} cannot do is partition a method: a begin/end pair
+	 * per stretch leaves the gaps between the pairs uncounted, and a pair whose end sits behind a
+	 * branch may never fire at all. A cursor handed from one boundary to the next has neither
+	 * problem - every nanosecond between the first boundary and the last lands in exactly one
+	 * source, whichever branches the frame took.
+	 *
+	 * @param startedNs the cursor, from {@link #begin()} or a previous split; {@code 0} records
+	 *     nothing and returns {@code 0}, so a disabled probe costs one comparison per boundary
+	 * @return the new cursor to pass to the next boundary
+	 */
+	public static long split(final Source source, final long startedNs) {
+		if (startedNs == 0L) {
+			return 0L;
+		}
+		long now = System.nanoTime();
+		record(source, now - startedNs, 1L, 0L);
+		return now;
 	}
 
 	/**
