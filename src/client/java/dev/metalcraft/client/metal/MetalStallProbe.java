@@ -73,9 +73,31 @@ public final class MetalStallProbe {
 		/** Draining the client's queued network packets, before any rendering happens. */
 		CLIENT_PACKETS,
 		/**
-		 * Running the main-thread task queue, which is what chunk mesh uploads are scheduled onto.
+		 * From the end of packet processing to the end of {@code runAllTasks}.
+		 *
+		 * <p>Named for the task queue, and under the Fabric client gametest harness it is mostly not
+		 * the task queue. The harness parks the render thread in {@code postRunTasksHook}, injected
+		 * at the same {@code INVOKE runAllTasks} that closes this phase and applied closer to the
+		 * call, so the handoff to the test thread lands inside this bracket. Read {@link #TASK_DRAIN}
+		 * for the queue itself and the difference between the two for the harness.
 		 */
 		CLIENT_TASKS,
+		/**
+		 * The main-thread task queue's drain, timed from inside {@code runAllTasks}.
+		 *
+		 * <p>A detail rather than a phase: it sits inside {@code CLIENT_TASKS} and explains the part
+		 * of it that is really Minecraft's.
+		 */
+		TASK_DRAIN,
+		/**
+		 * The client gametest harness blocking the render thread to hand the frame to the test thread.
+		 *
+		 * <p>Not the game's cost and not this renderer's, but it is inside the frame interval and it
+		 * is large - 175 ms of one 180 ms traversal frame. Without a column of its own it is charged
+		 * to whichever phase the injection order happens to put it in, which is how it spent months
+		 * being read as Minecraft's task queue.
+		 */
+		HARNESS_HANDOFF,
 		/** One client game tick. A frame runs up to ten of them before it renders anything. */
 		CLIENT_TICK,
 		/**
@@ -152,6 +174,8 @@ public final class MetalStallProbe {
 	private static final AtomicLongArray ACCUMULATORS = new AtomicLongArray(SLOTS);
 	/** Only ever touched by the render thread, under the {@link #isEnabled()} guard. */
 	private static final long[] GPU_WORK = new long[2];
+	/** Likewise: the handoff is bracketed from a static mixin, which has nowhere to put a field. */
+	private static long handoffStartedNs;
 	private static volatile Thread renderThread;
 
 	private MetalStallProbe() {
@@ -222,6 +246,16 @@ public final class MetalStallProbe {
 
 	public static void end(final Source source, final long startedNs) {
 		end(source, startedNs, 0L);
+	}
+
+	/** @see Source#HARNESS_HANDOFF */
+	public static void beginHandoff() {
+		handoffStartedNs = begin();
+	}
+
+	public static void endHandoff() {
+		end(Source.HARNESS_HANDOFF, handoffStartedNs);
+		handoffStartedNs = 0L;
 	}
 
 	/**

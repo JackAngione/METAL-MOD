@@ -55,6 +55,13 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	 */
 	private static final double SETTLE_PROGRESS_EPSILON = 0.005;
 	private static final int SETTLE_STALL_CHECKS = 8;
+	/**
+	 * How much terrain must be loaded before the streaming capture starts.
+	 *
+	 * <p>Late enough that the client is meshing and uploading in bulk rather than waiting on the
+	 * generator, and early enough that the settle wait cannot end before the window closes.
+	 */
+	private static final double STREAMING_CAPTURE_START_FRACTION = 0.25;
 	private static final int SITE_SEARCH_RADIUS = 1536;
 	private static final int SITE_CANDIDATE_STEP = 128;
 	/** Eye height of a standing player, used to place the camera where a player's actually is. */
@@ -121,18 +128,25 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			LOGGER.info("Metal lifecycle validation: screenshot written to {}", screenshot.toAbsolutePath());
 
 			context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
-			// A known task through the real queue, so the census is proved to be recording rather
-			// than merely silent. Benchmark phases wait for terrain to settle and then routinely
-			// drain an empty queue, which reads identically to a census whose injection point has
-			// drifted onto a method Minecraft no longer routes tasks through - and that is the
-			// failure this instrument is most exposed to, because it hooks an internal event-loop
-			// method rather than anything Blaze3D promises. The tasks are empty, so they cost the
-			// surrounding measurement nothing.
-			context.runOnClient(client -> {
-				for (int submission = 0; submission < CENSUS_PROBE_TASKS; submission++) {
-					client.execute(() -> { });
-				}
-			});
+			// Known tasks through the real queue, so the census is proved to be recording rather than
+			// merely silent. Benchmark phases routinely drain an empty queue, which reads identically
+			// to a census whose injection point has drifted onto a method Minecraft no longer routes
+			// tasks through - the failure this instrument is most exposed to, because it hooks an
+			// internal event-loop method rather than anything Blaze3D promises.
+			//
+			// Submitted from the test thread, deliberately. Minecraft.execute runs a task inline when
+			// the caller is already the game thread, so a probe submitted from inside runOnClient
+			// would exercise doRunTask without ever touching the queue - which is most of what is
+			// being claimed. From here the task is scheduled, polled, and then run. The tasks are
+			// empty, so they cost the surrounding measurement nothing.
+			//
+			// The instance is fetched through the harness rather than from Minecraft.getInstance(),
+			// which the gametest thread is forbidden to call; execute is what the guard exists to
+			// point callers at, and is safe from any thread.
+			Minecraft client = context.computeOnClient(instance -> instance);
+			for (int submission = 0; submission < CENSUS_PROBE_TASKS; submission++) {
+				client.execute(() -> { });
+			}
 			context.waitTicks(PERFORMANCE_SAMPLE_TICKS);
 			MetalFrameMetrics.Phase metrics = context.computeOnClient(ignored -> MetalFrameMetrics.endCapture("lifecycle"));
 			LOGGER.info("Metal lifecycle performance: backend={} {}", backend, metrics.toLogLine());
@@ -144,16 +158,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			for (String line : metrics.toAttributionLines()) {
 				LOGGER.info("Metal lifecycle stall: {}", line);
 			}
-			long censusTasks = metrics.taskKinds().stream()
-				.filter(kind -> "total".equals(kind.name()))
-				.mapToLong(MetalTaskCensus.TaskKind::count)
-				.findFirst()
-				.orElse(0L);
-			if (censusTasks < CENSUS_PROBE_TASKS) {
-				throw new AssertionError("The main-thread task census recorded " + censusTasks
-					+ " tasks, fewer than the " + CENSUS_PROBE_TASKS
-					+ " submitted to prove it records at all; its injection point has probably moved");
-			}
+			assertCensusRecorded(metrics, "total", "ran no tasks at all");
 			if (metrics.frames() < 120) {
 				throw new AssertionError("Lifecycle captured too few complete render frames: " + metrics.frames());
 			}
@@ -407,6 +412,28 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		 *
 		 * @return the fraction of the chunks inside the render distance that the client holds
 		 */
+		/**
+		 * Captures one window of frames while terrain is still streaming, for attribution only.
+		 *
+		 * <p>The three measured phases all run after the settle wait, and the main-thread task queue
+		 * is empty by then: three runs of the census counted zero tasks across roughly 2350 drains.
+		 * The 170 ms spike this renderer's largest open item is about lives on the other side of that
+		 * wait, in the window the harness exists to skip past. So this one is captured inside it.
+		 *
+		 * <p>It is deliberately not one of the phases. Its duration depends on how fast the generator
+		 * runs, its frame rate is dominated by work that is not the renderer's, and it would be
+		 * incomparable between runs - so it is logged and never fed to the report, the display-pacing
+		 * check, or the thresholds.
+		 */
+		private void finishStreamingCapture() {
+			MetalFrameMetrics.Phase phase =
+				this.context.computeOnClient(ignored -> MetalFrameMetrics.endCapture("streaming"));
+			LOGGER.info("Metal benchmark: {}", phase.toLogLine());
+			for (String line : phase.toAttributionLines()) {
+				LOGGER.info("Metal benchmark stall: {}", line);
+			}
+		}
+
 		private double awaitLoadedTerrain(final TestSingleplayerContext world) {
 			int served = world.getServer().computeOnServer(server ->
 				server.getPlayerList().getPlayers().stream().mapToInt(player -> player.requestedViewDistance()).max().orElse(0));
@@ -420,8 +447,15 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			double fraction = 0.0;
 			double best = 0.0;
 			int stalledChecks = 0;
+			int captureStartedTick = -1;
+			boolean captureTaken = false;
 			for (int tick = 0; tick < CHUNK_LOAD_TIMEOUT_TICKS; tick++) {
 				this.tick(world);
+				if (captureStartedTick >= 0 && tick - captureStartedTick >= this.phaseTicks) {
+					this.finishStreamingCapture();
+					captureStartedTick = -1;
+					captureTaken = true;
+				}
 				if (tick % 100 != 0) {
 					continue;
 				}
@@ -430,6 +464,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 					LOGGER.info("Metal benchmark: streaming terrain, {} of the render distance loaded",
 						format(fraction));
 				}
+				if (!captureTaken && captureStartedTick < 0 && fraction >= STREAMING_CAPTURE_START_FRACTION) {
+					this.context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
+					captureStartedTick = tick;
+				}
 				if (fraction > best + SETTLE_PROGRESS_EPSILON) {
 					best = fraction;
 					stalledChecks = 0;
@@ -437,6 +475,14 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 					LOGGER.info("Metal benchmark: terrain settled at {} of the render distance", format(fraction));
 					break;
 				}
+			}
+			// The settle can end mid-window, and a world small enough to load before the start
+			// fraction is reached never opens one. Both leave the capture to be closed here.
+			if (captureStartedTick >= 0) {
+				this.finishStreamingCapture();
+			} else if (!captureTaken) {
+				LOGGER.warn("Metal benchmark: terrain settled before {} of the render distance was "
+					+ "loaded, so no streaming capture was taken", format(STREAMING_CAPTURE_START_FRACTION));
 			}
 
 			try {
@@ -785,6 +831,28 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 
 	private static String format(final double value) {
 		return String.format(Locale.ROOT, "%.3f", value);
+	}
+
+	/**
+	 * Fails unless the census counted at least the tasks this test deliberately put through it.
+	 *
+	 * <p>The probe tasks are submitted from the test thread, so a count here covers the whole path:
+	 * scheduled onto the queue, taken off it, then timed and named. A drift in the injection point
+	 * silences the census, and that silence would otherwise be indistinguishable from the quiet queue
+	 * the benchmark phases genuinely see.
+	 */
+	private static void assertCensusRecorded(final MetalFrameMetrics.Phase metrics, final String counter,
+			final String failure) {
+		long recorded = metrics.taskKinds().stream()
+			.filter(kind -> counter.equals(kind.name()))
+			.mapToLong(MetalTaskCensus.TaskKind::count)
+			.findFirst()
+			.orElse(0L);
+		if (recorded < CENSUS_PROBE_TASKS) {
+			throw new AssertionError("The main-thread task census " + failure + " (" + counter + "="
+				+ recorded + ") while this test submitted " + CENSUS_PROBE_TASKS
+				+ "; its injection point has probably moved");
+		}
 	}
 
 	private static void assertScreenshotVaries(final Path path) {

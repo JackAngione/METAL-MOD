@@ -75,15 +75,22 @@ public final class MetalTaskCensus {
 		entry[1]++;
 	}
 
-	/** One kind of task, identified by the class of the runnable submitted. */
-	public record TaskKind(String name, double totalMs, long count) {
+	/**
+	 * One kind of task, identified by the class of the runnable submitted - or one of the counters
+	 * reported alongside them, for which {@code timed} is false and only the count means anything.
+	 */
+	public record TaskKind(String name, double totalMs, long count, boolean timed) {
 		public String describe() {
-			return String.format(Locale.ROOT, "%s=%.3fms/%d", this.name, this.totalMs, this.count);
+			return this.timed
+				? String.format(Locale.ROOT, "%s=%.3fms/%d", this.name, this.totalMs, this.count)
+				: String.format(Locale.ROOT, "%s=%d", this.name, this.count);
 		}
 
 		public String toJson() {
-			return String.format(Locale.ROOT, "{\"task\":\"%s\",\"totalMs\":%.3f,\"count\":%d}",
-				this.name, this.totalMs, this.count);
+			return this.timed
+				? String.format(Locale.ROOT, "{\"task\":\"%s\",\"totalMs\":%.3f,\"count\":%d}",
+					this.name, this.totalMs, this.count)
+				: String.format(Locale.ROOT, "{\"counter\":\"%s\",\"count\":%d}", this.name, this.count);
 		}
 	}
 
@@ -99,7 +106,7 @@ public final class MetalTaskCensus {
 			totalNanos += entry.getValue()[0];
 			totalCount += entry.getValue()[1];
 			kinds.add(new TaskKind(describeClass(entry.getKey()), entry.getValue()[0] / 1_000_000.0,
-				entry.getValue()[1]));
+				entry.getValue()[1], true));
 		}
 		kinds.sort((left, right) -> Double.compare(right.totalMs(), left.totalMs()));
 		// The total leads, and is reported even when it is zero. A phase that drained an empty queue
@@ -108,7 +115,7 @@ public final class MetalTaskCensus {
 		// instrument was nearly read as a broken probe rather than as a warm world with no meshing
 		// left to do.
 		List<TaskKind> reported = new ArrayList<>(1 + Math.min(REPORTED_KINDS, kinds.size()));
-		reported.add(new TaskKind("total", totalNanos / 1_000_000.0, totalCount));
+		reported.add(new TaskKind("total", totalNanos / 1_000_000.0, totalCount, true));
 		reported.addAll(kinds.subList(0, Math.min(REPORTED_KINDS, kinds.size())));
 		return List.copyOf(reported);
 	}

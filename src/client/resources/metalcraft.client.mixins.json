@@ -3,8 +3,10 @@
   "package": "dev.metalcraft.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "BlockableEventLoopDrainMixin",
     "BlockableEventLoopTaskCensusMixin",
     "CreativeModeInventoryScreenInvoker",
+    "GametestHandoffMixin",
     "MinecraftBackendAvailabilityMixin",
     "MinecraftFrameMetricsMixin",
     "MinecraftTickPhaseMixin",
