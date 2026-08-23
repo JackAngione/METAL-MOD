@@ -4,7 +4,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <jni.h>
 #import <objc/runtime.h>
-#import <pthread.h>
+#import <os/lock.h>
 #import <stdatomic.h>
 #import <float.h>
 #import <math.h>
@@ -503,17 +503,25 @@ typedef struct {
 	MCObjectType type;
 } MCSlot;
 
-static pthread_once_t mc_registry_once = PTHREAD_ONCE_INIT;
-static NSLock *mc_registry_lock;
+/**
+ * Guards the slot table.
+ *
+ * <p>An os_unfair_lock rather than an NSLock, because this is taken and dropped on every command the
+ * render thread issues, and the work inside it is now a bounds check and a few field reads. An
+ * NSLock charges an objc_msgSend and a pthread_mutex round-trip for each of those, which is most of
+ * what a lookup costs once the lookup itself is a slot index. This is an atomic compare-and-swap
+ * when uncontended, and it needs no lazy construction - so the pthread_once that guarded the lock's
+ * allocation is gone from the same path.
+ *
+ * <p>It is not recursive and does not want to be: nothing below calls another function that locks,
+ * and everything that can throw, block, or run Objective-C teardown does so after unlocking.
+ */
+static os_unfair_lock mc_registry_lock = OS_UNFAIR_LOCK_INIT;
 static MCSlot *mc_slots;
 static uint32_t mc_slot_capacity;
 static uint32_t mc_slot_count;
 static uint32_t *mc_free_slots;
 static uint32_t mc_free_count;
-
-static void mc_initialize_registry(void) {
-	mc_registry_lock = [[NSLock alloc] init];
-}
 
 static jlong mc_make_handle(uint32_t slot, uint64_t generation) {
 	return (jlong)((generation << MC_SLOT_BITS) | slot);
@@ -1015,11 +1023,10 @@ static uint32_t mc_claim_slot_locked(void) {
 }
 
 static jlong mc_register_object(id object, MCObjectType type, jlong ownerHandle) {
-	pthread_once(&mc_registry_once, mc_initialize_registry);
-	[mc_registry_lock lock];
+	os_unfair_lock_lock(&mc_registry_lock);
 	uint32_t slot = mc_claim_slot_locked();
 	if (slot == UINT32_MAX) {
-		[mc_registry_lock unlock];
+		os_unfair_lock_unlock(&mc_registry_lock);
 		return 0;
 	}
 	MCSlot *entry = &mc_slots[slot];
@@ -1041,7 +1048,7 @@ static jlong mc_register_object(id object, MCObjectType type, jlong ownerHandle)
 	entry->rootDeviceHandle = rootDeviceHandle;
 	entry->childCount = 0;
 	entry->type = type;
-	[mc_registry_lock unlock];
+	os_unfair_lock_unlock(&mc_registry_lock);
 	return handle;
 }
 
@@ -1051,18 +1058,17 @@ static id mc_get_object(JNIEnv *env, jlong handle, MCObjectType expectedType) {
 		return nil;
 	}
 
-	pthread_once(&mc_registry_once, mc_initialize_registry);
-	[mc_registry_lock lock];
+	os_unfair_lock_lock(&mc_registry_lock);
 	MCSlot *entry = mc_slot_locked(handle);
 	if (entry == NULL) {
-		[mc_registry_lock unlock];
+		os_unfair_lock_unlock(&mc_registry_lock);
 		mc_throw_state(env, [NSString stringWithFormat:@"Unknown or released %@ handle %lld", mc_type_name(expectedType), (long long)handle]);
 		return nil;
 	}
 	// Copied out under the lock; the slot itself can be reused the moment it is dropped.
 	MCObjectType actualType = entry->type;
 	id object = (__bridge id)entry->object;
-	[mc_registry_lock unlock];
+	os_unfair_lock_unlock(&mc_registry_lock);
 
 	if (actualType != expectedType) {
 		mc_throw_state(
@@ -1086,26 +1092,25 @@ static BOOL mc_get_objects_same_device(
 	id __strong *objects,
 	NSUInteger count
 ) {
-	pthread_once(&mc_registry_once, mc_initialize_registry);
-	[mc_registry_lock lock];
+	os_unfair_lock_lock(&mc_registry_lock);
 	jlong rootDevice = 0;
 	for (NSUInteger index = 0; index < count; index++) {
 		MCSlot *entry = mc_slot_locked(handles[index]);
 		if (entry == NULL || entry->type != types[index]) {
-			[mc_registry_lock unlock];
+			os_unfair_lock_unlock(&mc_registry_lock);
 			mc_throw_state(env, [NSString stringWithFormat:@"Unknown, released, or incorrectly typed %@", mc_type_name(types[index])]);
 			return NO;
 		}
 		jlong candidateRoot = entry->rootDeviceHandle;
 		if (candidateRoot == 0 || (rootDevice != 0 && candidateRoot != rootDevice)) {
-			[mc_registry_lock unlock];
+			os_unfair_lock_unlock(&mc_registry_lock);
 			mc_throw_state(env, @"Metal objects used by one command must belong to the same device");
 			return NO;
 		}
 		rootDevice = candidateRoot;
 		objects[index] = (__bridge id)entry->object;
 	}
-	[mc_registry_lock unlock];
+	os_unfair_lock_unlock(&mc_registry_lock);
 	return YES;
 }
 
@@ -1116,28 +1121,27 @@ static BOOL mc_get_present_objects(
 	MCMetalCommandBuffer **commandBuffer,
 	id<CAMetalDrawable> *drawable
 ) {
-	pthread_once(&mc_registry_once, mc_initialize_registry);
-	[mc_registry_lock lock];
+	os_unfair_lock_lock(&mc_registry_lock);
 	MCSlot *commandBufferEntry = mc_slot_locked(commandBufferHandle);
 	MCSlot *drawableEntry = mc_slot_locked(drawableHandle);
 	if (commandBufferEntry == NULL || commandBufferEntry->type != MCObjectTypeCommandBuffer) {
-		[mc_registry_lock unlock];
+		os_unfair_lock_unlock(&mc_registry_lock);
 		mc_throw_state(env, @"Cannot present with an unknown, released, or incorrectly typed Metal command buffer");
 		return NO;
 	}
 	if (drawableEntry == NULL || drawableEntry->type != MCObjectTypeDrawable) {
-		[mc_registry_lock unlock];
+		os_unfair_lock_unlock(&mc_registry_lock);
 		mc_throw_state(env, @"Cannot present an unknown, released, or incorrectly typed Metal drawable");
 		return NO;
 	}
 	if (commandBufferEntry->rootDeviceHandle != drawableEntry->rootDeviceHandle) {
-		[mc_registry_lock unlock];
+		os_unfair_lock_unlock(&mc_registry_lock);
 		mc_throw_state(env, @"A command buffer cannot present a drawable created by another Metal device");
 		return NO;
 	}
 	*commandBuffer = (__bridge id)commandBufferEntry->object;
 	*drawable = (__bridge id)drawableEntry->object;
-	[mc_registry_lock unlock];
+	os_unfair_lock_unlock(&mc_registry_lock);
 	return YES;
 }
 
@@ -1146,17 +1150,16 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
 		return;
 	}
 
-	pthread_once(&mc_registry_once, mc_initialize_registry);
-	[mc_registry_lock lock];
+	os_unfair_lock_lock(&mc_registry_lock);
 	MCSlot *entry = mc_slot_locked(handle);
 	if (entry == NULL) {
-		[mc_registry_lock unlock];
+		os_unfair_lock_unlock(&mc_registry_lock);
 		mc_throw_state(env, [NSString stringWithFormat:@"Unknown or already released %@ handle %lld", mc_type_name(expectedType), (long long)handle]);
 		return;
 	}
 	if (entry->type != expectedType) {
 		MCObjectType actualType = entry->type;
-		[mc_registry_lock unlock];
+		os_unfair_lock_unlock(&mc_registry_lock);
 		mc_throw_state(
 			env,
 			[NSString stringWithFormat:@"Cannot release handle %lld as a %@ because it is a %@", (long long)handle, mc_type_name(expectedType), mc_type_name(actualType)]
@@ -1173,7 +1176,7 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
 				break;
 			}
 		}
-		[mc_registry_lock unlock];
+		os_unfair_lock_unlock(&mc_registry_lock);
 		mc_throw_state(env, [NSString stringWithFormat:@"Cannot release a %@ while it still owns a %@", mc_type_name(expectedType), mc_type_name(childType)]);
 		return;
 	}
@@ -1189,7 +1192,7 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
 	entry->ownerHandle = 0;
 	entry->rootDeviceHandle = 0;
 	mc_free_slots[mc_free_count++] = (uint32_t)handle & MC_SLOT_MASK;
-	[mc_registry_lock unlock];
+	os_unfair_lock_unlock(&mc_registry_lock);
 
 	if (expectedType == MCObjectTypeSurface) {
 		[(MCMetalSurface *)object detach];
