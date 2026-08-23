@@ -99,6 +99,7 @@ tasks.named('runClient') {
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')
+		systemProperty 'metalcraft.lifecycleCreativeSearch', providers.gradleProperty('metalCreativeSearchTest').getOrElse('false')
 
 		benchmarkProperties.each { gradleProperty, systemPropertyName ->
 			def value = providers.gradleProperty(gradleProperty)

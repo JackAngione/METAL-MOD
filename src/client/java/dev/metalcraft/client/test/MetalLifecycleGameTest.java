@@ -72,6 +72,13 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			return;
 		}
 
+		// Runnable on its own because it needs a creative world of its own, and because a crash in the
+		// GUI item atlas has nothing to do with the world lifecycle the rest of this test walks.
+		if (Boolean.getBoolean("metalcraft.lifecycleCreativeSearch")) {
+			new MetalCreativeSearchGameTest(context).run();
+			return;
+		}
+
 		try (TestSingleplayerContext world = context.worldBuilder().create()) {
 			context.waitFor(client -> client.level != null && client.player != null);
 			context.waitTicks(10);
@@ -124,6 +131,8 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		}
 
 		LOGGER.info("Metal lifecycle validation: world closed; clean client shutdown requested");
+
+		new MetalCreativeSearchGameTest(context).run();
 	}
 
 	/**

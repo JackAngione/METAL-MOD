@@ -3,6 +3,7 @@
   "package": "dev.metalcraft.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "CreativeModeInventoryScreenInvoker",
     "MinecraftBackendAvailabilityMixin",
     "MinecraftFrameMetricsMixin",
     "MinecraftTickPhaseMixin",

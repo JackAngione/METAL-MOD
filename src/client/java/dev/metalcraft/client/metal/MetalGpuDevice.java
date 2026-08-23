@@ -60,6 +60,8 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	// the old one rather than closing it. Doubling means this happens a handful of times at most.
 	private final List<MetalBuffer> retiredFanIndices = new ArrayList<>();
 	private boolean closed;
+	/** Built on first use; most sessions that never recycle an item-atlas slot never compile it. */
+	private MetalRegionClear regionClear;
 
 	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource) {
 		this.metal = metal;
@@ -83,6 +85,11 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 
 	MetalDevice metal() {
 		return this.metal;
+	}
+
+	MetalRegionClear regionClear() {
+		if (this.regionClear == null) this.regionClear = new MetalRegionClear(this.metal);
+		return this.regionClear;
 	}
 
 	MetalCompiledRenderPipeline getOrCompilePipeline(final RenderPipeline pipeline) {
@@ -208,6 +215,10 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			this.commandEncoder.close();
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.pipelineCache.clear();
+			if (this.regionClear != null) {
+				this.regionClear.close();
+				this.regionClear = null;
+			}
 			this.retiredFanIndices.forEach(MetalBuffer::close);
 			this.retiredFanIndices.clear();
 			if (this.fanShortIndices != null) {

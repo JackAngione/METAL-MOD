@@ -11,6 +11,7 @@ import com.mojang.blaze3d.systems.RenderPassDescriptor;
 import com.mojang.blaze3d.systems.TransientMemory;
 import com.mojang.blaze3d.textures.GpuTexture;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -127,10 +128,32 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		final int regionWidth,
 		final int regionHeight
 	) {
-		if (regionX != 0 || regionY != 0 || regionWidth != colorTexture.getWidth(0) || regionHeight != colorTexture.getHeight(0)) {
-			throw new UnsupportedOperationException("Partial Metal attachment clears are not implemented");
+		int width = colorTexture.getWidth(0);
+		int height = colorTexture.getHeight(0);
+		if (regionX == 0 && regionY == 0 && regionWidth == width && regionHeight == height) {
+			this.clear(colorTexture, clearColor, depthTexture, clearDepth);
+			return;
 		}
-		this.clear(colorTexture, clearColor, depthTexture, clearDepth);
+		if (regionX < 0 || regionY < 0 || regionWidth <= 0 || regionHeight <= 0
+			|| regionX + regionWidth > width || regionY + regionHeight > height) {
+			throw new IllegalArgumentException("Metal attachment clear region lies outside the color attachment");
+		}
+		MetalGpuTexture color = requireTexture(colorTexture);
+		MetalGpuTexture depth = requireTexture(depthTexture);
+		if (depthTexture.getWidth(0) < regionX + regionWidth || depthTexture.getHeight(0) < regionY + regionHeight) {
+			throw new IllegalArgumentException("Metal attachment clear region lies outside the depth attachment");
+		}
+		ByteBuffer parameters = ByteBuffer.allocate(MetalRegionClear.PARAMETER_BYTES).order(ByteOrder.nativeOrder());
+		MetalRegionClear.writeParameters(
+			parameters, clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w(), (float) clearDepth
+		);
+		GpuBufferSlice staged = this.transientMemory.uploadGpu(
+			parameters.flip(), MetalRegionClear.PARAMETER_ALIGNMENT, GpuBuffer.USAGE_UNIFORM
+		);
+		this.device.regionClear().clear(
+			this.commands(), color.metal(), depth.metal(), regionX, regionY, regionWidth, regionHeight,
+			requireBuffer(staged.buffer()).metal(), staged.offset()
+		);
 	}
 
 	@Override
