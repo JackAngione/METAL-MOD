@@ -49,6 +49,16 @@ public final class MetalCraftOptionsScreen extends Screen {
 		halfResolution.active = MetalCraftPlatform.isAppleSilicon();
 		contents.addChild(halfResolution);
 
+		CycleButton<Boolean> unlockedFrameRate = CycleButton.onOffBuilder(MetalCraftConfig.unlockedFrameRate())
+			.withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.unlocked_frame_rate.tooltip")))
+			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.unlocked_frame_rate"), (button, enabled) -> {
+				MetalCraftConfig.setUnlockedFrameRate(enabled);
+				// The layer's synchronization is only read while the surface is configured, so the
+				// change reaches Metal on the reconfiguration this schedules, not on the next frame.
+				this.minecraft.invalidateSurfaceConfiguration();
+			});
+		contents.addChild(unlockedFrameRate);
+
 		this.resolutionStatus = new StringWidget(Component.empty(), this.font);
 		contents.addChild(this.resolutionStatus);
 		this.updateResolutionStatus();

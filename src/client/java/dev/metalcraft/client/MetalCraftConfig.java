@@ -33,6 +33,19 @@ public final class MetalCraftConfig {
 		save();
 	}
 
+	/** Whether MetalCraft removes Minecraft's frame limit and forces the layer to present unsynced. */
+	public static synchronized boolean unlockedFrameRate() {
+		return data.unlockedFrameRate;
+	}
+
+	public static synchronized void setUnlockedFrameRate(final boolean enabled) {
+		if (data.unlockedFrameRate == enabled) {
+			return;
+		}
+		data.unlockedFrameRate = enabled;
+		save();
+	}
+
 	private static Data load() {
 		if (!Files.isRegularFile(PATH)) {
 			return new Data();
@@ -60,5 +73,6 @@ public final class MetalCraftConfig {
 
 	private static final class Data {
 		private boolean halfResolution;
+		private boolean unlockedFrameRate;
 	}
 }

@@ -5,5 +5,7 @@
   "metalcraft.options.half_resolution": "Half-resolution rendering",
   "metalcraft.options.half_resolution.description": "Render at macOS logical resolution instead of the Retina display's 2x backing resolution. The image is upscaled to the native Metal surface for a substantial GPU performance gain.",
   "metalcraft.options.half_resolution.tooltip": "Halves each framebuffer dimension, reducing the rendered pixel count to one quarter.",
-  "metalcraft.options.render_resolution": "Current render resolution: %s x %s"
+  "metalcraft.options.render_resolution": "Current render resolution: %s x %s",
+  "metalcraft.options.unlocked_frame_rate": "Unlocked frame rate",
+  "metalcraft.options.unlocked_frame_rate.tooltip": "Presents without display synchronization and ignores Minecraft's Max Framerate and one-minute AFK limits, so frames are not paced to the display's refresh rate. Iconified, ten-minute idle, and menu throttles still apply."
 }

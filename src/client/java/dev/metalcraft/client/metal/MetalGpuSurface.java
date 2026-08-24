@@ -6,6 +6,7 @@ import com.mojang.blaze3d.systems.GpuSurfaceBackend;
 import com.mojang.blaze3d.systems.SurfaceException;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
+import dev.metalcraft.client.MetalCraftConfig;
 import java.util.Collection;
 import java.util.List;
 import org.slf4j.Logger;
@@ -37,10 +38,15 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 			// Logged because a benchmark that silently runs display-synced produces frame intervals
 			// pinned to the refresh rate, which absorbs exactly the stalls the capture exists to
 			// find and is indistinguishable from a healthy result unless the mode is recorded.
-			this.displaySyncEnabled = config.presentMode() != GpuSurface.PresentMode.IMMEDIATE;
+			// The unlocked option overrides the requested mode: macOS paces a display-synced
+			// CAMetalLayer at the panel's refresh rate no matter what Minecraft's V-Sync option says,
+			// so the only way to present unsynced is to turn the layer's own synchronization off.
+			this.displaySyncEnabled = config.presentMode() != GpuSurface.PresentMode.IMMEDIATE
+				&& !MetalCraftConfig.unlockedFrameRate();
 			this.metal.setDisplaySyncEnabled(this.displaySyncEnabled);
-			LOGGER.info("MetalCraft surface configured: {}x{} presentMode={} displaySync={}",
-				config.width(), config.height(), config.presentMode(), this.displaySyncEnabled);
+			LOGGER.info("MetalCraft surface configured: {}x{} presentMode={} displaySync={} unlockedFrameRate={}",
+				config.width(), config.height(), config.presentMode(), this.displaySyncEnabled,
+				MetalCraftConfig.unlockedFrameRate());
 			MetalSurfaceProbe.configured(config.width(), config.height());
 			this.configured = true;
 		} catch (RuntimeException error) {
