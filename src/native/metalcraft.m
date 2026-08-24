@@ -23,6 +23,64 @@ typedef NS_OPTIONS(uint32_t, MCShaderStage) {
 	MCShaderStageFragment = 2
 };
 
+/**
+ * One recorded render command, laid out exactly as MetalCommandStream writes it.
+ *
+ * <p>Records are fixed width and every field is named for its widest use, so decoding a batch is an
+ * array index rather than a parse. That costs a few unused bytes per record and buys a decoder that
+ * cannot lose sync, plus an ABI check that is one comparison: the stream header carries the record
+ * size Java believes in, and a build whose struct has drifted from it fails on the first batch
+ * instead of encoding garbage into a render pass.
+ *
+ * <p>`slot` is a binding index, or a primitive type for a draw. `stages` is a MCShaderStage mask,
+ * or an index type for a draw. `reserved` is zero on every record.
+ */
+typedef struct {
+	int32_t opcode;
+	int32_t slot;
+	int32_t stages;
+	int32_t count;
+	int32_t instanceCount;
+	int32_t baseVertex;
+	int32_t baseInstance;
+	int32_t reserved;
+	int64_t handle;
+	int64_t offset;
+} MCCommand;
+
+typedef struct {
+	int32_t magic;
+	int32_t commandSize;
+	int32_t commandCount;
+	int32_t flags;
+} MCCommandStreamHeader;
+
+_Static_assert(sizeof(MCCommand) == 48, "MCCommand must match MetalCommandStream.COMMAND_BYTES");
+_Static_assert(sizeof(MCCommandStreamHeader) == 16, "MCCommandStreamHeader must match MetalCommandStream.HEADER_BYTES");
+
+enum {
+	MCCommandSetVertexBuffer = 1,
+	MCCommandSetUniformBuffer = 2,
+	MCCommandSetTexture = 3,
+	MCCommandSetSampler = 4,
+	MCCommandDrawIndexed = 5
+};
+
+/** 'MCMD'. */
+#define MC_COMMAND_STREAM_MAGIC 0x4D434D44
+/** Re-derive every range from the Metal objects a batch names, rather than trusting the recorder. */
+#define MC_COMMAND_STREAM_CHECKED 1
+/**
+ * Commands resolved per acquisition of the registry lock.
+ *
+ * <p>Batching exists to stop the render thread taking this lock once per command, but resolving a
+ * whole batch under one acquisition would hold a lock that chunk-meshing threads need for as long
+ * as the batch is large - and batches are as large as the visible world. Resolving in strides
+ * bounds the hold to a few microseconds while still cutting the render thread's acquisitions by
+ * this factor.
+ */
+#define MC_COMMAND_RESOLVE_STRIDE 256
+
 typedef NS_ENUM(NSUInteger, MCObjectType) {
 	MCObjectTypeDevice = 1,
 	MCObjectTypeCommandQueue = 2,
@@ -235,6 +293,7 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 @interface MCInFlightResources : NSObject
 
 - (void)pin:(id)object;
+- (void)pinAll:(id __unsafe_unretained const *)objects count:(NSUInteger)count;
 - (void)complete;
 - (NSUInteger)count;
 
@@ -264,6 +323,24 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 	[_lock unlock];
 }
 
+/**
+ * Retains a whole batch's resources under one acquisition.
+ *
+ * <p>Pinning per command takes this lock per command, which is a second lock round-trip on top of
+ * the registry's for every bind and draw a frame issues. The set still hashes each object, and
+ * duplicates - the index buffer every draw in a batch shares, most obviously - are absorbed by the
+ * set rather than filtered here.
+ */
+- (void)pinAll:(id __unsafe_unretained const *)objects count:(NSUInteger)count {
+	[_lock lock];
+	for (NSUInteger index = 0; index < count; index++) {
+		if (objects[index] != nil) {
+			[_objects addObject:objects[index]];
+		}
+	}
+	[_lock unlock];
+}
+
 - (void)complete {
 	[_lock lock];
 	[_objects removeAllObjects];
@@ -286,6 +363,7 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 
 - (instancetype)initWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer;
 - (void)pin:(id)object;
+- (void)pinAll:(id __unsafe_unretained const *)objects count:(NSUInteger)count;
 - (id<MTLBlitCommandEncoder>)blitEncoder;
 - (void)endBlitEncoding;
 - (void)recordTimestampInPool:(MCMetalTimestampQueryPool *)pool index:(NSUInteger)index;
@@ -338,6 +416,10 @@ static _Atomic uint64_t mc_gpu_command_buffers;
 
 - (void)pin:(id)object {
 	[_resources pin:object];
+}
+
+- (void)pinAll:(id __unsafe_unretained const *)objects count:(NSUInteger)count {
+	[_resources pinAll:objects count:count];
 }
 
 - (id<MTLBlitCommandEncoder>)blitEncoder {
@@ -967,22 +1049,36 @@ static MTLStoreAction mc_store_action(JNIEnv *env, jint action) {
 	}
 }
 
-static MTLPrimitiveType mc_primitive_type(JNIEnv *env, jint primitive) {
+/** @return NO for an unknown primitive index, without touching the JNI environment */
+static BOOL mc_primitive_type_for(jint primitive, MTLPrimitiveType *result) {
 	switch (primitive) {
 		case 0:
-			return MTLPrimitiveTypePoint;
+			*result = MTLPrimitiveTypePoint;
+			return YES;
 		case 1:
-			return MTLPrimitiveTypeLine;
+			*result = MTLPrimitiveTypeLine;
+			return YES;
 		case 2:
-			return MTLPrimitiveTypeLineStrip;
+			*result = MTLPrimitiveTypeLineStrip;
+			return YES;
 		case 3:
-			return MTLPrimitiveTypeTriangle;
+			*result = MTLPrimitiveTypeTriangle;
+			return YES;
 		case 4:
-			return MTLPrimitiveTypeTriangleStrip;
+			*result = MTLPrimitiveTypeTriangleStrip;
+			return YES;
 		default:
-			mc_throw_state(env, [NSString stringWithFormat:@"Unsupported Metal primitive index %d", primitive]);
-			return MTLPrimitiveTypeTriangle;
+			return NO;
 	}
+}
+
+static MTLPrimitiveType mc_primitive_type(JNIEnv *env, jint primitive) {
+	MTLPrimitiveType result;
+	if (!mc_primitive_type_for(primitive, &result)) {
+		mc_throw_state(env, [NSString stringWithFormat:@"Unsupported Metal primitive index %d", primitive]);
+		return MTLPrimitiveTypeTriangle;
+	}
+	return result;
 }
 
 static BOOL mc_require_main_thread(JNIEnv *env, NSString *operation) {
@@ -3221,6 +3317,318 @@ Java_dev_metalcraft_client_metal_MetalNative_nWriteRenderTimestamp(
 		}
 		[renderPass.commandBuffer recordTimestampInPool:pool index:(NSUInteger)index];
 		[renderPass.encoder sampleCountersInBuffer:pool.sampleBuffer atSampleIndex:(NSUInteger)index withBarrier:YES];
+	}
+}
+
+/**
+ * The Metal object a command names, or 0 for an opcode this build does not know.
+ *
+ * <p>Every opcode in the batch ABI names exactly one object, which is what lets the resolved
+ * objects be a plain array parallel to the records.
+ */
+static MCObjectType mc_command_operand_type(int32_t opcode) {
+	switch (opcode) {
+		case MCCommandSetVertexBuffer:
+		case MCCommandSetUniformBuffer:
+		case MCCommandDrawIndexed:
+			return MCObjectTypeBuffer;
+		case MCCommandSetTexture:
+			return MCObjectTypeTextureView;
+		case MCCommandSetSampler:
+			return MCObjectTypeSampler;
+		default:
+			return (MCObjectType)0;
+	}
+}
+
+static NSUInteger mc_command_index_size(int32_t indexType) {
+	return indexType == 0 ? 2 : (indexType == 1 ? 4 : 0);
+}
+
+/**
+ * Checks everything a record can be judged on by itself.
+ *
+ * <p>This runs on the coarse path too. It is integer comparisons over a buffer already in cache, and
+ * what it keeps out is a slot index or a primitive type that would make Metal raise an Objective-C
+ * exception through a JNI frame that cannot catch it. What it deliberately does not do is read the
+ * length of the buffer a record names: that is a message send per command, and it is the recorder's
+ * job - see MetalCommandStream. MC_COMMAND_STREAM_CHECKED asks for it anyway.
+ */
+static BOOL mc_validate_command(JNIEnv *env, const MCCommand *command, int32_t index) {
+	NSString *problem = nil;
+	if (command->handle <= 0 || command->reserved != 0) {
+		problem = @"resource handle or reserved field";
+	} else {
+		switch (command->opcode) {
+			case MCCommandSetVertexBuffer:
+				if (command->slot < 0 || command->slot >= 31 || command->offset < 0) {
+					problem = @"vertex-buffer binding index or offset";
+				}
+				break;
+			case MCCommandSetUniformBuffer:
+				if (command->slot < 0 || command->slot >= 16 || command->offset < 0
+					|| command->stages == 0 || (command->stages & ~(MCShaderStageVertex | MCShaderStageFragment)) != 0) {
+					problem = @"uniform-buffer binding index, offset, or stage mask";
+				}
+				break;
+			case MCCommandSetTexture:
+			case MCCommandSetSampler:
+				if (command->slot < 0 || command->slot >= 16
+					|| command->stages == 0 || (command->stages & ~(MCShaderStageVertex | MCShaderStageFragment)) != 0) {
+					problem = @"texture or sampler binding index or stage mask";
+				}
+				break;
+			case MCCommandDrawIndexed: {
+				MTLPrimitiveType primitiveType;
+				NSUInteger indexSize = mc_command_index_size(command->stages);
+				if (!mc_primitive_type_for(command->slot, &primitiveType) || indexSize == 0
+					|| command->count <= 0 || command->instanceCount <= 0 || command->baseInstance < 0
+					|| command->offset < 0 || (NSUInteger)command->offset % indexSize != 0) {
+					problem = @"indexed draw";
+				}
+				break;
+			}
+			default:
+				problem = @"opcode";
+				break;
+		}
+	}
+	if (problem == nil) {
+		return YES;
+	}
+	mc_throw_state(env, [NSString stringWithFormat:@"Metal command %d in this batch has an invalid %@", index, problem]);
+	return NO;
+}
+
+/** The ranges the coarse path leaves to the recorder, re-derived from the objects themselves. */
+static BOOL mc_check_command_range(JNIEnv *env, const MCCommand *command, id __unsafe_unretained object, int32_t index) {
+	NSString *problem = nil;
+	switch (command->opcode) {
+		case MCCommandSetVertexBuffer:
+		case MCCommandSetUniformBuffer: {
+			id<MTLBuffer> buffer = object;
+			if ((NSUInteger)command->offset >= buffer.length) {
+				problem = @"binds past the end of its buffer";
+			}
+			break;
+		}
+		case MCCommandDrawIndexed: {
+			id<MTLBuffer> indexBuffer = object;
+			NSUInteger indexSize = mc_command_index_size(command->stages);
+			if ((NSUInteger)command->offset > indexBuffer.length
+				|| (NSUInteger)command->count > (indexBuffer.length - (NSUInteger)command->offset) / indexSize) {
+				problem = @"reads indices past the end of its buffer";
+			}
+			break;
+		}
+		default:
+			break;
+	}
+	if (problem == nil) {
+		return YES;
+	}
+	mc_throw_state(env, [NSString stringWithFormat:@"Metal command %d in this batch %@", index, problem]);
+	return NO;
+}
+
+/**
+ * Turns every handle in a batch into the object it names, and the render pass with it.
+ *
+ * <p>The objects are retained for the batch's duration rather than left as bare slot pointers,
+ * because the stride below drops the registry lock between strides and a release taken in that gap
+ * would otherwise leave the encode pass reading freed Metal objects. That is the same retain the
+ * per-command path already performs on each of its lookups; what the batch removes is the crossing
+ * and the lock around it, not the retain.
+ *
+ * <p>A handle repeated by consecutive commands - a batch's shared index buffer, a uniform rebound at
+ * a new offset - skips the lookup entirely.
+ */
+static BOOL mc_resolve_command_operands(
+	JNIEnv *env,
+	jlong renderPassHandle,
+	const MCCommand *commands,
+	int32_t count,
+	id __strong *objects,
+	MCMetalRenderPass * __strong *renderPass
+) {
+	os_unfair_lock_lock(&mc_registry_lock);
+	MCSlot *passEntry = mc_slot_locked(renderPassHandle);
+	if (passEntry == NULL || passEntry->type != MCObjectTypeRenderPass) {
+		os_unfair_lock_unlock(&mc_registry_lock);
+		mc_throw_state(env, @"Cannot submit Metal commands to an unknown, released, or incorrectly typed render pass");
+		return NO;
+	}
+	jlong rootDevice = passEntry->rootDeviceHandle;
+	*renderPass = (__bridge id)passEntry->object;
+	os_unfair_lock_unlock(&mc_registry_lock);
+
+	jlong resolvedHandle = 0;
+	MCObjectType resolvedType = (MCObjectType)0;
+	for (int32_t index = 0; index < count;) {
+		int32_t stride = index + MC_COMMAND_RESOLVE_STRIDE;
+		if (stride > count) {
+			stride = count;
+		}
+		os_unfair_lock_lock(&mc_registry_lock);
+		for (; index < stride; index++) {
+			jlong handle = commands[index].handle;
+			MCObjectType expectedType = mc_command_operand_type(commands[index].opcode);
+			// The type has to match as well as the handle. A handle names one object and so has one
+			// type, so this can only differ when the recorder has gone wrong - but that is exactly
+			// the case the check exists for, and skipping it here would let it through.
+			if (handle == resolvedHandle && expectedType == resolvedType) {
+				objects[index] = objects[index - 1];
+				continue;
+			}
+			MCSlot *entry = mc_slot_locked(handle);
+			if (entry == NULL || entry->type != expectedType
+				|| entry->rootDeviceHandle != rootDevice) {
+				os_unfair_lock_unlock(&mc_registry_lock);
+				mc_throw_state(
+					env,
+					[NSString stringWithFormat:@"Metal command %d in this batch names an unknown, released, incorrectly typed, or foreign resource", index]
+				);
+				return NO;
+			}
+			objects[index] = (__bridge id)entry->object;
+			resolvedHandle = handle;
+			resolvedType = expectedType;
+		}
+		os_unfair_lock_unlock(&mc_registry_lock);
+	}
+	return YES;
+}
+
+/**
+ * Issues the batch's Metal calls in the order they were recorded.
+ *
+ * <p>Nothing here locks and nothing here looks anything up. A checked run that rejects a command
+ * leaves the encoder holding the commands before it - there is no undoing an encoder call - so the
+ * exception that follows is fatal to the frame, which is what a batch ABI violation should be.
+ */
+static void mc_encode_commands(
+	JNIEnv *env,
+	MCMetalRenderPass *renderPass,
+	const MCCommand *commands,
+	int32_t count,
+	id __strong const *objects,
+	BOOL checked
+) {
+	id<MTLRenderCommandEncoder> encoder = renderPass.encoder;
+	for (int32_t index = 0; index < count; index++) {
+		const MCCommand *command = &commands[index];
+		id __unsafe_unretained object = objects[index];
+		if (checked && !mc_check_command_range(env, command, object, index)) {
+			return;
+		}
+		NSUInteger slot = (NSUInteger)command->slot;
+		switch (command->opcode) {
+			case MCCommandSetVertexBuffer:
+				[encoder setVertexBuffer:object offset:(NSUInteger)command->offset atIndex:slot];
+				break;
+			case MCCommandSetUniformBuffer:
+				if (command->stages & MCShaderStageVertex) {
+					[encoder setVertexBuffer:object offset:(NSUInteger)command->offset atIndex:slot];
+				}
+				if (command->stages & MCShaderStageFragment) {
+					[encoder setFragmentBuffer:object offset:(NSUInteger)command->offset atIndex:slot];
+				}
+				break;
+			case MCCommandSetTexture:
+				if (command->stages & MCShaderStageVertex) {
+					[encoder setVertexTexture:object atIndex:slot];
+				}
+				if (command->stages & MCShaderStageFragment) {
+					[encoder setFragmentTexture:object atIndex:slot];
+				}
+				break;
+			case MCCommandSetSampler:
+				if (command->stages & MCShaderStageVertex) {
+					[encoder setVertexSamplerState:object atIndex:slot];
+				}
+				if (command->stages & MCShaderStageFragment) {
+					[encoder setFragmentSamplerState:object atIndex:slot];
+				}
+				break;
+			case MCCommandDrawIndexed: {
+				MTLPrimitiveType primitiveType;
+				mc_primitive_type_for(command->slot, &primitiveType);
+				[encoder drawIndexedPrimitives:primitiveType
+					indexCount:(NSUInteger)command->count
+					indexType:command->stages == 0 ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32
+					indexBuffer:object
+					indexBufferOffset:(NSUInteger)command->offset
+					instanceCount:(NSUInteger)command->instanceCount
+					baseVertex:(NSInteger)command->baseVertex
+					baseInstance:(NSUInteger)command->baseInstance];
+				break;
+			}
+			default:
+				break;
+		}
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nSubmitCommandStream(
+	JNIEnv *env,
+	jclass type,
+	jlong renderPassHandle,
+	jobject stream,
+	jint byteCount
+) {
+	@autoreleasepool {
+		void *base = stream == NULL ? NULL : (*env)->GetDirectBufferAddress(env, stream);
+		jlong capacity = stream == NULL ? -1 : (*env)->GetDirectBufferCapacity(env, stream);
+		if (base == NULL || capacity < 0) {
+			mc_throw_state(env, @"A Metal command batch must be a direct buffer");
+			return;
+		}
+		if (byteCount < (jint)sizeof(MCCommandStreamHeader) || (jlong)byteCount > capacity) {
+			mc_throw_state(env, @"Metal command batch length is outside its buffer");
+			return;
+		}
+		const MCCommandStreamHeader *header = base;
+		if (header->magic != MC_COMMAND_STREAM_MAGIC || header->commandSize != (int32_t)sizeof(MCCommand)) {
+			mc_throw_state(
+				env,
+				[NSString stringWithFormat:@"Metal command batch ABI does not match this native build: magic %d, record size %d against %d",
+					header->magic, header->commandSize, (int)sizeof(MCCommand)]
+			);
+			return;
+		}
+		int32_t count = header->commandCount;
+		if (count < 0
+			|| (int64_t)byteCount != (int64_t)sizeof(MCCommandStreamHeader) + (int64_t)count * (int64_t)sizeof(MCCommand)) {
+			mc_throw_state(env, @"Metal command batch length does not match the commands it declares");
+			return;
+		}
+		if (count == 0) {
+			return;
+		}
+		BOOL checked = (header->flags & MC_COMMAND_STREAM_CHECKED) != 0;
+		const MCCommand *commands = (const MCCommand *)((const uint8_t *)base + sizeof(MCCommandStreamHeader));
+		for (int32_t index = 0; index < count; index++) {
+			if (!mc_validate_command(env, &commands[index], index)) {
+				return;
+			}
+		}
+
+		// Zeroed because ARC releases what a __strong slot held before overwriting it.
+		id __strong *objects = (id __strong *)calloc((size_t)count, sizeof(id));
+		if (objects == NULL) {
+			mc_throw_state(env, @"Could not allocate a Metal command batch's resolved resources");
+			return;
+		}
+		MCMetalRenderPass *renderPass = nil;
+		if (mc_resolve_command_operands(env, renderPassHandle, commands, count, objects, &renderPass)) {
+			[renderPass.commandBuffer pinAll:(id __unsafe_unretained const *)(void *)objects count:(NSUInteger)count];
+			mc_encode_commands(env, renderPass, commands, count, objects, checked);
+		}
+		for (int32_t index = 0; index < count; index++) {
+			objects[index] = nil;
+		}
+		free(objects);
 	}
 }
 

@@ -139,6 +139,26 @@ public final class MetalShaderTranslationSmoke {
 		    color = sampledValue == 42 ? vec4(1.0, 0.0, 0.0, 1.0) : vec4(0.0, 1.0, 0.0, 1.0);
 		}
 		""";
+	private static final String BATCH_VERTEX_GLSL = """
+		#version 450
+		void main() {
+		    vec2 positions[3] = vec2[](
+		        vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
+		    );
+		    gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+		}
+		""";
+	/**
+	 * Multiplies a bound uniform by a bound texture, so a slot that the batch failed to bind reads
+	 * as black rather than as the expected product.
+	 */
+	private static final String BATCH_FRAGMENT_GLSL = """
+		#version 450
+		layout(binding = 0, std140) uniform BatchTint { vec4 Tint; };
+		layout(binding = 1) uniform sampler2D BatchTexture;
+		layout(location = 0) out vec4 color;
+		void main() { color = Tint * texture(BatchTexture, vec2(0.5)); }
+		""";
 	private static final String MIP_FRAGMENT_GLSL = """
 		#version 450
 		layout(binding = 0) uniform sampler2D Source;
@@ -219,6 +239,7 @@ public final class MetalShaderTranslationSmoke {
 			assertMipRenderTargetViewport(device);
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
+			assertBatchedResourceBindings(device);
 			assertQueriesAndLifetime(device, pipeline);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(
 				mappedDescriptor.vertexSource(), mappedDescriptor.vertexFunction(), mappedDescriptor.fragmentSource(), mappedDescriptor.fragmentFunction(),
@@ -380,6 +401,7 @@ public final class MetalShaderTranslationSmoke {
 	private static void assertMappedVertexDraw(final MetalDevice device, final MetalRenderPipeline pipeline) {
 		try (MetalCommandQueue queue = device.createCommandQueue();
 			 MetalTexture color = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 16, 16, 1));
+			 MetalTexture batchedColor = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 16, 16, 1));
 			 MetalBuffer vertices = device.createBuffer(3L * 16L, MetalBuffer.StorageMode.SHARED);
 			 MetalBuffer indices = device.createBuffer(3L * Short.BYTES, MetalBuffer.StorageMode.SHARED)) {
 			try (MetalBuffer.Mapping mapping = vertices.map()) {
@@ -391,16 +413,127 @@ public final class MetalShaderTranslationSmoke {
 			try (MetalBuffer.Mapping mapping = indices.map()) {
 				mapping.bytes().order(ByteOrder.nativeOrder()).asShortBuffer().put(new short[]{0, 1, 2});
 			}
-			try (MetalCommandBuffer commands = queue.createCommandBuffer();
-				 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
-					 MetalRenderPass.ColorAttachment.clear(color, 0.0, 0.0, 0.0, 1.0)))) {
-				pass.setPipeline(pipeline);
+			drawMappedTriangle(queue, pipeline, color, vertices, indices, null);
+			ByteBuffer immediate = color.readback(queue, 0);
+			assertRenderedPixelsVary(immediate);
+
+			// A batch is only worth having if it encodes what the per-command setters encode, and
+			// the pixels are the only place that shows. Both ABIs are compared against the same
+			// immediate render, so a checked build and a shipping build are held to one answer.
+			boolean checkedOriginally = MetalCommandStream.isChecked();
+			try {
+				for (boolean checked : new boolean[]{false, true}) {
+					MetalCommandStream.setChecked(checked);
+					drawMappedTriangle(queue, pipeline, batchedColor, vertices, indices, new MetalCommandStream());
+					assertSamePixels(immediate, batchedColor.readback(queue, 0), checked);
+				}
+			} finally {
+				MetalCommandStream.setChecked(checkedOriginally);
+			}
+		}
+	}
+
+	/** Draws the mapped triangle, through the batch ABI when {@code batch} is present. */
+	private static void drawMappedTriangle(
+		final MetalCommandQueue queue,
+		final MetalRenderPipeline pipeline,
+		final MetalTexture target,
+		final MetalBuffer vertices,
+		final MetalBuffer indices,
+		final MetalCommandStream batch
+	) {
+		try (MetalCommandBuffer commands = queue.createCommandBuffer();
+			 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+				 MetalRenderPass.ColorAttachment.clear(target, 0.0, 0.0, 0.0, 1.0)))) {
+			pass.setPipeline(pipeline);
+			if (batch == null) {
 				pass.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, vertices, 0L);
 				pass.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, indices, 0L, MetalRenderPass.IndexType.UINT16, 3, 1, 0, 0);
-				pass.close();
-				commands.commitAndWait();
+			} else {
+				batch.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, vertices, 0L);
+				batch.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, indices, 0L, MetalRenderPass.IndexType.UINT16, 3, 1, 0, 0);
+				pass.submit(batch);
 			}
-			assertRenderedPixelsVary(color.readback(queue, 0));
+			pass.close();
+			commands.commitAndWait();
+		}
+	}
+
+	/**
+	 * Binds a uniform, a texture, and a sampler through the batch ABI and draws indexed with them.
+	 *
+	 * <p>The shader multiplies the uniform by the sampled texel, so the expected red is only
+	 * produced when every one of those three binds reached the fragment argument table: a missed
+	 * uniform or an unbound texture reads as zero and the product is black.
+	 */
+	private static void assertBatchedResourceBindings(final MetalDevice device) {
+		try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
+				 BATCH_VERTEX_GLSL, "smoke/batch.vert", BATCH_FRAGMENT_GLSL, "smoke/batch.frag",
+				 MetalTexture.Format.RGBA8_UNORM, null));
+			 MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture color = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 8, 8, 1));
+			 MetalTexture source = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 2, 2, 1));
+			 MetalTextureView sourceView = source.createView();
+			 MetalSampler sampler = device.createSampler(new MetalSampler.Descriptor(
+				 MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE));
+			 MetalBuffer tint = device.createBuffer(16L, MetalBuffer.StorageMode.SHARED);
+			 MetalBuffer indices = device.createBuffer(3L * Short.BYTES, MetalBuffer.StorageMode.SHARED)) {
+			// Magenta texels against a yellow tint: only their product is red, so neither binding
+			// alone can produce the colour this asserts on.
+			ByteBuffer texels = ByteBuffer.allocateDirect(2 * 2 * Integer.BYTES).order(ByteOrder.nativeOrder());
+			for (int texel = 0; texel < 4; texel++) texels.putInt(0xFFFF00FF);
+			source.upload(queue, 0, texels.flip());
+			try (MetalBuffer.Mapping mapping = tint.map()) {
+				mapping.bytes().order(ByteOrder.nativeOrder()).asFloatBuffer().put(new float[]{1.0F, 1.0F, 0.0F, 1.0F});
+			}
+			try (MetalBuffer.Mapping mapping = indices.map()) {
+				mapping.bytes().order(ByteOrder.nativeOrder()).asShortBuffer().put(new short[]{0, 1, 2});
+			}
+
+			boolean checkedOriginally = MetalCommandStream.isChecked();
+			try {
+				for (boolean checked : new boolean[]{false, true}) {
+					MetalCommandStream.setChecked(checked);
+					MetalCommandStream batch = new MetalCommandStream();
+					batch.setUniformBuffer(0, tint, 0L, MetalRenderPass.STAGE_FRAGMENT);
+					batch.setTexture(1, sourceView, MetalRenderPass.STAGE_FRAGMENT);
+					batch.setSampler(1, sampler, MetalRenderPass.STAGE_FRAGMENT);
+					batch.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, indices, 0L, MetalRenderPass.IndexType.UINT16, 3, 1, 0, 0);
+					if (batch.commandCount() != 4) {
+						throw new AssertionError("Metal command batch recorded " + batch.commandCount() + " commands rather than four");
+					}
+					try (MetalCommandBuffer commands = queue.createCommandBuffer();
+						 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+							 MetalRenderPass.ColorAttachment.clear(color, 0.0, 0.0, 1.0, 1.0)))) {
+						pass.setPipeline(pipeline);
+						pass.submit(batch);
+						pass.close();
+						commands.commitAndWait();
+					}
+					ByteBuffer pixels = color.readback(queue, 0);
+					int red = Byte.toUnsignedInt(pixels.get((4 * 8 + 4) * 4));
+					int green = Byte.toUnsignedInt(pixels.get((4 * 8 + 4) * 4 + 1));
+					int blue = Byte.toUnsignedInt(pixels.get((4 * 8 + 4) * 4 + 2));
+					if (red < 200 || green > 20 || blue > 20) {
+						throw new AssertionError("Metal command batch (checked=" + checked + ") did not bind its uniform, texture, and sampler: rgb="
+							+ red + "," + green + "," + blue);
+					}
+				}
+			} finally {
+				MetalCommandStream.setChecked(checkedOriginally);
+			}
+		}
+	}
+
+	private static void assertSamePixels(final ByteBuffer immediate, final ByteBuffer batched, final boolean checked) {
+		if (immediate.remaining() != batched.remaining()) {
+			throw new AssertionError("Metal command batch produced a readback of a different size");
+		}
+		for (int index = 0; index < immediate.remaining(); index++) {
+			if (immediate.get(immediate.position() + index) != batched.get(batched.position() + index)) {
+				throw new AssertionError("Metal command batch (checked=" + checked
+					+ ") rendered differently from the per-command path, first at byte " + index);
+			}
 		}
 	}
 

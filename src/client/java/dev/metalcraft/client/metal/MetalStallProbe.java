@@ -41,6 +41,14 @@ public final class MetalStallProbe {
 		/** Allocating a direct {@code ByteBuffer} for Blaze3D to build one frame's data in. */
 		CPU_ALLOC,
 		/**
+		 * Handing a recorded batch of binds and draws to Metal, once per batch rather than per draw.
+		 *
+		 * <p>Its byte count is the size of the recorded stream, so dividing by the record size gives
+		 * the commands the crossing carried - which is the number that says whether batching is
+		 * reaching the pass that matters.
+		 */
+		COMMAND_BATCH,
+		/**
 		 * The whole of {@code Minecraft.renderFrame}, as a container rather than a leaf.
 		 *
 		 * <p>It encloses {@code ACQUIRE}, {@code SUBMIT}, {@code PRESENT}, {@code LEVEL_END_FRAME},

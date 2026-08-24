@@ -16,6 +16,8 @@ public final class MetalRenderPass implements AutoCloseable {
 	public static final int STAGE_ALL = STAGE_VERTEX | STAGE_FRAGMENT;
 	/** Buffers and textures a Metal argument table addresses. */
 	public static final int RESOURCE_SLOTS = 16;
+	/** Vertex-buffer binding points a Metal render encoder addresses. */
+	public static final int VERTEX_BUFFER_SLOTS = 31;
 
 	public enum LoadAction {
 		LOAD,
@@ -40,7 +42,8 @@ public final class MetalRenderPass implements AutoCloseable {
 		UINT16(2),
 		UINT32(4);
 
-		private final int bytes;
+		/** Package-private so {@link MetalCommandStream} can align the offsets it records. */
+		final int bytes;
 
 		IndexType(final int bytes) {
 			this.bytes = bytes;
@@ -205,8 +208,8 @@ public final class MetalRenderPass implements AutoCloseable {
 	}
 
 	public synchronized void setVertexBuffer(final int index, final MetalBuffer buffer, final long offset) {
-		if (index < 0 || index >= 31) {
-			throw new IllegalArgumentException("Metal vertex buffer index must be between 0 and 30");
+		if (index < 0 || index >= VERTEX_BUFFER_SLOTS) {
+			throw new IllegalArgumentException("Metal vertex buffer index must be between 0 and " + (VERTEX_BUFFER_SLOTS - 1));
 		}
 		MetalBuffer.checkRange(buffer.size(), offset, 1L, "vertex binding");
 		MetalNative.nSetVertexBuffer(this.requireOpenHandle(), index, buffer.requireOpenHandle(), offset);
@@ -266,7 +269,8 @@ public final class MetalRenderPass implements AutoCloseable {
 		MetalNative.nSetSampler(this.requireOpenHandle(), index, sampler.requireOpenHandle(), stages);
 	}
 
-	private static int checkedStages(final int stages) {
+	/** Package-private because {@link MetalCommandStream} records the same masks. */
+	static int checkedStages(final int stages) {
 		if ((stages & ~STAGE_ALL) != 0) {
 			throw new IllegalArgumentException("Metal resource bindings apply to the vertex and fragment stages only");
 		}
@@ -480,6 +484,28 @@ public final class MetalRenderPass implements AutoCloseable {
 			commandsOffset,
 			drawCount
 		);
+	}
+
+	/**
+	 * Replays a recorded batch of binds and draws into this pass, in one crossing.
+	 *
+	 * <p>The batch encodes exactly what the setters above would have encoded, in the order it was
+	 * recorded, so this is a cheaper spelling of the same commands rather than a different one. What
+	 * it does not carry is the per-command Java monitor and JNI call: everything a batch names is
+	 * resolved and pinned together on the far side.
+	 *
+	 * @see MetalCommandStream
+	 */
+	public synchronized void submit(final MetalCommandStream commands) {
+		if (commands == null) {
+			throw new NullPointerException("commands");
+		}
+		if (commands.commandCount() == 0) {
+			return;
+		}
+		long handle = this.requireOpenHandle();
+		this.requirePipeline();
+		MetalNative.nSubmitCommandStream(handle, commands.prepared(), commands.byteCount());
 	}
 
 	public synchronized boolean isClosed() {

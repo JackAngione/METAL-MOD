@@ -309,6 +309,14 @@ public final class MetalNative {
 		int drawCount
 	);
 
+	/**
+	 * Replays a recorded batch of binds and draws.
+	 *
+	 * @param commands a direct buffer holding a {@link MetalCommandStream} header and its records
+	 * @param byteCount how much of {@code commands} the batch occupies
+	 */
+	static native void nSubmitCommandStream(long renderPassHandle, java.nio.ByteBuffer commands, int byteCount);
+
 	static native void nEndRenderPass(long handle);
 
 	static native void nReleaseDevice(long handle);

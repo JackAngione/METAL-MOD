@@ -448,6 +448,54 @@ tail after all - not of the 170 ms spike, which it never was, but of a tail an o
 smaller than this document has been quoting. The allocation behind it is vanilla chunk meshing;
 MetalCraft is 0.6% of allocation during traversal.
 
+### Command batching, and a quarter of the render thread's CPU time
+
+Every bind and every draw used to be a synchronized Java method wrapping its own JNI call, which
+then took the native registry's global lock, resolved its handles, and pinned its resources before
+issuing the one Metal call it existed for. `MetalRenderPassBackend.drawMultipleIndexed` - the entry
+point Minecraft 26.2 draws chunk sections through - now records those commands into
+`MetalCommandStream`, a flat array of 48-byte records in one reused direct buffer, and hands the
+whole array to `nSubmitCommandStream`. One crossing resolves every handle, pins every resource in a
+single acquisition of the in-flight set's lock, and issues every encoder call.
+
+At 4K this scene records **about 14,000 commands per frame and submits them in three to nine
+batches**. What used to be 14,000 Java monitors, 14,000 JNI transitions, and 14,000 acquisitions of
+the registry lock is now that many batches of each.
+
+Two three-repeat runs, back to back in one session at 3840x2104, the second adding
+`-PmetalCommandBatching=false` to restore the per-command path and change nothing else:
+
+| Median of three repeats | Stationary | Pan | Traversal |
+|---|---:|---:|---:|
+| p50 CPU per frame, batched | **3.064 ms** | **3.031 ms** | **3.043 ms** |
+| p50 CPU per frame, per command | 4.086 ms | 3.911 ms | 3.979 ms |
+| Average FPS, batched | **209.4** | **219.5** | **202.3** |
+| Average FPS, per command | 188.7 | 199.7 | 190.7 |
+
+Per-frame CPU time is the number to trust, for the same reason as the binding work above: this
+change removes CPU work from the render thread and nothing else. It fell by 22-25% in every phase,
+every paired repeat was faster batched, and in stationary and traversal the two sets of repeats do
+not overlap at all. The FPS row moved with it, by 6-11%, but those sets *do* overlap in pan and
+traversal, so the frame rate corroborates the CPU column rather than standing on its own. Both runs
+were free-running - `p50AcquireMs` around 0.02 in every phase - so neither was paced by presentation.
+
+**The 1% lows did not move**, and were not expected to. They are collection time driven by vanilla
+chunk meshing, and batching removes CPU work rather than allocation.
+
+The batch submission is itself timed, as the `command_batch` source: about 0.78 ms per frame for
+14,000 commands, or 55 ns each - and that figure still contains every Metal encoder call the
+per-command path also made. Its byte count is the size of the recorded stream, so dividing by the
+48-byte record size gives the commands a frame's crossings carried.
+
+Validation moved rather than disappeared. The recorder makes the same range checks the per-command
+setters made, from buffer sizes it already knows in Java; the native decoder re-checks everything a
+record can be judged on by itself - opcodes, slot indices, stage masks, counts, index alignment -
+because those are integer compares, and leaves the buffer-length arithmetic alone because that is a
+message send per command. `-PmetalCheckedCommands=true` turns the native range checks back on and
+names the offending command by index. The shader smoke test renders the same draws through both
+ABIs and through the per-command path and compares the readbacks byte for byte, which is the only
+evidence that the coarse path encodes what it replaces.
+
 ### Known gaps
 
 Per-frame attribution now covers the render path, the JVM's collection time, time spent outside the
@@ -474,7 +522,7 @@ Current status of each item, and the work that is open now, is tracked in [NEXT_
 |---:|---|---|---|
 | 0 | ~~Replace the benchmark harness~~ (done; see above) | Done. Established that the traversal tail, not steady-state draw cost, is the problem | Medium |
 | 1 | Persistent triple-buffered shared upload/uniform/vertex arenas; reuse blit encoders | High, and now the top target: the frame became CPU-bound once the depth-clear allocation was removed | Medium |
-| 2 | Batch the JNI render ABI and replace the locked/boxed handle registry hot path | **Mostly done**: caching the root device per entry gave +38%; the O(live objects) release scan became a child count; the boxed-`NSNumber` dictionary is now a slot+generation table and stage-selective binding halves the bind calls, together worth +35% and a quarter of the per-frame CPU time. Remaining: command batching itself | Medium-high |
+| 2 | Batch the JNI render ABI and replace the locked/boxed handle registry hot path | **Done**: caching the root device per entry gave +38%; the O(live objects) release scan became a child count; the boxed-`NSNumber` dictionary is now a slot+generation table and stage-selective binding halves the bind calls, together worth +35% and a quarter of the per-frame CPU time; command batching then took another 22-25% of per-frame CPU off the multi-draw path. Remaining: argument buffers, and whether the registry lock belongs on the render thread at all | Medium-high |
 | 2b | ~~Stop rebuilding the flattened bind-group layout per draw~~ (done) | Done. Removed 98% of the renderer's Java allocation and gave +20-26%; see above | Low |
 | 3 | Remove artificial render-pass/resource churn; correct load/store actions | **Partly done**: the depth-clear scratch target is gone (20x acquire improvement). Remaining: load/store liveness, pass merging | Medium |
 | 4 | Cache shader libraries, pipeline variants, texel views, and translated outputs | Medium frame-hitch/startup win | Medium |
@@ -499,13 +547,13 @@ Also isolate actual readback submissions. Any pending callback currently turns s
 
 ### 2. Make command submission coarse-grained
 
-Every binding and draw is a synchronized Java method followed by a separate JNI call (`MetalRenderPass.java:162-229,247-300`). Resource binding can call native code for a uniform plus both a texture and sampler before a draw (`MetalRenderPassBackend.java`), though each such call now reaches one stage rather than two. Native lookup then locked one global `NSLock`, boxed `jlong` handles into `NSNumber`, walked ownership chains, and looked up every object. Only the lock remains; the rest is described under the measured effect above. Every pin takes another lock and hashes into an `NSMutableSet` (`metalcraft.m:197-240`). Finally, releasing any object scans every registry value for children while holding the global lock (`metalcraft.m:955-986`); per-frame temporary-buffer churn makes that O(live objects) release especially costly.
+Every binding and draw outside `drawMultipleIndexed` is still a synchronized Java method followed by a separate JNI call (`MetalRenderPass.java`); the multi-draw path is batched, and the effect is measured above. Resource binding can call native code for a uniform plus both a texture and sampler before a draw (`MetalRenderPassBackend.java`), though each such call now reaches one stage rather than two. Native lookup then locked one global `NSLock`, boxed `jlong` handles into `NSNumber`, walked ownership chains, and looked up every object. Only the lock remains; the rest is described under the measured effect above, and a batch now takes it once per 256 commands rather than once per command. Every pin outside a batch takes another lock and hashes into an `NSMutableSet` (`metalcraft.m`). Finally, releasing any object scans every registry value for children while holding the global lock (`metalcraft.m:955-986`); per-frame temporary-buffer churn makes that O(live objects) release especially costly.
 
 First add release-mode telemetry for JNI calls, registry lookups/lock wait, pins, releases, and live-object count. Then:
 
-1. Submit compact native command arrays/direct-buffer structs for repeated binds and draws, validated once per batch. Keep a checked debug ABI, but make the production path coarse.
+1. ~~Submit compact native command arrays/direct-buffer structs for repeated binds and draws, validated once per batch. Keep a checked debug ABI, but make the production path coarse.~~ Done, for `drawMultipleIndexed`: see the measured effect above. Remaining here: the immediate path still stands for every other entry point, and nothing has shown that batching those is worth the branch.
 2. ~~Replace dictionary/`NSNumber` handles with slot+generation handles in a contiguous table, store the root device directly in every slot, maintain child counts instead of scanning all objects.~~ Done. Remaining here: shard or eliminate the render-thread lookup lock, which is still one global `NSLock`.
-3. Transfer an immutable in-flight resource set to the completion handler rather than locking for every render-thread pin. Cache the last bindings on the native encoder too.
+3. Transfer an immutable in-flight resource set to the completion handler rather than locking for every render-thread pin. Batching pins a whole batch under one acquisition (`pinAll:count:`), which removes the per-command lock round-trip but still hashes each object into an `NSMutableSet`. Cache the last bindings on the native encoder too.
 4. ~~Bind only shader stages that use a resource.~~ Done: the translated shaders are reflected for the slots each stage declares, and the bind calls take a stage mask. See the measured effect above.
 
 Apple does not publish a JNI cost model, so the exact win must come from local counters. The direction is consistent with Apple's guidance to do more GPU work with fewer CPU commands. Argument buffers explicitly reduce the overhead of assigning resources individually ([Improving CPU performance with argument buffers](https://developer.apple.com/documentation/metal/improving-cpu-performance-by-using-argument-buffers)).

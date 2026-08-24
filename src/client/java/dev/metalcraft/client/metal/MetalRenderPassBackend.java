@@ -38,6 +38,14 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	 * instead of once per pass.
 	 */
 	private static final int NAME_MAP_CAPACITY = 32;
+	/**
+	 * Whether a multi-draw records its binds and draws and submits them together.
+	 *
+	 * <p>A kill switch rather than a setting. Turning batching off restores the per-command path
+	 * exactly, which is what makes the two comparable back to back in one session - the only
+	 * comparison this renderer's 8-10% run-to-run spread admits.
+	 */
+	private static final boolean BATCHING = Boolean.parseBoolean(System.getProperty("metalcraft.commandBatching", "true"));
 
 	private final MetalGpuDevice device;
 	private final Map<String, GpuBufferSlice> uniforms = new HashMap<>(NAME_MAP_CAPACITY);
@@ -61,6 +69,17 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	private MetalGpuBuffer indexBuffer;
 	private MetalRenderPass.IndexType indexType;
 	private int debugGroups;
+	/**
+	 * The batch buffer, allocated on the first multi-draw and reused for the encoder's lifetime.
+	 *
+	 * <p>One adapter serves every pass on an encoder, so this is allocated once per process in
+	 * practice - which is the point: a per-pass batch buffer would trade thousands of JNI calls for
+	 * a per-pass direct allocation, and direct allocations are exactly what the renderer has spent
+	 * this long removing from the frame.
+	 */
+	private MetalCommandStream commands;
+	/** Non-null while a multi-draw is recording; binds and draws go to it instead of the encoder. */
+	private @Nullable MetalCommandStream recording;
 
 	MetalRenderPassBackend(final MetalGpuDevice device) {
 		this.device = device;
@@ -85,6 +104,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		this.outputWidth = width;
 		this.outputHeight = height;
 		this.hasDepth = depth;
+		this.recording = null;
 		this.uniforms.clear();
 		this.textures.clear();
 		this.clearBoundSlots();
@@ -103,7 +123,20 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		this.metal = null;
 	}
 
+	/**
+	 * The pass, with any batch recorded so far submitted first.
+	 *
+	 * <p>Every command outside the batch ABI reaches the encoder through here, and each one has to
+	 * land after the draws already recorded rather than ahead of them. Flushing at this seam is what
+	 * keeps that true without each caller having to know that a batch might be open.
+	 */
 	private MetalRenderPass pass() {
+		if (this.recording != null) this.submitBatch(this.recording);
+		return this.metal();
+	}
+
+	/** The pass without flushing, for the batch path itself and for {@link #submitBatch}. */
+	private MetalRenderPass metal() {
 		if (this.metal == null) throw new IllegalStateException("This Metal render pass has already been submitted");
 		return this.metal;
 	}
@@ -173,7 +206,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	public void setVertexBuffer(final int slot, final @Nullable GpuBufferSlice vertexBuffer) {
 		if (vertexBuffer != null) {
 			MetalGpuBuffer buffer = requireBuffer(vertexBuffer.buffer());
-			this.pass().setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX + slot, buffer.metal(), vertexBuffer.offset());
+			this.encodeVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX + slot, buffer.metal(), vertexBuffer.offset());
 		}
 	}
 
@@ -190,7 +223,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	public void drawIndexed(final int indexCount, final int instanceCount, final int firstIndex, final int vertexOffset, final int firstInstance) {
 		this.bindResources();
 		this.requireIndexBuffer();
-		this.pass().drawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instanceCount, vertexOffset, firstInstance);
+		this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instanceCount, vertexOffset, firstInstance);
 	}
 
 	@Override
@@ -207,7 +240,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		for (int draw = 0; draw < drawCount; draw++) {
 			int count = indexCounts.get(indexCounts.position() + draw);
 			int baseVertex = vertexOffsets.get(vertexOffsets.position() + draw);
-			this.pass().drawIndexed(this.primitive(), this.indexBuffer.metal(), firstIndexOffsets.get(firstIndexOffsets.position() + draw), this.indexType, count, 1, baseVertex, 0);
+			this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), firstIndexOffsets.get(firstIndexOffsets.position() + draw), this.indexType, count, 1, baseVertex, 0);
 		}
 	}
 
@@ -226,13 +259,21 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		final Collection<String> dynamicUniforms,
 		final T uniformArgument
 	) {
-		for (RenderPass.Draw<T> draw : draws) {
-			BiConsumer<T, RenderPass.UniformUploader> uploader = draw.uniformUploaderConsumer();
-			if (uploader != null) uploader.accept(uniformArgument, this::setUniform);
-			this.setIndexBuffer(draw.indexBuffer() == null ? defaultIndexBuffer : draw.indexBuffer(), draw.indexType() == null ? defaultIndexType : draw.indexType());
-			this.setVertexBuffer(draw.slot(), draw.vertexBuffer().slice());
-			this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
+		MetalCommandStream batch = BATCHING ? this.beginRecording() : null;
+		try {
+			for (RenderPass.Draw<T> draw : draws) {
+				BiConsumer<T, RenderPass.UniformUploader> uploader = draw.uniformUploaderConsumer();
+				if (uploader != null) uploader.accept(uniformArgument, this::setUniform);
+				this.setIndexBuffer(draw.indexBuffer() == null ? defaultIndexBuffer : draw.indexBuffer(), draw.indexType() == null ? defaultIndexType : draw.indexType());
+				this.setVertexBuffer(draw.slot(), draw.vertexBuffer().slice());
+				this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
+			}
+		} finally {
+			// Cleared before the batch is submitted, so a draw that threw part-way discards what it
+			// recorded rather than encoding half a multi-draw into the pass.
+			this.recording = null;
 		}
+		if (batch != null) this.submitBatch(batch);
 	}
 
 	@Override
@@ -283,12 +324,12 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 					if (description.gpuFormat() == null) {
 						throw new IllegalStateException("Metal texel-buffer uniform has no format: " + description.name());
 					}
-					this.pass().setTexelBuffer(
+					this.encodeTexelBuffer(
 						index, buffer, value.offset(), value.length(), Blaze3DMetalMappings.textureFormat(description.gpuFormat()),
 						this.pipeline.textureStages(index)
 					);
 				} else {
-					this.pass().setUniformBuffer(index, buffer, value.offset(), this.pipeline.bufferStages(index));
+					this.encodeUniformBuffer(index, buffer, value.offset(), this.pipeline.bufferStages(index));
 				}
 				this.boundUniforms[index] = value;
 			}
@@ -304,11 +345,92 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			// equals() performed, without boxing the slot to look the pair up.
 			if (this.boundTextureViews[resourceIndex] != value.view || this.boundSamplers[resourceIndex] != value.sampler) {
 				int stages = this.pipeline.textureStages(resourceIndex);
-				this.pass().setTexture(resourceIndex, value.view.metal(), stages);
-				this.pass().setSampler(resourceIndex, value.sampler.metal(), stages);
+				this.encodeTexture(resourceIndex, value.view.metal(), stages);
+				this.encodeSampler(resourceIndex, value.sampler.metal(), stages);
 				this.boundTextureViews[resourceIndex] = value.view;
 				this.boundSamplers[resourceIndex] = value.sampler;
 			}
+		}
+	}
+
+	/**
+	 * Starts recording into the reusable batch buffer.
+	 *
+	 * <p>Every bind and draw below asks {@link #recording} where to go, so opening a batch is the
+	 * only thing that has to know batching exists.
+	 */
+	private MetalCommandStream beginRecording() {
+		if (this.commands == null) this.commands = new MetalCommandStream();
+		this.commands.reset();
+		this.recording = this.commands;
+		return this.commands;
+	}
+
+	/**
+	 * Hands a recorded batch to the pass and empties it.
+	 *
+	 * <p>Timed as a whole, because that is the granularity the change is about: a batch's cost has
+	 * to be read against the commands it carried, which is what the recorded byte count reports.
+	 */
+	private void submitBatch(final MetalCommandStream batch) {
+		if (batch.commandCount() == 0) return;
+		long startedNs = MetalStallProbe.begin();
+		long bytes = batch.byteCount();
+		this.metal().submit(batch);
+		MetalStallProbe.end(MetalStallProbe.Source.COMMAND_BATCH, startedNs, bytes);
+		batch.reset();
+	}
+
+	private void encodeVertexBuffer(final int index, final MetalBuffer buffer, final long offset) {
+		if (this.recording != null) this.recording.setVertexBuffer(index, buffer, offset);
+		else this.metal().setVertexBuffer(index, buffer, offset);
+	}
+
+	private void encodeUniformBuffer(final int index, final MetalBuffer buffer, final long offset, final int stages) {
+		if (this.recording != null) this.recording.setUniformBuffer(index, buffer, offset, stages);
+		else this.metal().setUniformBuffer(index, buffer, offset, stages);
+	}
+
+	private void encodeTexture(final int index, final MetalTextureView textureView, final int stages) {
+		if (this.recording != null) this.recording.setTexture(index, textureView, stages);
+		else this.metal().setTexture(index, textureView, stages);
+	}
+
+	private void encodeSampler(final int index, final MetalSampler sampler, final int stages) {
+		if (this.recording != null) this.recording.setSampler(index, sampler, stages);
+		else this.metal().setSampler(index, sampler, stages);
+	}
+
+	/**
+	 * Texel buffers are not in the batch ABI, deliberately: binding one means resolving a cached
+	 * texture view against the buffer's format alignment, which is far more native work than a
+	 * compact record can describe and is rebound once per pass rather than once per draw.
+	 */
+	private void encodeTexelBuffer(
+		final int index,
+		final MetalBuffer buffer,
+		final long offset,
+		final long length,
+		final MetalTexture.Format format,
+		final int stages
+	) {
+		this.pass().setTexelBuffer(index, buffer, offset, length, format, stages);
+	}
+
+	private void encodeDrawIndexed(
+		final MetalRenderPass.Primitive primitive,
+		final MetalBuffer indexBuffer,
+		final long indexBufferOffset,
+		final MetalRenderPass.IndexType indexType,
+		final int indexCount,
+		final int instanceCount,
+		final int baseVertex,
+		final int baseInstance
+	) {
+		if (this.recording != null) {
+			this.recording.drawIndexed(primitive, indexBuffer, indexBufferOffset, indexType, indexCount, instanceCount, baseVertex, baseInstance);
+		} else {
+			this.metal().drawIndexed(primitive, indexBuffer, indexBufferOffset, indexType, indexCount, instanceCount, baseVertex, baseInstance);
 		}
 	}
 
@@ -329,7 +451,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		boolean useShorts = vertexCount <= 1 << 16;
 		// The shared fan buffer is already filled; a smaller fan is a prefix of a larger one.
 		MetalBuffer indices = this.device.fanIndices(vertexCount, useShorts);
-		this.pass().drawIndexed(
+		this.encodeDrawIndexed(
 			MetalRenderPass.Primitive.TRIANGLE,
 			indices,
 			0L,

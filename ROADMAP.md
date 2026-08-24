@@ -72,7 +72,7 @@ This milestone proved that Minecraft 26.2's backend abstraction is usable, but i
 - [x] Name the tasks in Minecraft's main-thread queue, with a positive-control assertion so a silent census cannot read as an empty one.
 - [x] Separate the client gametest harness's frame handoff from Minecraft's task queue: the 170 ms traversal spike was the harness parking the render thread, and the queue's own drain measures 0.000 ms on that frame.
 - [ ] Reduce the real traversal tail, which is collection: 15-20 ms frames of which 12-17 ms is a pause, driven by vanilla chunk meshing's allocation rather than by this renderer.
-- [ ] Batch the render ABI so a bind-and-draw sequence crosses JNI once rather than per command.
+- [x] Batch the render ABI so a bind-and-draw sequence crosses JNI once rather than per command: `drawMultipleIndexed` records ~14,000 commands per 4K frame into a flat record array and submits them in three to nine crossings, for 22-25% less render-thread CPU per frame.
 - [ ] Propagate attachment liveness so dead attachments store `DontCare`, and merge compatible passes.
 - [ ] Localise GPU time to a stage with encoder-level counter samples, not just per command buffer.
 - [ ] Compare OpenGL and Vulkan/Metal on M1, M2, M3, and M4 families.

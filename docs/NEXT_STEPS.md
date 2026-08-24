@@ -1,6 +1,6 @@
 # Next steps
 
-Last updated: 2026-08-23, after finding that the traversal tail was the test harness, on `metal-benchmark-and-perf`.
+Last updated: 2026-08-23, after batching the multi-draw command path, on `metal-benchmark-and-perf`.
 
 A handoff for whoever picks up the performance work. It records what is known, what is measured,
 what is still open, and which claims elsewhere in this repository are now out of date. Read
@@ -31,6 +31,10 @@ Useful flags:
   changes the workload if you ever run on a different display.
 - `-PmetalJvmArgs="..."` passes JVM flags through, e.g. `-Xlog:gc*:file=gc.log:time,uptime` or
   `-XX:StartFlightRecording=filename=alloc.jfr,settings=profile`.
+- `-PmetalCommandBatching=false` restores the per-command JNI path under `drawMultipleIndexed` and
+  changes nothing else, so a batched build can be compared against an unbatched one back to back.
+- `-PmetalCheckedCommands=true` makes the native decoder re-validate every batched command against
+  the Metal objects it names. It is for proving the two paths agree, not for a timed run.
 
 The requested resolution is a request. A windowed frame cannot always reach the display's full pixel
 count - macOS keeps one below the menu bar, so a 3840x2160 request lands at 3840x2104 here. The run
@@ -82,7 +86,9 @@ the gaps between them uncounted, and a pair whose end sits behind a branch never
 matters because `runTick` skips packets, tasks and ticks entirely when `advanceGameTime` is false.
 
 *Details* happen inside a phase and explain it: `acquire`, `submit`, `present`,
-`level_end_frame`, `buffer_map`, `upload_copy`, `jvm_gc`, and the rest. A collection pause can land
+`level_end_frame`, `buffer_map`, `upload_copy`, `command_batch`, `jvm_gc`, and the rest.
+`command_batch` is one crossing carrying a whole multi-draw; its byte count is the size of the
+recorded stream, so dividing by 48 gives the commands the crossing carried. A collection pause can land
 in any phase, so it is a detail, not a phase. Summing details as well as phases subtracts the same
 milliseconds twice - it drove the residual to -42 ms on the frame quoted above.
 
@@ -178,33 +184,61 @@ roughly one frame per run, not a distributed cost.
 
 ### 2. Command batching
 
-**Status:** open, and now the largest item that is actually ours.
+**Status:** done for the path that matters, and measured. It removed 22-25% of the render thread's
+per-frame CPU time in every phase.
 
-Binding and drawing is one synchronized Java method plus a separate JNI call each. Stage-selective
-binding roughly halved the number of those calls and the slot table made each one much cheaper, and
-together those were worth about a quarter of the per-frame CPU time - but the shape is unchanged:
-one crossing per command.
+`MetalRenderPassBackend.drawMultipleIndexed` - the entry point Minecraft 26.2 draws chunk sections
+through - no longer crosses JNI per bind and per draw. It records them into `MetalCommandStream`, a
+flat array of 48-byte records in one direct buffer that is allocated per encoder and reused, and
+hands the array to `nSubmitCommandStream`. One crossing resolves every handle, pins every resource,
+and issues every encoder call. At 4K this scene records about 14,000 commands per frame and submits
+them in three to nine batches, so what used to be 14,000 Java monitors, 14,000 JNI transitions, and
+14,000 acquisitions of the native registry lock is now that many batches of each.
 
-The plan is to submit compact native command arrays or direct-buffer structs for repeated binds and
-draws, validated once per batch, keeping a checked debug ABI behind a flag. The hot caller to design
-against is `MetalRenderPassBackend.drawMultipleIndexed`, which is what Minecraft 26.2 uses for chunk
-sections: per draw it sets a vertex buffer, resolves the uniform and sampler layout by name, and
-issues a draw.
+The numbers, and the two runs behind them, are in
+[APPLE_SILICON_PERFORMANCE.md](APPLE_SILICON_PERFORMANCE.md). The short version: p50 CPU per frame
+fell from 4.086/3.911/3.979 ms to 3.064/3.031/3.043 ms across stationary, pan and traversal, every
+paired repeat was faster batched, and the 1% lows did not move - which is what item 1 predicts,
+because the tail is collection and this removes CPU work rather than allocation.
 
-Two batch fixes that look easy are **not currently worth doing**: the `multiDrawIndexed(PointerBuffer, …)`
-overload loops in Java and crosses JNI per draw, and the Java multi-draw paths build several
-primitive arrays before crossing. Nothing in Minecraft 26.2 calls either - `drawMultipleIndexed` is
-the only multi-draw entry point the client uses. Fix them when a caller appears.
+**The ABI, in one paragraph.** A record is a fixed 48 bytes with named fields rather than a packed
+per-opcode encoding, so decoding is an array index and an ABI mismatch is one comparison: the stream
+header carries the record size Java believes in, and a native build whose struct has drifted fails
+on the first batch instead of encoding garbage. Five opcodes - vertex buffer, uniform buffer,
+texture, sampler, indexed draw - each naming exactly one Metal object, which is what lets the
+resolved objects be a plain array parallel to the records. Adding one means an opcode constant, an
+encode method on `MetalCommandStream`, a case in `mc_validate_command`, and a case in
+`mc_encode_commands`; the operand's type goes in `mc_command_operand_type`.
 
-The registry's lookup lock is a single global lock taken on every command, and it is now an
-`os_unfair_lock` rather than an `NSLock`. With the lookups behind it reduced to a bounds check and a
-few field reads, the `objc_msgSend` plus `pthread_mutex` round-trip that `NSLock` charges was most of
-what a lookup cost; the replacement is an atomic compare-and-swap when uncontended, and it dropped
-the `pthread_once` that guarded the lock's lazy allocation off the same path. **This was not measured
-as a win** - it is below what the harness can resolve against an 8-10% spread, and it is recorded
-here as a cost removed, not as a speedup. What is still open is whether the lock should exist on the
-render-thread path at all: sharding it by slot, or giving lookups a lock-free read path, is the next
-step if command batching does not make the question moot by taking the lock once per batch.
+**Where validation went.** The recorder makes the same range checks the per-command setters made,
+from buffer sizes Java already knows. The native decoder checks everything a record can be judged on
+by itself - opcodes, slot indices, stage masks, counts, index alignment - because those are integer
+compares, and leaves buffer-length arithmetic alone because that costs a message send per command.
+`-PmetalCheckedCommands=true` turns those back on and names the offending command by index. The
+shader smoke test renders the same draws through the per-command path, the coarse batch, and the
+checked batch, and compares the readbacks byte for byte; that comparison is the only evidence that
+the coarse path encodes what it replaces, so keep it working when the ABI changes.
+
+**What is still open here.**
+
+- **Texel buffers are deliberately outside the ABI.** Binding one resolves a cached texture view
+  against the buffer's format alignment, which is far more native work than a compact record can
+  describe, and it is rebound once per pass rather than once per draw. A batch flushes when one
+  appears, so ordering is preserved. Every other immediate command flushes for the same reason, at
+  one seam - `MetalRenderPassBackend.pass()`.
+- **The registry lock is still global**, and a batch now takes it once per 256 commands rather than
+  once per command. The stride exists because holding it for a whole batch would stall chunk-meshing
+  threads for as long as the batch is large. Sharding it, or giving lookups a lock-free read path,
+  is still the open question - but it is now a much smaller one.
+- **Pinning still hashes every resource into an `NSMutableSet`**, once per batch under one lock
+  rather than once per command under one lock each. Handing an immutable set to the completion
+  handler, as item 3 of the ranked plan describes, is what would remove the hashing too.
+- **The other entry points are still per-command.** Nothing has shown that batching a single
+  `drawIndexed` is worth the branch, and `drawMultipleIndexed` is where the commands are.
+- Two batch fixes that look easy are **still not worth doing**: the
+  `multiDrawIndexed(PointerBuffer, …)` overload loops in Java and crosses JNI per draw, and the Java
+  multi-draw paths build several primitive arrays before crossing. Nothing in Minecraft 26.2 calls
+  either. Fix them when a caller appears.
 
 ### 3. GPU timing below the command buffer
 
