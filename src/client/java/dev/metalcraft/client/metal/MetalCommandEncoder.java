@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
+import java.util.function.Supplier;
 import org.joml.Vector4fc;
 
 /** Persistent Blaze3D encoder that rotates owned Metal command buffers on submit. */
@@ -84,7 +85,8 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 				depth.clearValue().orElse(1.0)
 			);
 		}
-		this.renderPass = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(colorAttachment, depthAttachment));
+		this.renderPass = this.commands().beginRenderPass(
+			new MetalRenderPass.Descriptor(colorAttachment, depthAttachment), passKind(descriptor));
 		RenderPass.RenderArea area = descriptor.renderArea;
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
 		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
@@ -164,7 +166,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		// texture per call on the render path.
 		try (MetalRenderPass pass = this.commands().beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
 			new MetalRenderPass.DepthAttachment(depth.metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth)
-		))) {
+		), MetalPassCensus.kindFor("(depth clear)"))) {
 			// Beginning and ending the pass performs the clear.
 		}
 	}
@@ -408,6 +410,20 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	private static MetalGpuTextureView requireTextureView(final com.mojang.blaze3d.textures.GpuTextureView view) {
 		if (view instanceof MetalGpuTextureView metal) return metal;
 		throw new IllegalArgumentException("Texture view does not belong to the direct Metal backend");
+	}
+
+	/**
+	 * The pass census kind for a Blaze3D pass, from the label it was created with.
+	 *
+	 * <p>The label is a supplier, and resolving it allocates, so it is asked for only while a
+	 * capture is running - which is also the only time the pass carries counter samples.
+	 */
+	private static int passKind(final RenderPassDescriptor descriptor) {
+		if (!MetalStallProbe.isEnabled()) {
+			return MetalPassCensus.UNTIMED_KIND;
+		}
+		Supplier<String> label = descriptor.label();
+		return MetalPassCensus.kindFor(label == null ? "(unlabelled)" : label.get());
 	}
 
 	private static MetalTimestampQueryPool requireQueryPool(final GpuQueryPool pool) {

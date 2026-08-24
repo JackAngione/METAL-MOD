@@ -74,7 +74,7 @@ This milestone proved that Minecraft 26.2's backend abstraction is usable, but i
 - [ ] Reduce the real traversal tail, which is collection: 15-20 ms frames of which 12-17 ms is a pause, driven by vanilla chunk meshing's allocation rather than by this renderer.
 - [x] Batch the render ABI so a bind-and-draw sequence crosses JNI once rather than per command: `drawMultipleIndexed` records ~14,000 commands per 4K frame into a flat record array and submits them in three to nine crossings, for 22-25% less render-thread CPU per frame.
 - [ ] Propagate attachment liveness so dead attachments store `DontCare`, and merge compatible passes.
-- [ ] Localise GPU time to a stage with encoder-level counter samples, not just per command buffer.
+- [x] Localise GPU time to a render pass with stage-boundary counter samples, keyed by the Blaze3D pass label: Apple silicon samples counters only at encoder stage boundaries, so the pass descriptor's `sampleBufferAttachments` carry the timing and the mid-encoder `nWriteRenderTimestamp` path can never run on this hardware. Pass spans overlap and rank passes rather than partitioning the frame; the first reading puts clouds third in the frame and the sky in five separate full-size passes.
 - [ ] Compare OpenGL and Vulkan/Metal on M1, M2, M3, and M4 families.
 - [ ] Tune MoltenVK settings only when measurements demonstrate a win.
 - [ ] Add unified-memory-aware upload staging and allocation telemetry where Blaze3D exposes safe hooks.

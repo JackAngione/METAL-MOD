@@ -15,6 +15,7 @@ import com.mojang.blaze3d.vertex.VertexFormat;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import net.minecraft.resources.Identifier;
@@ -241,6 +242,7 @@ public final class MetalShaderTranslationSmoke {
 			assertMipLevelSampling(device);
 			assertBatchedResourceBindings(device);
 			assertQueriesAndLifetime(device, pipeline);
+			assertPassGpuTiming(device, pipeline);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(
 				mappedDescriptor.vertexSource(), mappedDescriptor.vertexFunction(), mappedDescriptor.fragmentSource(), mappedDescriptor.fragmentFunction(),
 				mappedDescriptor.colorTargets(), null, mappedDescriptor.vertexDescriptor(), MetalRenderPipeline.DepthState.DISABLED,
@@ -539,6 +541,94 @@ public final class MetalShaderTranslationSmoke {
 
 	private static void putVertex(final ByteBuffer bytes, final float x, final float y, final float z, final int color) {
 		bytes.putFloat(x).putFloat(y).putFloat(z).putInt(color);
+	}
+
+	/**
+	 * Pins the per-pass GPU timing against the command-buffer total it has to fit inside.
+	 *
+	 * <p>The pass is measured by counter samples the GPU writes at the encoder's stage boundaries,
+	 * and the command buffer is measured by Metal's own {@code GPUStartTime}/{@code GPUEndTime}.
+	 * They are separate mechanisms, so a pass reported as longer than the buffer that contains it
+	 * means the two have stopped agreeing about what they are timing - which is the failure mode
+	 * that would otherwise be discovered only as an implausible benchmark line.
+	 *
+	 * <p><b>Exactly one pass is timed here, and the containment check depends on that.</b> Pass
+	 * spans overlap each other on this hardware, so several timed passes in one command buffer can
+	 * and do sum past its GPU time; that is a property of the GPU rather than a fault, and asserting
+	 * against it would be asserting something false. See {@link MetalPassCensus}.
+	 */
+	private static void assertPassGpuTiming(final MetalDevice device, final MetalRenderPipeline pipeline) {
+		if (!device.supportsPassGpuTiming()) {
+			throw new AssertionError("The active Apple GPU did not expose stage-boundary counter sampling");
+		}
+		long[] frame = new long[MetalStallProbe.slots()];
+		List<MetalPassCensus.PassKind> passes;
+		MetalStallProbe.setEnabled(true);
+		try {
+			MetalPassCensus.reset();
+			int kind = MetalPassCensus.kindFor("smoke pass");
+			if (kind == MetalPassCensus.UNTIMED_KIND) {
+				throw new AssertionError("Metal pass census refused to intern a pass label while capturing");
+			}
+			try (MetalCommandQueue queue = device.createCommandQueue();
+				 MetalTexture color = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 64, 64, 1));
+				 MetalBuffer indexUpload = device.createBuffer(3L * Short.BYTES, MetalBuffer.StorageMode.SHARED);
+				 MetalBuffer indices = device.createBuffer(3L * Short.BYTES, MetalBuffer.StorageMode.PRIVATE)) {
+				try (MetalBuffer.Mapping mapping = indexUpload.map()) {
+					mapping.bytes().order(ByteOrder.nativeOrder()).asShortBuffer().put(new short[]{0, 1, 2});
+				}
+				try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+					commands.copyBuffer(indexUpload, 0L, indices, 0L, 3L * Short.BYTES);
+					// Untimed, so the timed pass below has to come in under the buffer's own total
+					// rather than accounting for all of it.
+					try (MetalRenderPass clearPass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+						MetalRenderPass.ColorAttachment.clear(color, 0.0, 0.0, 0.0, 1.0)
+					))) {
+						// Beginning and ending the pass performs the clear.
+					}
+					try (MetalRenderPass renderPass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+						new MetalRenderPass.ColorAttachment(
+							color, MetalRenderPass.LoadAction.LOAD, MetalRenderPass.StoreAction.STORE, 0.0, 0.0, 0.0, 0.0
+						)
+					), kind)) {
+						renderPass.setScissor(0, 0, 64, 64);
+						renderPass.setPipeline(pipeline);
+						for (int repeat = 0; repeat < 64; repeat++) {
+							renderPass.drawIndexed(
+								MetalRenderPass.Primitive.TRIANGLE, indices, 0L, MetalRenderPass.IndexType.UINT16, 3, 1, 3, 0
+							);
+						}
+					}
+					commands.commitAndWait();
+				}
+				assertRenderedPixelsVary(color.readback(queue, 0));
+			}
+			passes = MetalPassCensus.take();
+			MetalStallProbe.recordCompletedGpuWork();
+			MetalStallProbe.takeFrame(frame, 0);
+		} finally {
+			MetalStallProbe.setEnabled(false);
+		}
+
+		MetalPassCensus.PassKind timed = passes.stream()
+			.filter(pass -> pass.name().equals("smoke pass"))
+			.findFirst()
+			.orElseThrow(() -> new AssertionError("Metal pass census did not report the timed render pass"));
+		if (timed.count() != 1L) {
+			throw new AssertionError("Metal pass census reported " + timed.count() + " samples for one render pass");
+		}
+		if (!(timed.totalMs() > 0.0)) {
+			throw new AssertionError("Metal pass census reported no GPU time for a pass that drew 64 triangles");
+		}
+		int base = MetalStallProbe.Source.GPU_FRAME.ordinal() * MetalStallProbe.FIELDS;
+		double commandBufferMs = frame[base + MetalStallProbe.FIELD_NANOS] / 1_000_000.0;
+		if (!(commandBufferMs > 0.0)) {
+			throw new AssertionError("Metal reported no GPU time for a completed command buffer");
+		}
+		if (timed.totalMs() > commandBufferMs) {
+			throw new AssertionError("Metal pass GPU time of " + timed.totalMs()
+				+ " ms exceeded its command buffer's " + commandBufferMs + " ms");
+		}
 	}
 
 	private static void assertQueriesAndLifetime(final MetalDevice device, final MetalRenderPipeline pipeline) {

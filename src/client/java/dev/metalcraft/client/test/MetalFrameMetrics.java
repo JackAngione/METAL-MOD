@@ -1,5 +1,6 @@
 package dev.metalcraft.client.test;
 
+import dev.metalcraft.client.metal.MetalPassCensus;
 import dev.metalcraft.client.metal.MetalStallProbe;
 import dev.metalcraft.client.metal.MetalTaskCensus;
 import java.lang.management.GarbageCollectorMXBean;
@@ -74,8 +75,9 @@ public final class MetalFrameMetrics {
 		frameStartNs = 0L;
 		previousCollectionCount = collectionCount();
 		previousCollectionMillis = collectionMillis();
-		MetalTaskCensus.reset();
 		MetalStallProbe.setEnabled(true);
+		MetalTaskCensus.reset();
+		MetalPassCensus.reset();
 	}
 
 	/** Records that the render loop resumed, so time spent outside it can be separated out. */
@@ -106,6 +108,7 @@ public final class MetalFrameMetrics {
 		previousCollectionCount = collections;
 		previousCollectionMillis = collectionMillis;
 		MetalStallProbe.recordCompletedGpuWork();
+		MetalPassCensus.drainCompleted();
 		// Read unconditionally so the accumulators reset even for frames that are not retained.
 		MetalStallProbe.takeFrame(stalls, size * slots);
 		long interval = previousFrameEndNs == 0L ? 0L : frameEndNs - previousFrameEndNs;
@@ -132,10 +135,11 @@ public final class MetalFrameMetrics {
 		capturing = false;
 		// Taken before the probe is disabled, because the census is guarded on the same flag.
 		List<MetalTaskCensus.TaskKind> tasks = MetalTaskCensus.take();
+		List<MetalPassCensus.PassKind> passes = MetalPassCensus.take();
 		MetalStallProbe.setEnabled(false);
 		return Phase.of(name, Arrays.copyOf(cpuFrameTimes, size), Arrays.copyOf(frameIntervals, size),
 			Arrays.copyOf(outsideLoopTimes, size), Arrays.copyOf(stalls, size * MetalStallProbe.slots()),
-			tasks);
+			tasks, passes);
 	}
 
 	/** One source's contribution to a set of frames. */
@@ -207,14 +211,16 @@ public final class MetalFrameMetrics {
 		List<StallTotal> phaseStalls,
 		List<StallTotal> tailStalls,
 		List<FrameDetail> worstFrames,
-		List<MetalTaskCensus.TaskKind> taskKinds
+		List<MetalTaskCensus.TaskKind> taskKinds,
+		List<MetalPassCensus.PassKind> passKinds
 	) {
 		static Phase of(final String name, final long[] cpuFrameTimesNs, final long[] frameIntervalsNs,
 				final long[] outsideLoopNs, final long[] stallsNs,
-				final List<MetalTaskCensus.TaskKind> taskKinds) {
+				final List<MetalTaskCensus.TaskKind> taskKinds,
+				final List<MetalPassCensus.PassKind> passKinds) {
 			if (cpuFrameTimesNs.length == 0) {
 				return new Phase(name, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-					List.of(), List.of(), List.of(), taskKinds);
+					List.of(), List.of(), List.of(), taskKinds, passKinds);
 			}
 			long total = 0L;
 			for (long interval : frameIntervalsNs) {
@@ -276,7 +282,8 @@ public final class MetalFrameMetrics {
 				sum(stallsNs, all),
 				sum(stallsNs, tail),
 				List.copyOf(worstFrames),
-				taskKinds
+				taskKinds,
+				passKinds
 			);
 		}
 
@@ -352,6 +359,11 @@ public final class MetalFrameMetrics {
 			lines.add("phase=" + this.name + " worst-1% " + describe(this.tailStalls));
 			lines.add("phase=" + this.name + " tasks "
 				+ String.join(" ", this.taskKinds.stream().map(MetalTaskCensus.TaskKind::describe).toList()));
+			// Per-pass GPU spans. Concurrent with everything above them - the GPU runs a frame's
+			// passes while the render thread records the next - and, unlike the phases, concurrent
+			// with each other too, so they rank passes rather than partitioning the frame.
+			lines.add("phase=" + this.name + " gpuPassSpans "
+				+ String.join(" ", this.passKinds.stream().map(MetalPassCensus.PassKind::describe).toList()));
 			for (FrameDetail frame : this.worstFrames) {
 				lines.add("phase=" + this.name + " " + frame.describe());
 			}
@@ -373,7 +385,7 @@ public final class MetalFrameMetrics {
 					+ "\"p50AcquireMs\":%.3f,\"p99AcquireMs\":%.3f,"
 					+ "\"p50OutsideLoopMs\":%.3f,\"p99OutsideLoopMs\":%.3f,"
 					+ "\"phaseStalls\":[%s],\"worstOnePercentStalls\":[%s],\"worstFrames\":[%s],"
-					+ "\"tasks\":[%s]}",
+					+ "\"tasks\":[%s],\"gpuPassSpans\":[%s]}",
 				this.name, this.frames, this.durationSeconds, this.averageFps, this.onePercentLowFps,
 				this.pointOnePercentLowFps, this.p50CpuMs, this.p95CpuMs, this.p99CpuMs,
 				this.p50IntervalMs, this.p99IntervalMs, this.worstIntervalMs, this.p50AcquireMs, this.p99AcquireMs,
@@ -381,7 +393,8 @@ public final class MetalFrameMetrics {
 				String.join(",", this.phaseStalls.stream().map(StallTotal::toJson).toList()),
 				String.join(",", this.tailStalls.stream().map(StallTotal::toJson).toList()),
 				String.join(",", this.worstFrames.stream().map(FrameDetail::toJson).toList()),
-				String.join(",", this.taskKinds.stream().map(MetalTaskCensus.TaskKind::toJson).toList()));
+				String.join(",", this.taskKinds.stream().map(MetalTaskCensus.TaskKind::toJson).toList()),
+				String.join(",", this.passKinds.stream().map(MetalPassCensus.PassKind::toJson).toList()));
 		}
 	}
 }

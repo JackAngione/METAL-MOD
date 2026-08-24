@@ -74,6 +74,22 @@ public final class MetalNative {
 	/** Drains GPU busy time from completed command buffers into {@code destination} as {nanos, count}. */
 	static native void nTakeGpuWork(long[] destination);
 
+	/**
+	 * Drains per-pass GPU time into {@code destination} as {nanos, count} for each pass kind.
+	 *
+	 * @see MetalPassCensus
+	 */
+	static native void nTakeGpuPassWork(long[] destination);
+
+	/** The number of pass kinds {@link #nTakeGpuPassWork} reports, which the native ABI fixes. */
+	static native int nGpuPassKinds();
+
+	/**
+	 * Whether this device can sample counters at encoder stage boundaries, which is what per-pass
+	 * GPU timing is taken at. False leaves passes untimed rather than failing them.
+	 */
+	static native boolean nSupportsPassGpuTiming(long deviceHandle);
+
 	static native long nCreateSurface(long deviceHandle, long cocoaViewHandle, int width, int height);
 
 	static native void nResizeSurface(long handle, int width, int height);
@@ -232,7 +248,8 @@ public final class MetalNative {
 		int depthMipLevel,
 		int depthLoadAction,
 		int depthStoreAction,
-		double clearDepth
+		double clearDepth,
+		int gpuTimingKind
 	);
 
 	static native void nSetRenderPipeline(long renderPassHandle, long pipelineHandle);

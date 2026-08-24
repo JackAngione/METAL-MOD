@@ -496,6 +496,109 @@ names the offending command by index. The shader smoke test renders the same dra
 ABIs and through the per-command path and compares the readbacks byte for byte, which is the only
 evidence that the coarse path encodes what it replaces.
 
+### Localising GPU time to a pass
+
+`GPU_FRAME` says whether the GPU was busy; it cannot say which pass was keeping it busy, and that is
+the question the remaining GPU-side items turn on. Storing a dead attachment as `DontCare` or merging
+two compatible passes is only worth doing to a pass that costs something, and a whole-frame total
+that already mixes every pass together cannot rank them.
+
+Metal answers it with counter samples written by the GPU at an encoder's boundaries. **Which boundary
+is available is the whole difficulty, and it is not the one this document previously assumed.**
+Querying the tested M4 Max directly:
+
+| `supportsCounterSampling:` | M4 Max |
+|---|---|
+| `MTLCounterSamplingPointAtStageBoundary` | yes |
+| `MTLCounterSamplingPointAtDrawBoundary` | **no** |
+| `MTLCounterSamplingPointAtBlitBoundary` | **no** |
+| `MTLCounterSamplingPointAtDispatchBoundary` | **no** |
+
+So a timestamp can be taken at a pass's edges and never part-way through it. That invalidates the
+suggestion above that the existing timestamp query pools were most of the answer: `nWriteRenderTimestamp`,
+which samples mid-encoder through `sampleCountersInBuffer:`, requires a draw boundary and therefore
+**can never succeed on the hardware this backend targets**. Nothing in Minecraft 26.2 reaches it -
+`TimerQuery` and `TracyGpuProfiler` both go through `CommandEncoder.writeTimestamp`, which samples at
+an encoder boundary and does work - so it has sat unreachable rather than failing loudly.
+
+What works instead is the render pass descriptor's own `sampleBufferAttachments`, which name a sample
+buffer and the indices to write at the start of the vertex stage and the end of the fragment stage.
+`MetalPassCensus` interns each Blaze3D pass label to a small integer, `nBeginRenderPass` attaches two
+slots of a shared 512-pass ring to the descriptor, and the samples are resolved in the command
+buffer's completion handler and accumulated per label. The render thread hands native code an int per
+pass rather than a string, and a pass begun while nothing is being captured attaches nothing at all -
+the sample buffer is not even created.
+
+**The resolved timestamps need no conversion.** A single pass measured both ways - stage-boundary
+samples against `MTLCommandBuffer`'s `GPUStartTime`/`GPUEndTime` - agreed to the nanosecond
+(7,285,125 raw ticks against 7,285,125.0 ns), so the counter is nanoseconds on the same timebase, and
+`sampleTimestamps:gpuTimestamp:` returns an identical CPU and GPU value on this hardware.
+
+The smoke test pins the relationship rather than the value: it times **one** pass inside a command
+buffer that also runs an untimed clear, and requires that pass to report positive GPU time no greater
+than the command buffer's own. In that test the timed pass reports 0.023 ms inside a 5.258 ms buffer.
+The single-pass restriction is load-bearing, for the reason below.
+
+#### What a pass span is, and why spans cannot be added
+
+The first world run through this instrument reported per-pass spans summing to **1.5x to 2.2x** the
+`GPU_FRAME` total for the same phase. That is not a fault in either measurement. A pass's span runs
+from its vertex stage starting to its fragment stage ending, and Apple's GPU pipelines one pass's
+tiling against the previous pass's fragment work, so the spans genuinely overlap.
+
+Four passes in one command buffer on the M4 Max, timed at all four stage boundaries (microseconds,
+relative to the first sample):
+
+| pass | vertex start | vertex end | fragment start | fragment end |
+|---:|---:|---:|---:|---:|
+| 0 | 0 | 21,259 | 1,353 | 26,642 |
+| 1 | 21,384 | 63,250 | 26,704 | 66,724 |
+| 2 | 43,271 | 56,542 | 45,383 | 59,950 |
+| 3 | 63,396 | 78,391 | 67,214 | 83,593 |
+
+Pass 2 begins and ends entirely inside pass 1's span. Every pass's fragment stage starts long before
+its own vertex stage ends. Summed, the spans come to 1.30x the command buffer's own GPU time, and
+restricting the sum to fragment stages only still gives 1.15x - so **there is no additive
+decomposition available at this sampling granularity**, not merely an inconvenient one.
+
+Read a pass span the way `GPU_FRAME` is read: as occupancy, for ranking passes against each other,
+never as a share of the frame. The aggregate is reported as `sumOfSpans` rather than `total` for that
+reason - this project has already spent time on a residual driven to -42 ms by adding figures that
+overlapped, and this is the same mistake with a different source.
+
+#### First world reading
+
+Each benchmark phase logs a `gpuPassSpans` line beside its `tasks` line, and carries the same
+breakdown in the JSON. One repeat at 3840x2104, 32 chunks, on the M4 Max - a diagnostic pass, not a
+before/after claim. Mean span per frame, traversal phase (4,644 frames):
+
+| Pass | Span per frame |
+|---|---:|
+| Section layers for opaque | 1.769 ms |
+| Section layers for translucent | 0.701 ms |
+| Clouds | 0.565 ms |
+| Blit render target | 0.108 ms |
+| GUI before blur | 0.103 ms |
+| Stars | 0.101 ms |
+| Sky moon | 0.090 ms |
+| Sky sun | 0.076 ms |
+| Sunrise sunset | 0.073 ms |
+| Sky disc | 0.036 ms |
+| (depth clear), twice per frame | 0.020 ms |
+
+Two things stand out, and neither was predictable from reading the code.
+
+**Clouds are the third most expensive pass in the frame**, at 0.565 ms of span per frame - within a
+factor of 1.25 of all translucent chunk geometry, and roughly five times the blit that presents the
+frame. Whatever else is true of the cloud pass, it is not the cheap incidental it looks like.
+
+**The sky is five separate render passes** - stars, moon, sun, sunrise/sunset, and the sky disc -
+each beginning and ending its own encoder against the full 3840x2104 attachment, and together
+carrying 0.376 ms of span per frame for a very small amount of geometry. That is the clearest
+pass-merging candidate the ranked plan has ever had a number for. It is a candidate rather than a
+finding: because spans overlap, 0.376 ms is not the time that merging them would recover, and only a
+measured before/after can say what is.
+
 ### Known gaps
 
 Per-frame attribution now covers the render path, the JVM's collection time, time spent outside the
@@ -503,9 +606,10 @@ render loop, and GPU busy time. The last of those comes from `MTLCommandBuffer`'
 end times, collected in the completion handler that already existed and drained by the render thread
 once per frame as the `GPU_FRAME` source. It answers "is the GPU busy", not "how long did this frame
 take on the GPU": command buffers are attributed to whichever frame they finished in, and they can
-overlap on the GPU, so the sum can exceed the wall clock. Localising a stall to a specific GPU
-*stage* still needs encoder-level counter samples, for which the timestamp query pools already exist
-in the backend; Apple's Instruments Game Performance template and GPU counters remain the reference.
+overlap on the GPU, so the sum can exceed the wall clock. GPU time is now also attributed per render
+pass, by the stage-boundary counter samples described above; what is still missing below that is a
+breakdown *within* a pass, which this hardware cannot sample for at all. Apple's Instruments Game
+Performance template and GPU counters remain the reference for that.
 
 The harness records heap size and collector names but still not thermal state or system load, which would
 have explained the variance above rather than leaving it inferred - and which matters more than this

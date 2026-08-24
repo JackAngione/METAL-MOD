@@ -90,7 +90,7 @@ final class MetalRegionClear implements AutoCloseable {
 			new MetalRenderPass.DepthAttachment(
 				depth, MetalRenderPass.LoadAction.LOAD, MetalRenderPass.StoreAction.STORE, 0.0
 			)
-		))) {
+		), MetalPassCensus.kindFor("(region clear)"))) {
 			pass.setPipeline(pipeline);
 			pass.setScissor(regionX, regionY, regionWidth, regionHeight);
 			pass.setUniformBuffer(0, parameters, parameterOffset, MetalRenderPass.STAGE_ALL);

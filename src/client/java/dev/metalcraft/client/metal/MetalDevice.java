@@ -137,6 +137,11 @@ public final class MetalDevice implements AutoCloseable {
 		return MetalNative.nSupportsRenderTimestampQueries(this.requireOpenHandle());
 	}
 
+	/** @see MetalPassCensus */
+	public synchronized boolean supportsPassGpuTiming() {
+		return MetalNative.nSupportsPassGpuTiming(this.requireOpenHandle());
+	}
+
 	public synchronized MetalTimestampQueryPool createTimestampQueryPool(final int size) {
 		if (size <= 0 || size > 4096) {
 			throw new IllegalArgumentException("A Metal timestamp query pool size must be between 1 and 4096");

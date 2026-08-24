@@ -169,6 +169,17 @@ public final class MetalCommandBuffer implements AutoCloseable {
 	}
 
 	public synchronized MetalRenderPass beginRenderPass(final MetalRenderPass.Descriptor descriptor) {
+		return this.beginRenderPass(descriptor, MetalPassCensus.UNTIMED_KIND);
+	}
+
+	/**
+	 * @param gpuTimingKind the {@link MetalPassCensus} kind to charge this pass's GPU time to, or
+	 *     {@link MetalPassCensus#UNTIMED_KIND} to encode no counter samples at all
+	 */
+	public synchronized MetalRenderPass beginRenderPass(
+		final MetalRenderPass.Descriptor descriptor,
+		final int gpuTimingKind
+	) {
 		if (descriptor == null) {
 			throw new NullPointerException("descriptor");
 		}
@@ -206,7 +217,8 @@ public final class MetalCommandBuffer implements AutoCloseable {
 			depth == null ? 0 : depth.mipLevel(),
 			depth == null ? 0 : depth.loadAction().ordinal(),
 			depth == null ? 0 : depth.storeAction().ordinal(),
-			depth == null ? 1.0 : depth.clearDepth()
+			depth == null ? 1.0 : depth.clearDepth(),
+			gpuTimingKind
 		);
 		if (renderPassHandle == 0L) {
 			throw new IllegalStateException("Metal did not create a render command encoder");

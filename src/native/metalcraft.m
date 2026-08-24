@@ -290,6 +290,186 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 @end
 
 
+/**
+ * GPU time attributed to individual render passes rather than to a whole command buffer.
+ *
+ * <p>`mc_gpu_nanos` can say that the GPU was busy for 3.4 ms of a frame, but not which pass spent
+ * it. That is the question that decides whether an attachment store or a pass merge is worth
+ * doing, and it cannot be answered by a command-buffer total that already mixes every pass of the
+ * frame together.
+ *
+ * <p>Metal answers it with counter samples taken at encoder boundaries: a render-pass descriptor
+ * carries a sample buffer and a set of indices, and the GPU writes a timestamp as the pass's
+ * vertex stage begins and as its fragment stage ends.
+ *
+ * <p><b>The sampling point is the whole difficulty.</b> Apple silicon supports
+ * `MTLCounterSamplingPointAtStageBoundary` and nothing else - an M4 Max reports draw, blit and
+ * dispatch boundaries as unavailable - so a timestamp can be taken at a pass's edges but never
+ * part-way through it. That is what this samples, and it is also why `nWriteRenderTimestamp`,
+ * which needs a draw boundary, can never succeed on the hardware this backend targets.
+ *
+ * <p>The resolved timestamps are nanoseconds on the same timebase as `MTLCommandBuffer`'s own
+ * `GPUStartTime`: one pass measured both ways agrees to the nanosecond, so nothing here converts
+ * units or calibrates against the CPU clock.
+ *
+ * <p>Passes are keyed by a small integer that the Java side interns from the Blaze3D pass label,
+ * so the render path crosses JNI with an int rather than a string.
+ */
+#define MC_GPU_PASS_KINDS 32
+/**
+ * Passes the sample buffer can hold before its slots are reused, two timestamps each.
+ *
+ * <p>A slot is read once its command buffer completes, so the ring only has to outlast the passes
+ * in flight - a few frames' worth, against the tens of passes per frame this scene records.
+ *
+ * <p>Headroom is not relied on, though. A slot reused before its old pass was resolved would hand
+ * the old pass the new one's timestamps, and the result would be plausible rather than obviously
+ * wrong - so each pass carries the sequence number it was allocated at, and resolving one that has
+ * since been lapped drops it instead. That turns a silent wrong number into a missing one.
+ */
+#define MC_GPU_PASS_SLOTS 512
+
+static _Atomic uint64_t mc_gpu_pass_nanos[MC_GPU_PASS_KINDS];
+static _Atomic uint64_t mc_gpu_pass_counts[MC_GPU_PASS_KINDS];
+static _Atomic uint64_t mc_gpu_pass_next_slot;
+static os_unfair_lock mc_gpu_pass_lock = OS_UNFAIR_LOCK_INIT;
+static id<MTLCounterSampleBuffer> mc_gpu_pass_samples;
+static id<MTLDevice> mc_gpu_pass_device;
+/** A device that cannot sample is recorded once, rather than retried on every pass. */
+static BOOL mc_gpu_pass_unavailable;
+
+static id<MTLCounterSet> mc_timestamp_counter_set(id<MTLDevice> device);
+
+/** The shared pass sample buffer for {@code device}, creating it on first use, or nil. */
+static id<MTLCounterSampleBuffer> mc_gpu_pass_sample_buffer(id<MTLDevice> device) {
+	if (device == nil) {
+		return nil;
+	}
+	os_unfair_lock_lock(&mc_gpu_pass_lock);
+	if (mc_gpu_pass_device != device) {
+		// A second device - or one opened after the first was released - starts over rather than
+		// sampling into a buffer that belongs to a device it is not encoding on.
+		mc_gpu_pass_samples = nil;
+		mc_gpu_pass_device = nil;
+		mc_gpu_pass_unavailable = NO;
+	}
+	if (mc_gpu_pass_samples == nil && !mc_gpu_pass_unavailable) {
+		id<MTLCounterSet> timestampSet = mc_timestamp_counter_set(device);
+		if (timestampSet != nil && [device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary]) {
+			MTLCounterSampleBufferDescriptor *descriptor = [[MTLCounterSampleBufferDescriptor alloc] init];
+			descriptor.counterSet = timestampSet;
+			descriptor.label = @"MetalCraft pass GPU timing";
+			descriptor.storageMode = MTLStorageModeShared;
+			descriptor.sampleCount = MC_GPU_PASS_SLOTS * 2;
+			NSError *error = nil;
+			mc_gpu_pass_samples = [device newCounterSampleBufferWithDescriptor:descriptor error:&error];
+		}
+		mc_gpu_pass_unavailable = mc_gpu_pass_samples == nil;
+		mc_gpu_pass_device = mc_gpu_pass_samples == nil ? nil : device;
+	}
+	id<MTLCounterSampleBuffer> samples = mc_gpu_pass_samples;
+	os_unfair_lock_unlock(&mc_gpu_pass_lock);
+	return samples;
+}
+
+/**
+ * Drops the sample buffer, so it cannot outlive the device that created it.
+ *
+ * <p>Called when any device is released rather than only the owning one, because the registry has
+ * no lookup that tolerates an already-closed handle. Dropping one device's buffer because another
+ * closed costs a recreation on the next timed pass and nothing else.
+ */
+static void mc_gpu_pass_reset(void) {
+	os_unfair_lock_lock(&mc_gpu_pass_lock);
+	mc_gpu_pass_samples = nil;
+	mc_gpu_pass_device = nil;
+	mc_gpu_pass_unavailable = NO;
+	os_unfair_lock_unlock(&mc_gpu_pass_lock);
+}
+
+/**
+ * The timed passes one command buffer holds, resolved together when it completes.
+ *
+ * <p>Held by an object of its own rather than by the command buffer, for the same reason
+ * {@link MCInFlightResources} is: the completion handler has to retain what it reads, and a block
+ * that captured the command buffer would keep it alive through its own handler.
+ */
+@interface MCGpuPassSamples : NSObject
+
+- (instancetype)initWithSampleBuffer:(id<MTLCounterSampleBuffer>)sampleBuffer;
+- (void)addKind:(uint32_t)kind sequence:(uint64_t)sequence;
+- (void)resolve;
+
+@end
+
+
+/** One timed pass, and the ring position it was sampled into. */
+typedef struct {
+	uint64_t sequence;
+	uint32_t kind;
+	uint32_t reserved;
+} MCGpuPassEntry;
+
+
+@implementation MCGpuPassSamples {
+	NSLock *_lock;
+	id<MTLCounterSampleBuffer> _sampleBuffer;
+	NSMutableData *_entries;
+}
+
+- (instancetype)initWithSampleBuffer:(id<MTLCounterSampleBuffer>)sampleBuffer {
+	self = [super init];
+	if (self != nil) {
+		_lock = [[NSLock alloc] init];
+		_sampleBuffer = sampleBuffer;
+		_entries = [NSMutableData data];
+	}
+	return self;
+}
+
+- (void)addKind:(uint32_t)kind sequence:(uint64_t)sequence {
+	MCGpuPassEntry entry = {.sequence = sequence, .kind = kind, .reserved = 0};
+	[_lock lock];
+	[_entries appendBytes:&entry length:sizeof(entry)];
+	[_lock unlock];
+}
+
+- (void)resolve {
+	[_lock lock];
+	NSData *entries = [_entries copy];
+	[_entries setLength:0];
+	id<MTLCounterSampleBuffer> sampleBuffer = _sampleBuffer;
+	[_lock unlock];
+
+	uint64_t allocated = atomic_load_explicit(&mc_gpu_pass_next_slot, memory_order_relaxed);
+	NSUInteger count = entries.length / sizeof(MCGpuPassEntry);
+	const MCGpuPassEntry *values = (const MCGpuPassEntry *)entries.bytes;
+	for (NSUInteger index = 0; index < count; index++) {
+		uint32_t kind = values[index].kind;
+		// Lapped: another pass has taken this slot since, so whatever is in it is not this pass.
+		if (kind >= MC_GPU_PASS_KINDS || allocated - values[index].sequence >= MC_GPU_PASS_SLOTS) {
+			continue;
+		}
+		NSUInteger slot = (NSUInteger)(values[index].sequence % MC_GPU_PASS_SLOTS);
+		NSData *resolved = [sampleBuffer resolveCounterRange:NSMakeRange(slot * 2, 2)];
+		if (resolved.length < 2 * sizeof(MTLCounterResultTimestamp)) {
+			continue;
+		}
+		const MTLCounterResultTimestamp *timestamps = (const MTLCounterResultTimestamp *)resolved.bytes;
+		uint64_t start = timestamps[0].timestamp;
+		uint64_t end = timestamps[1].timestamp;
+		// A pass Metal declined to sample reports the error value. Dropped rather than folded in,
+		// so a bad sample costs a missing pass instead of a wrong total.
+		if (start == MTLCounterErrorValue || end == MTLCounterErrorValue || end <= start) {
+			continue;
+		}
+		atomic_fetch_add_explicit(&mc_gpu_pass_nanos[kind], end - start, memory_order_relaxed);
+		atomic_fetch_add_explicit(&mc_gpu_pass_counts[kind], 1, memory_order_relaxed);
+	}
+}
+
+@end
+
 @interface MCInFlightResources : NSObject
 
 - (void)pin:(id)object;
@@ -367,6 +547,7 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 - (id<MTLBlitCommandEncoder>)blitEncoder;
 - (void)endBlitEncoding;
 - (void)recordTimestampInPool:(MCMetalTimestampQueryPool *)pool index:(NSUInteger)index;
+- (void)addTimedPassKind:(uint32_t)kind sequence:(uint64_t)sequence sampleBuffer:(id<MTLCounterSampleBuffer>)sampleBuffer;
 - (NSUInteger)retainedResourceCount;
 
 @end
@@ -392,6 +573,7 @@ static _Atomic uint64_t mc_gpu_command_buffers;
 @implementation MCMetalCommandBuffer {
 	MCInFlightResources *_resources;
 	id<MTLBlitCommandEncoder> _blitEncoder;
+	MCGpuPassSamples *_gpuPasses;
 }
 
 - (instancetype)initWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer {
@@ -443,6 +625,25 @@ static _Atomic uint64_t mc_gpu_command_buffers;
 	[self.commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
 		[pool markSampleAvailableAtIndex:index generation:generation];
 	}];
+}
+
+/**
+ * Notes that this command buffer carries one pass, sampled at ring position {@code sequence}.
+ *
+ * <p>The completion handler is added on the first timed pass rather than in the initialiser, so a
+ * command buffer encoded while nothing is being measured pays for neither the handler nor the
+ * object. Every pass is encoded before the buffer is committed, so there is always a commit left
+ * to add it to.
+ */
+- (void)addTimedPassKind:(uint32_t)kind sequence:(uint64_t)sequence sampleBuffer:(id<MTLCounterSampleBuffer>)sampleBuffer {
+	if (_gpuPasses == nil) {
+		_gpuPasses = [[MCGpuPassSamples alloc] initWithSampleBuffer:sampleBuffer];
+		MCGpuPassSamples *passes = _gpuPasses;
+		[self.commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+			[passes resolve];
+		}];
+	}
+	[_gpuPasses addKind:kind sequence:sequence];
 }
 
 - (NSUInteger)retainedResourceCount {
@@ -1470,6 +1671,37 @@ Java_dev_metalcraft_client_metal_MetalNative_nTakeGpuWork(JNIEnv *env, jclass ty
 	values[0] = (jlong)atomic_exchange_explicit(&mc_gpu_nanos, 0, memory_order_relaxed);
 	values[1] = (jlong)atomic_exchange_explicit(&mc_gpu_command_buffers, 0, memory_order_relaxed);
 	(*env)->SetLongArrayRegion(env, destination, 0, 2, values);
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nTakeGpuPassWork(JNIEnv *env, jclass type, jlongArray destination) {
+	jsize expected = MC_GPU_PASS_KINDS * 2;
+	if (destination == NULL || (*env)->GetArrayLength(env, destination) < expected) {
+		mc_throw_state(env, @"Draining Metal pass GPU timing needs an array of two values per kind");
+		return;
+	}
+	jlong values[MC_GPU_PASS_KINDS * 2];
+	for (int kind = 0; kind < MC_GPU_PASS_KINDS; kind++) {
+		values[kind * 2] = (jlong)atomic_exchange_explicit(&mc_gpu_pass_nanos[kind], 0, memory_order_relaxed);
+		values[kind * 2 + 1] = (jlong)atomic_exchange_explicit(&mc_gpu_pass_counts[kind], 0, memory_order_relaxed);
+	}
+	(*env)->SetLongArrayRegion(env, destination, 0, expected, values);
+}
+
+MC_EXPORT JNIEXPORT jint JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nGpuPassKinds(JNIEnv *env, jclass type) {
+	return MC_GPU_PASS_KINDS;
+}
+
+MC_EXPORT JNIEXPORT jboolean JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nSupportsPassGpuTiming(JNIEnv *env, jclass type, jlong deviceHandle) {
+	@autoreleasepool {
+		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, deviceHandle, MCObjectTypeDevice);
+		return device != nil
+			&& mc_timestamp_counter_set(device) != nil
+			&& [device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary]
+			? JNI_TRUE : JNI_FALSE;
+	}
 }
 
 MC_EXPORT JNIEXPORT void JNICALL
@@ -2572,7 +2804,8 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 	jint depthMipLevel,
 	jint depthLoadAction,
 	jint depthStoreAction,
-	jdouble clearDepth
+	jdouble clearDepth,
+	jint gpuTimingKind
 ) {
 	@autoreleasepool {
 		// A pass may omit either attachment. A depth-only pass is how a depth clear is expressed
@@ -2687,6 +2920,23 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 		}
 		if (depthTexture != nil) {
 			[commandBuffer pin:depthTexture];
+		}
+		if (gpuTimingKind >= 0 && gpuTimingKind < MC_GPU_PASS_KINDS) {
+			id<MTLCounterSampleBuffer> samples = mc_gpu_pass_sample_buffer(commandBuffer.commandBuffer.device);
+			if (samples != nil) {
+				uint64_t sequence = atomic_fetch_add_explicit(&mc_gpu_pass_next_slot, 1, memory_order_relaxed);
+				NSUInteger slot = (NSUInteger)(sequence % MC_GPU_PASS_SLOTS);
+				MTLRenderPassSampleBufferAttachmentDescriptor *samplePoints = descriptor.sampleBufferAttachments[0];
+				samplePoints.sampleBuffer = samples;
+				// The pass's own span: the first thing its vertex stage does and the last thing its
+				// fragment stage does. The two inner boundaries are left unsampled because the gap
+				// between them is scheduling rather than this pass's work.
+				samplePoints.startOfVertexSampleIndex = slot * 2;
+				samplePoints.endOfVertexSampleIndex = MTLCounterDontSample;
+				samplePoints.startOfFragmentSampleIndex = MTLCounterDontSample;
+				samplePoints.endOfFragmentSampleIndex = slot * 2 + 1;
+				[commandBuffer addTimedPassKind:(uint32_t)gpuTimingKind sequence:sequence sampleBuffer:samples];
+			}
 		}
 		id<MTLRenderCommandEncoder> encoder = [commandBuffer.commandBuffer renderCommandEncoderWithDescriptor:descriptor];
 		if (encoder == nil) {
@@ -3312,7 +3562,9 @@ Java_dev_metalcraft_client_metal_MetalNative_nWriteRenderTimestamp(
 			return;
 		}
 		if (!mc_supports_render_timestamp_queries(renderPass.encoder.device)) {
-			mc_throw_state(env, @"The selected Metal device does not support timestamps within a render pass");
+			mc_throw_state(env, @"The selected Metal device samples counters only at encoder stage boundaries, "
+				"so it cannot take a timestamp part-way through a render pass; whole-pass GPU time is "
+				"measured instead, through MetalPassCensus");
 			return;
 		}
 		[renderPass.commandBuffer recordTimestampInPool:pool index:(NSUInteger)index];
@@ -3643,6 +3895,7 @@ MC_EXPORT JNIEXPORT void JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nReleaseDevice(JNIEnv *env, jclass type, jlong handle) {
 	@autoreleasepool {
 		mc_release_object(env, handle, MCObjectTypeDevice);
+		mc_gpu_pass_reset();
 	}
 }
 
