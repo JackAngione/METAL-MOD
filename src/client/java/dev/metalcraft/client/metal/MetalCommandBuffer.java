@@ -1,5 +1,7 @@
 package dev.metalcraft.client.metal;
 
+import java.util.List;
+
 /** An owned {@code MTLCommandBuffer} used to schedule and present one frame. */
 public final class MetalCommandBuffer implements AutoCloseable {
 	private final MetalCommandQueue commandQueue;
@@ -187,32 +189,44 @@ public final class MetalCommandBuffer implements AutoCloseable {
 			throw new IllegalStateException("A Metal render pass is already active on this command buffer");
 		}
 
-		MetalRenderPass.ColorAttachment color = descriptor.colorAttachment();
-		long colorTargetHandle = 0L;
-		boolean colorTargetIsDrawable = false;
-		if (color != null) {
+		// One flat array per primitive type, strided by attachment index. A zero handle marks an
+		// index the pass leaves empty, which native code turns into an unattached Metal slot rather
+		// than an error, so the arrays stay dense while the layout stays positional.
+		List<MetalRenderPass.ColorAttachment> colors = descriptor.colorAttachments();
+		long[] colorTargetHandles = new long[colors.size()];
+		int[] colorFields = new int[colors.size() * MetalRenderPass.COLOR_FIELDS];
+		double[] colorClearValues = new double[colors.size() * MetalRenderPass.COLOR_CLEAR_COMPONENTS];
+		for (int index = 0; index < colors.size(); index++) {
+			MetalRenderPass.ColorAttachment color = colors.get(index);
+			if (color == null) {
+				continue;
+			}
+			boolean isDrawable = color.target() instanceof MetalDrawable;
 			if (color.target() instanceof MetalDrawable drawable) {
-				colorTargetHandle = drawable.requireOpenHandle();
-				colorTargetIsDrawable = true;
+				colorTargetHandles[index] = drawable.requireOpenHandle();
 			} else if (color.target() instanceof MetalTexture texture) {
-				colorTargetHandle = texture.requireOpenHandle();
+				colorTargetHandles[index] = texture.requireOpenHandle();
 			} else {
 				throw new IllegalArgumentException("Unsupported Metal color attachment target");
 			}
+			int field = index * MetalRenderPass.COLOR_FIELDS;
+			colorFields[field + MetalRenderPass.COLOR_FIELD_IS_DRAWABLE] = isDrawable ? 1 : 0;
+			colorFields[field + MetalRenderPass.COLOR_FIELD_MIP_LEVEL] = color.mipLevel();
+			colorFields[field + MetalRenderPass.COLOR_FIELD_LOAD_ACTION] = color.loadAction().ordinal();
+			colorFields[field + MetalRenderPass.COLOR_FIELD_STORE_ACTION] = color.storeAction().ordinal();
+			int clear = index * MetalRenderPass.COLOR_CLEAR_COMPONENTS;
+			colorClearValues[clear] = color.clearRed();
+			colorClearValues[clear + 1] = color.clearGreen();
+			colorClearValues[clear + 2] = color.clearBlue();
+			colorClearValues[clear + 3] = color.clearAlpha();
 		}
 
 		MetalRenderPass.DepthAttachment depth = descriptor.depthAttachment();
 		long renderPassHandle = MetalNative.nBeginRenderPass(
 			this.requireEncodingHandle(),
-			colorTargetHandle,
-			colorTargetIsDrawable,
-			color == null ? 0 : color.mipLevel(),
-			color == null ? 0 : color.loadAction().ordinal(),
-			color == null ? 0 : color.storeAction().ordinal(),
-			color == null ? 0.0 : color.clearRed(),
-			color == null ? 0.0 : color.clearGreen(),
-			color == null ? 0.0 : color.clearBlue(),
-			color == null ? 0.0 : color.clearAlpha(),
+			colorTargetHandles,
+			colorFields,
+			colorClearValues,
 			depth == null ? 0L : depth.texture().requireOpenHandle(),
 			depth == null ? 0 : depth.mipLevel(),
 			depth == null ? 0 : depth.loadAction().ordinal(),

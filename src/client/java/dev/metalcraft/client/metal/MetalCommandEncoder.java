@@ -84,22 +84,42 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (this.renderPass != null) {
 			throw new IllegalStateException("A direct Metal render pass is already active");
 		}
-		if (descriptor.colorAttachments().size() != 1 || descriptor.colorAttachments().getFirst() == null) {
-			throw new UnsupportedOperationException("Direct Metal currently requires exactly one color attachment");
+		List<RenderPassDescriptor.Attachment<Optional<Vector4fc>>> colors = descriptor.colorAttachments();
+		if (colors.size() > MetalRenderPass.MAX_COLOR_ATTACHMENTS) {
+			throw new UnsupportedOperationException(
+				"Direct Metal accepts at most " + MetalRenderPass.MAX_COLOR_ATTACHMENTS
+					+ " color attachments, not " + colors.size()
+			);
 		}
-		RenderPassDescriptor.Attachment<Optional<Vector4fc>> color = descriptor.colorAttachments().getFirst();
-		MetalGpuTextureView colorView = requireTextureView(color.textureView());
-		Optional<Vector4fc> colorClear = color.clearValue();
-		MetalRenderPass.ColorAttachment colorAttachment = new MetalRenderPass.ColorAttachment(
-			colorView.texture().metal(),
-			colorView.baseMipLevel(),
-			colorClear.isPresent() ? MetalRenderPass.LoadAction.CLEAR : MetalRenderPass.LoadAction.LOAD,
-			MetalRenderPass.StoreAction.STORE,
-			colorClear.map(Vector4fc::x).orElse(0.0F),
-			colorClear.map(Vector4fc::y).orElse(0.0F),
-			colorClear.map(Vector4fc::z).orElse(0.0F),
-			colorClear.map(Vector4fc::w).orElse(0.0F)
-		);
+		// Blaze3D's list is positional and may hold a null where the layout reserves an index the
+		// pass does not write, so the attachment list keeps the same shape rather than compacting.
+		List<MetalRenderPass.ColorAttachment> colorAttachments = new ArrayList<>(colors.size());
+		MetalGpuTextureView firstColorView = null;
+		for (RenderPassDescriptor.Attachment<Optional<Vector4fc>> color : colors) {
+			if (color == null) {
+				colorAttachments.add(null);
+				continue;
+			}
+			MetalGpuTextureView colorView = requireTextureView(color.textureView());
+			if (firstColorView == null) {
+				firstColorView = colorView;
+			}
+			Optional<Vector4fc> colorClear = color.clearValue();
+			colorAttachments.add(new MetalRenderPass.ColorAttachment(
+				colorView.texture().metal(),
+				colorView.baseMipLevel(),
+				colorClear.isPresent() ? MetalRenderPass.LoadAction.CLEAR : MetalRenderPass.LoadAction.LOAD,
+				MetalRenderPass.StoreAction.STORE,
+				colorClear.map(Vector4fc::x).orElse(0.0F),
+				colorClear.map(Vector4fc::y).orElse(0.0F),
+				colorClear.map(Vector4fc::z).orElse(0.0F),
+				colorClear.map(Vector4fc::w).orElse(0.0F)
+			));
+		}
+		if (firstColorView == null) {
+			throw new UnsupportedOperationException("Direct Metal requires at least one color attachment on a render pass");
+		}
+		MetalGpuTextureView colorView = firstColorView;
 		MetalRenderPass.DepthAttachment depthAttachment = null;
 		if (descriptor.depthAttachment() != null) {
 			RenderPassDescriptor.Attachment<OptionalDouble> depth = descriptor.depthAttachment();
@@ -112,7 +132,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 				depth.clearValue().orElse(1.0)
 			);
 		}
-		MetalRenderPass.Descriptor next = new MetalRenderPass.Descriptor(colorAttachment, depthAttachment);
+		MetalRenderPass.Descriptor next = new MetalRenderPass.Descriptor(colorAttachments, depthAttachment);
 		if (PASS_MERGING && this.deferredRenderPass != null && canMerge(this.deferredDescriptor, next)) {
 			// Continue into the encoder the previous pass left open, so its attachments are never
 			// resolved out and loaded back in.
@@ -159,15 +179,23 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (open == null || next == null) {
 			return false;
 		}
-		MetalRenderPass.ColorAttachment openColor = open.colorAttachment();
-		MetalRenderPass.ColorAttachment nextColor = next.colorAttachment();
-		if (openColor == null || nextColor == null) {
-			return openColor == nextColor;
-		}
-		if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel()
-			|| nextColor.loadAction() != MetalRenderPass.LoadAction.LOAD
-			|| openColor.storeAction() != MetalRenderPass.StoreAction.STORE) {
+		if (open.colorAttachments().size() != next.colorAttachments().size()) {
 			return false;
+		}
+		for (int index = 0; index < open.colorAttachments().size(); index++) {
+			MetalRenderPass.ColorAttachment openColor = open.colorAttachments().get(index);
+			MetalRenderPass.ColorAttachment nextColor = next.colorAttachments().get(index);
+			if (openColor == null || nextColor == null) {
+				if (openColor != nextColor) {
+					return false;
+				}
+				continue;
+			}
+			if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel()
+				|| nextColor.loadAction() != MetalRenderPass.LoadAction.LOAD
+				|| openColor.storeAction() != MetalRenderPass.StoreAction.STORE) {
+				return false;
+			}
 		}
 		MetalRenderPass.DepthAttachment openDepth = open.depthAttachment();
 		MetalRenderPass.DepthAttachment nextDepth = next.depthAttachment();

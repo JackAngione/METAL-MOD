@@ -14,6 +14,7 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
@@ -46,6 +47,33 @@ public final class MetalShaderTranslationSmoke {
 
 		void main() {
 		    color = vec4(texCoord, 0.25, 1.0);
+		}
+		""";
+	private static final String MRT_VERTEX_GLSL = """
+		#version 450
+
+		void main() {
+		    vec2 positions[3] = vec2[](
+		        vec2(-1.0, -1.0),
+		        vec2( 3.0, -1.0),
+		        vec2(-1.0,  3.0)
+		    );
+		    gl_Position = vec4(positions[gl_VertexID % 3], 0.0, 1.0);
+		}
+		""";
+
+	private static final String MRT_FRAGMENT_GLSL = """
+		#version 450
+		layout(location = 0) out vec4 target0;
+		layout(location = 1) out vec4 target1;
+		layout(location = 2) out vec4 target2;
+		layout(location = 3) out vec4 target3;
+
+		void main() {
+		    target0 = vec4(1.0, 0.0, 0.0, 1.0);
+		    target1 = vec4(0.0, 1.0, 0.0, 1.0);
+		    target2 = vec4(0.0, 0.0, 1.0, 1.0);
+		    target3 = vec4(1.0, 1.0, 0.0, 1.0);
 		}
 		""";
 	private static final String MAPPED_VERTEX_GLSL = """
@@ -238,6 +266,7 @@ public final class MetalShaderTranslationSmoke {
 			}
 			assertFramebufferOrientation(device);
 			assertMipRenderTargetViewport(device);
+			assertMultipleRenderTargets(device);
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
 			assertBatchedResourceBindings(device);
@@ -308,6 +337,92 @@ public final class MetalShaderTranslationSmoke {
 				throw new AssertionError("Metal mip render target used the base-level viewport: leftBlue=" + leftBlue + ", rightRed=" + rightRed);
 			}
 		}
+	}
+
+	/**
+	 * Four attachments written from one pass, each with its own color.
+	 *
+	 * <p>A single-attachment pass cannot tell a correct MRT layout from one that routes every
+	 * target through slot zero, so each target here is given a distinct color and all four are read
+	 * back. The pass also declares a fifth index and leaves it empty, which is the shape Blaze3D
+	 * produces when a layout reserves a target the pipeline does not write: Metal rejects a pipeline
+	 * whose color format disagrees with its attachment, so an empty index must stay empty on both
+	 * sides.
+	 */
+	private static void assertMultipleRenderTargets(final MetalDevice device) {
+		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
+			MRT_VERTEX_GLSL, "smoke/mrt.vert", MRT_FRAGMENT_GLSL, "smoke/mrt.frag"
+		);
+		List<MetalRenderPipeline.ColorTarget> targets = List.of(
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.unused()
+		);
+		int[] expected = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00};
+		List<MetalTexture> written = new ArrayList<>();
+		try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 translated.vertex().metalSource(), translated.vertex().entryPoint(),
+				 translated.fragment().metalSource(), translated.fragment().entryPoint(),
+				 targets, null, MetalRenderPipeline.VertexDescriptor.EMPTY,
+				 MetalRenderPipeline.DepthState.DISABLED, MetalRenderPipeline.RasterState.DEFAULT
+			 ));
+			 MetalCommandQueue queue = device.createCommandQueue()) {
+			List<MetalRenderPass.ColorAttachment> attachments = new ArrayList<>();
+			for (int index = 0; index < expected.length; index++) {
+				MetalTexture texture = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 4, 4, 1));
+				written.add(texture);
+				attachments.add(new MetalRenderPass.ColorAttachment(
+					texture, 0, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.0, 0.0, 0.0, 1.0
+				));
+			}
+			attachments.add(null);
+
+			try (MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(attachments, null))) {
+				pass.setPipeline(pipeline);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				pass.close();
+				commands.commitAndWait();
+			}
+
+			for (int index = 0; index < expected.length; index++) {
+				ByteBuffer pixels = written.get(index).readback(queue, 0);
+				int actual = Byte.toUnsignedInt(pixels.get(0)) << 16
+					| Byte.toUnsignedInt(pixels.get(1)) << 8
+					| Byte.toUnsignedInt(pixels.get(2));
+				if (!isNearColor(actual, expected[index])) {
+					throw new AssertionError(String.format(
+						"Metal color target %d holds %06X but its shader wrote %06X", index, actual, expected[index]
+					));
+				}
+			}
+
+			// A pipeline bound to a pass with a different layout would be a Metal validation failure
+			// at draw time, which is late and reported against the encoder rather than the caller.
+			try (MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalRenderPass narrow = commands.beginRenderPass(
+					 new MetalRenderPass.Descriptor(attachments.subList(0, 2), null))) {
+				narrow.setPipeline(pipeline);
+				throw new AssertionError("A five-target Metal pipeline bound to a two-attachment pass");
+			} catch (IllegalArgumentException expectedFailure) {
+				if (!expectedFailure.getMessage().contains("2")) {
+					throw new AssertionError("MRT layout mismatch did not name the offending index", expectedFailure);
+				}
+			}
+		} finally {
+			written.forEach(MetalTexture::close);
+		}
+	}
+
+	private static boolean isNearColor(final int actual, final int expected) {
+		for (int shift = 0; shift <= 16; shift += 8) {
+			if (Math.abs((actual >> shift & 0xFF) - (expected >> shift & 0xFF)) > 2) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static void assertMipLevelSampling(final MetalDevice device) {

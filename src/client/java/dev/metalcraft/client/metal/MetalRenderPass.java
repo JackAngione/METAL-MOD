@@ -2,6 +2,10 @@ package dev.metalcraft.client.metal;
 
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /** A scoped {@code MTLRenderCommandEncoder}; closing it ends the render pass. */
 public final class MetalRenderPass implements AutoCloseable {
@@ -18,6 +22,21 @@ public final class MetalRenderPass implements AutoCloseable {
 	public static final int RESOURCE_SLOTS = 16;
 	/** Vertex-buffer binding points a Metal render encoder addresses. */
 	public static final int VERTEX_BUFFER_SLOTS = 31;
+	/** Color attachments one render pass can write, matching Metal's and Blaze3D's own limit. */
+	public static final int MAX_COLOR_ATTACHMENTS = 8;
+	/**
+	 * Layout of the per-attachment field array that crosses JNI with a pass descriptor.
+	 *
+	 * <p>One flat array per primitive type, strided by attachment, keeps the native signature to a
+	 * handful of parameters rather than eight copies of every attachment field.
+	 */
+	static final int COLOR_FIELDS = 4;
+	static final int COLOR_FIELD_IS_DRAWABLE = 0;
+	static final int COLOR_FIELD_MIP_LEVEL = 1;
+	static final int COLOR_FIELD_LOAD_ACTION = 2;
+	static final int COLOR_FIELD_STORE_ACTION = 3;
+	/** Clear components per color attachment, in red, green, blue, alpha order. */
+	static final int COLOR_CLEAR_COMPONENTS = 4;
 
 	public enum LoadAction {
 		LOAD,
@@ -142,10 +161,28 @@ public final class MetalRenderPass implements AutoCloseable {
 		}
 	}
 
-	/** Either attachment may be absent, but a pass with neither would render nowhere. */
-	public record Descriptor(ColorAttachment colorAttachment, DepthAttachment depthAttachment) {
+	/**
+	 * The attachments one pass writes.
+	 *
+	 * <p>The color list is positional: entry {@code n} is {@code colorAttachments[n]} in the Metal
+	 * descriptor and {@code [[color(n)]]} in the fragment shader, so a bound pipeline's color
+	 * targets line up with it one for one. An entry may be null, meaning the layout reserves that
+	 * index but this pass attaches nothing to it; a pipeline must then leave the same index unused,
+	 * because Metal rejects a pipeline whose color format disagrees with its attachment.
+	 *
+	 * <p>Color may be absent entirely, but a pass with no attachment at all would render nowhere.
+	 */
+	public record Descriptor(List<@Nullable ColorAttachment> colorAttachments, DepthAttachment depthAttachment) {
 		public Descriptor {
-			if (colorAttachment == null && depthAttachment == null) {
+			// Not List.copyOf: a null entry is meaningful here, and List.copyOf rejects one.
+			colorAttachments = Collections.unmodifiableList(new ArrayList<>(colorAttachments));
+			if (colorAttachments.size() > MAX_COLOR_ATTACHMENTS) {
+				throw new IllegalArgumentException(
+					"A Metal render pass accepts at most " + MAX_COLOR_ATTACHMENTS
+						+ " color attachments, not " + colorAttachments.size()
+				);
+			}
+			if (depthAttachment == null && colorAttachments.stream().allMatch(attachment -> attachment == null)) {
 				throw new IllegalArgumentException("A Metal render pass requires at least one attachment");
 			}
 		}
@@ -154,16 +191,26 @@ public final class MetalRenderPass implements AutoCloseable {
 			if (depthAttachment == null) {
 				throw new NullPointerException("depthAttachment");
 			}
-			return new Descriptor(null, depthAttachment);
+			return new Descriptor(List.of(), depthAttachment);
+		}
+
+		public Descriptor(final ColorAttachment colorAttachment, final DepthAttachment depthAttachment) {
+			this(Collections.singletonList(colorAttachment), depthAttachment);
 		}
 
 		public Descriptor(final ColorAttachment colorAttachment) {
-			this(colorAttachment, null);
+			this(Collections.singletonList(colorAttachment), null);
+		}
+
+		/** @return the attachment at {@code index}, or null when the pass leaves that index empty */
+		public @Nullable ColorAttachment colorAttachment(final int index) {
+			return index < this.colorAttachments.size() ? this.colorAttachments.get(index) : null;
 		}
 	}
 
 	private final MetalCommandBuffer commandBuffer;
-	private final MetalTexture.Format colorFormat;
+	/** Attachment formats by index; a null entry is an index the pass leaves empty. */
+	private final List<MetalTexture.@Nullable Format> colorFormats;
 	private final MetalTexture.Format depthFormat;
 	private long handle;
 	private boolean pipelineBound;
@@ -173,11 +220,15 @@ public final class MetalRenderPass implements AutoCloseable {
 			throw new IllegalArgumentException("A Metal render-pass handle cannot be zero");
 		}
 		this.commandBuffer = commandBuffer;
-		this.colorFormat = descriptor.colorAttachment() == null
-			? null
-			: descriptor.colorAttachment().target() instanceof MetalTexture texture
-				? texture.descriptor().format()
-				: MetalTexture.Format.BGRA8_UNORM;
+		List<MetalTexture.@Nullable Format> formats = new ArrayList<>(descriptor.colorAttachments().size());
+		for (ColorAttachment attachment : descriptor.colorAttachments()) {
+			formats.add(attachment == null
+				? null
+				: attachment.target() instanceof MetalTexture texture
+					? texture.descriptor().format()
+					: MetalTexture.Format.BGRA8_UNORM);
+		}
+		this.colorFormats = Collections.unmodifiableList(formats);
 		this.depthFormat = descriptor.depthAttachment() == null
 			? null
 			: descriptor.depthAttachment().texture().descriptor().format();
@@ -188,13 +239,31 @@ public final class MetalRenderPass implements AutoCloseable {
 		if (pipeline == null) {
 			throw new NullPointerException("pipeline");
 		}
-		if (this.colorFormat == null) {
-			throw new IllegalStateException("A depth-only Metal render pass cannot bind a render pipeline");
+		// Metal matches a pipeline to a pass by index, so the two agree only if every index agrees,
+		// including the empty ones: an attached texture needs a format and an empty index needs an
+		// unused target. A depth-only pass is the all-empty case, which is how a shadow pass draws.
+		List<MetalRenderPipeline.ColorTarget> targets = pipeline.descriptor().colorTargets();
+		if (pipeline.descriptor().depthStencilFormat() != this.depthFormat) {
+			throw new IllegalArgumentException(
+				"Metal render pipeline depth format " + pipeline.descriptor().depthStencilFormat()
+					+ " does not match the render pass's " + this.depthFormat
+			);
 		}
-		if (pipeline.descriptor().colorTargets().size() != 1
-			|| pipeline.descriptor().colorFormat() != this.colorFormat
-			|| pipeline.descriptor().depthStencilFormat() != this.depthFormat) {
-			throw new IllegalArgumentException("Metal render pipeline formats must match the render-pass attachments");
+		for (int index = 0; index < targets.size(); index++) {
+			MetalTexture.Format attachmentFormat = index < this.colorFormats.size() ? this.colorFormats.get(index) : null;
+			if (targets.get(index).format() != attachmentFormat) {
+				throw new IllegalArgumentException(
+					"Metal render pipeline color target " + index + " is " + targets.get(index).format()
+						+ " but the render pass attaches " + attachmentFormat
+				);
+			}
+		}
+		for (int index = targets.size(); index < this.colorFormats.size(); index++) {
+			if (this.colorFormats.get(index) != null) {
+				throw new IllegalArgumentException(
+					"Metal render pass attaches color target " + index + " but the pipeline declares only " + targets.size()
+				);
+			}
 		}
 		MetalNative.nSetRenderPipeline(this.requireOpenHandle(), pipeline.requireOpenHandle());
 		this.pipelineBound = true;

@@ -2786,20 +2786,24 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 	}
 }
 
+// Attachment-array layout, mirrored by MetalRenderPass.COLOR_FIELD_* on the Java side.
+#define MC_MAX_COLOR_ATTACHMENTS 8
+#define MC_COLOR_FIELDS 4
+#define MC_COLOR_FIELD_IS_DRAWABLE 0
+#define MC_COLOR_FIELD_MIP_LEVEL 1
+#define MC_COLOR_FIELD_LOAD_ACTION 2
+#define MC_COLOR_FIELD_STORE_ACTION 3
+#define MC_COLOR_CLEAR_COMPONENTS 4
+#define MC_MAX_PASS_OBJECTS (1 + MC_MAX_COLOR_ATTACHMENTS + 1)
+
 MC_EXPORT JNIEXPORT jlong JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 	JNIEnv *env,
 	jclass type,
 	jlong commandBufferHandle,
-	jlong colorTargetHandle,
-	jboolean colorTargetIsDrawable,
-	jint colorMipLevel,
-	jint colorLoadAction,
-	jint colorStoreAction,
-	jdouble clearRed,
-	jdouble clearGreen,
-	jdouble clearBlue,
-	jdouble clearAlpha,
+	jlongArray colorTargetHandlesValue,
+	jintArray colorFieldsValue,
+	jdoubleArray colorClearValuesValue,
 	jlong depthTargetHandle,
 	jint depthMipLevel,
 	jint depthLoadAction,
@@ -2808,26 +2812,60 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 	jint gpuTimingKind
 ) {
 	@autoreleasepool {
-		// A pass may omit either attachment. A depth-only pass is how a depth clear is expressed
-		// without inventing a full-size colour target for the encoder to ignore.
-		if (colorTargetHandle == 0 && depthTargetHandle == 0) {
-			mc_throw_state(env, @"A Metal render pass requires at least one attachment");
+		if (colorTargetHandlesValue == NULL || colorFieldsValue == NULL || colorClearValuesValue == NULL) {
+			mc_throw_state(env, @"Metal render-pass attachment arrays cannot be null");
 			return 0;
 		}
-		jlong handles[3];
-		MCObjectType types[3];
-		id objects[3];
+		jsize colorCount = (*env)->GetArrayLength(env, colorTargetHandlesValue);
+		if (colorCount < 0 || colorCount > MC_MAX_COLOR_ATTACHMENTS
+			|| (*env)->GetArrayLength(env, colorFieldsValue) != colorCount * MC_COLOR_FIELDS
+			|| (*env)->GetArrayLength(env, colorClearValuesValue) != colorCount * MC_COLOR_CLEAR_COMPONENTS) {
+			mc_throw_state(env, @"Metal render-pass attachment arrays have an invalid length");
+			return 0;
+		}
+
+		jlong colorTargetHandles[MC_MAX_COLOR_ATTACHMENTS];
+		jint colorFields[MC_MAX_COLOR_ATTACHMENTS * MC_COLOR_FIELDS];
+		jdouble colorClearValues[MC_MAX_COLOR_ATTACHMENTS * MC_COLOR_CLEAR_COMPONENTS];
+		if (colorCount > 0) {
+			(*env)->GetLongArrayRegion(env, colorTargetHandlesValue, 0, colorCount, colorTargetHandles);
+			(*env)->GetIntArrayRegion(env, colorFieldsValue, 0, colorCount * MC_COLOR_FIELDS, colorFields);
+			(*env)->GetDoubleArrayRegion(env, colorClearValuesValue, 0, colorCount * MC_COLOR_CLEAR_COMPONENTS, colorClearValues);
+			if ((*env)->ExceptionCheck(env)) {
+				return 0;
+			}
+		}
+
+		// A pass may omit colour entirely. A depth-only pass is how a depth clear is expressed
+		// without inventing a full-size colour target for the encoder to ignore, and it is also how
+		// a shadow pass draws. A zero handle at one index leaves that index unattached, so the
+		// layout stays positional even when the middle of it is empty.
+		jlong handles[MC_MAX_PASS_OBJECTS];
+		MCObjectType types[MC_MAX_PASS_OBJECTS];
+		id objects[MC_MAX_PASS_OBJECTS];
+		NSInteger colorObjectIndex[MC_MAX_COLOR_ATTACHMENTS];
 		NSUInteger objectCount = 0;
-		NSInteger colorIndex = -1;
 		NSInteger depthIndex = -1;
+		NSUInteger attachedColorCount = 0;
 		handles[objectCount] = commandBufferHandle;
 		types[objectCount] = MCObjectTypeCommandBuffer;
 		objectCount++;
-		if (colorTargetHandle != 0) {
-			colorIndex = (NSInteger)objectCount;
-			handles[objectCount] = colorTargetHandle;
-			types[objectCount] = colorTargetIsDrawable ? MCObjectTypeDrawable : MCObjectTypeTexture;
+		for (jsize index = 0; index < colorCount; index++) {
+			if (colorTargetHandles[index] == 0) {
+				colorObjectIndex[index] = -1;
+				continue;
+			}
+			colorObjectIndex[index] = (NSInteger)objectCount;
+			handles[objectCount] = colorTargetHandles[index];
+			types[objectCount] = colorFields[index * MC_COLOR_FIELDS + MC_COLOR_FIELD_IS_DRAWABLE] != 0
+				? MCObjectTypeDrawable
+				: MCObjectTypeTexture;
 			objectCount++;
+			attachedColorCount++;
+		}
+		if (attachedColorCount == 0 && depthTargetHandle == 0) {
+			mc_throw_state(env, @"A Metal render pass requires at least one attachment");
+			return 0;
 		}
 		if (depthTargetHandle != 0) {
 			depthIndex = (NSInteger)objectCount;
@@ -2841,66 +2879,93 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 
 		MCMetalCommandBuffer *commandBuffer = objects[0];
 		[commandBuffer endBlitEncoding];
-		id<MTLTexture> colorTexture = nil;
-		if (colorIndex >= 0) {
-			colorTexture = colorTargetIsDrawable
-				? [(id<CAMetalDrawable>)objects[colorIndex] texture]
-				: (id<MTLTexture>)objects[colorIndex];
-		}
 		id<MTLTexture> depthTexture = depthIndex < 0 ? nil : (id<MTLTexture>)objects[depthIndex];
-		if (colorTexture != nil
-			&& (colorMipLevel < 0 || (NSUInteger)colorMipLevel >= colorTexture.mipmapLevelCount
-				|| colorTargetIsDrawable && colorMipLevel != 0)) {
-			mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
-			return 0;
-		}
 		if (depthTexture != nil && (depthMipLevel < 0 || (NSUInteger)depthMipLevel >= depthTexture.mipmapLevelCount)) {
 			mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
-			return 0;
-		}
-		if (colorTexture != nil
-			&& (mc_pixel_format_has_depth(colorTexture.pixelFormat) || mc_pixel_format_has_stencil(colorTexture.pixelFormat))) {
-			mc_throw_state(env, @"A depth/stencil texture cannot be used as a Metal color attachment");
 			return 0;
 		}
 		if (depthTexture != nil && !mc_pixel_format_has_depth(depthTexture.pixelFormat)) {
 			mc_throw_state(env, @"A Metal depth attachment requires a depth texture");
 			return 0;
 		}
-		NSUInteger colorWidth = colorTexture == nil ? 0 : MAX((NSUInteger)1, colorTexture.width >> colorMipLevel);
-		NSUInteger colorHeight = colorTexture == nil ? 0 : MAX((NSUInteger)1, colorTexture.height >> colorMipLevel);
-		NSUInteger depthWidth = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.width >> depthMipLevel);
-		NSUInteger depthHeight = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.height >> depthMipLevel);
-		if (colorTexture != nil && depthTexture != nil && (depthWidth != colorWidth || depthHeight != colorHeight)) {
-			mc_throw_state(env, @"Metal render-pass attachments must have matching dimensions");
-			return 0;
-		}
-		if (colorTexture == nil) {
-			colorWidth = depthWidth;
-			colorHeight = depthHeight;
+
+		// Every attachment covers the same pixels, so the first one to be resolved fixes the size
+		// the rest have to agree with.
+		NSUInteger targetWidth = 0;
+		NSUInteger targetHeight = 0;
+		id<MTLTexture> colorTextures[MC_MAX_COLOR_ATTACHMENTS];
+		for (jsize index = 0; index < colorCount; index++) {
+			colorTextures[index] = nil;
+			if (colorObjectIndex[index] < 0) {
+				continue;
+			}
+			const jint *fields = &colorFields[index * MC_COLOR_FIELDS];
+			BOOL isDrawable = fields[MC_COLOR_FIELD_IS_DRAWABLE] != 0;
+			id<MTLTexture> texture = isDrawable
+				? [(id<CAMetalDrawable>)objects[colorObjectIndex[index]] texture]
+				: (id<MTLTexture>)objects[colorObjectIndex[index]];
+			jint mipLevel = fields[MC_COLOR_FIELD_MIP_LEVEL];
+			if (mipLevel < 0 || (NSUInteger)mipLevel >= texture.mipmapLevelCount || (isDrawable && mipLevel != 0)) {
+				mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
+				return 0;
+			}
+			if (mc_pixel_format_has_depth(texture.pixelFormat) || mc_pixel_format_has_stencil(texture.pixelFormat)) {
+				mc_throw_state(env, @"A depth/stencil texture cannot be used as a Metal color attachment");
+				return 0;
+			}
+			NSUInteger width = MAX((NSUInteger)1, texture.width >> mipLevel);
+			NSUInteger height = MAX((NSUInteger)1, texture.height >> mipLevel);
+			if (targetWidth == 0) {
+				targetWidth = width;
+				targetHeight = height;
+			} else if (width != targetWidth || height != targetHeight) {
+				mc_throw_state(env, @"Metal render-pass attachments must have matching dimensions");
+				return 0;
+			}
+			colorTextures[index] = texture;
 		}
 
-		MTLLoadAction nativeColorLoadAction = colorTexture == nil ? MTLLoadActionDontCare : mc_load_action(env, colorLoadAction);
-		MTLStoreAction nativeColorStoreAction = colorTexture == nil ? MTLStoreActionDontCare : mc_store_action(env, colorStoreAction);
-		MTLLoadAction nativeDepthLoadAction = depthTexture == nil ? MTLLoadActionDontCare : mc_load_action(env, depthLoadAction);
-		MTLStoreAction nativeDepthStoreAction = depthTexture == nil ? MTLStoreActionDontCare : mc_store_action(env, depthStoreAction);
-		if ((*env)->ExceptionCheck(env)) {
-			return 0;
+		NSUInteger depthWidth = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.width >> depthMipLevel);
+		NSUInteger depthHeight = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.height >> depthMipLevel);
+		if (depthTexture != nil) {
+			if (targetWidth == 0) {
+				targetWidth = depthWidth;
+				targetHeight = depthHeight;
+			} else if (depthWidth != targetWidth || depthHeight != targetHeight) {
+				mc_throw_state(env, @"Metal render-pass attachments must have matching dimensions");
+				return 0;
+			}
 		}
 
 		MTLRenderPassDescriptor *descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-		if (colorTexture != nil) {
-			descriptor.colorAttachments[0].texture = colorTexture;
-			descriptor.colorAttachments[0].level = (NSUInteger)colorMipLevel;
-			descriptor.colorAttachments[0].loadAction = nativeColorLoadAction;
-			descriptor.colorAttachments[0].storeAction = nativeColorStoreAction;
-			descriptor.colorAttachments[0].clearColor = MTLClearColorMake(clearRed, clearGreen, clearBlue, clearAlpha);
-		} else {
+		for (jsize index = 0; index < colorCount; index++) {
+			if (colorTextures[index] == nil) {
+				continue;
+			}
+			const jint *fields = &colorFields[index * MC_COLOR_FIELDS];
+			const jdouble *clear = &colorClearValues[index * MC_COLOR_CLEAR_COMPONENTS];
+			MTLLoadAction loadAction = mc_load_action(env, fields[MC_COLOR_FIELD_LOAD_ACTION]);
+			MTLStoreAction storeAction = mc_store_action(env, fields[MC_COLOR_FIELD_STORE_ACTION]);
+			if ((*env)->ExceptionCheck(env)) {
+				return 0;
+			}
+			descriptor.colorAttachments[index].texture = colorTextures[index];
+			descriptor.colorAttachments[index].level = (NSUInteger)fields[MC_COLOR_FIELD_MIP_LEVEL];
+			descriptor.colorAttachments[index].loadAction = loadAction;
+			descriptor.colorAttachments[index].storeAction = storeAction;
+			descriptor.colorAttachments[index].clearColor = MTLClearColorMake(clear[0], clear[1], clear[2], clear[3]);
+		}
+		if (attachedColorCount == 0) {
 			// Without a colour attachment Metal cannot infer the pass dimensions from one.
-			descriptor.renderTargetWidth = colorWidth;
-			descriptor.renderTargetHeight = colorHeight;
+			descriptor.renderTargetWidth = targetWidth;
+			descriptor.renderTargetHeight = targetHeight;
 		}
 		if (depthTexture != nil) {
+			MTLLoadAction nativeDepthLoadAction = mc_load_action(env, depthLoadAction);
+			MTLStoreAction nativeDepthStoreAction = mc_store_action(env, depthStoreAction);
+			if ((*env)->ExceptionCheck(env)) {
+				return 0;
+			}
 			descriptor.depthAttachment.texture = depthTexture;
 			descriptor.depthAttachment.level = (NSUInteger)depthMipLevel;
 			descriptor.depthAttachment.loadAction = nativeDepthLoadAction;
@@ -2915,8 +2980,12 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			}
 		}
 
-		if (colorIndex >= 0) {
-			[commandBuffer pin:objects[colorIndex]];
+		// Pin the registered object rather than the resolved texture, so a drawable is retained as
+		// the drawable it is.
+		for (jsize index = 0; index < colorCount; index++) {
+			if (colorObjectIndex[index] >= 0) {
+				[commandBuffer pin:objects[colorObjectIndex[index]]];
+			}
 		}
 		if (depthTexture != nil) {
 			[commandBuffer pin:depthTexture];
@@ -2944,13 +3013,13 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			return 0;
 		}
 		encoder.label = @"MetalCraft render pass";
-		[encoder setViewport:(MTLViewport){0.0, 0.0, colorWidth, colorHeight, 0.0, 1.0}];
-		[encoder setScissorRect:(MTLScissorRect){0, 0, colorWidth, colorHeight}];
+		[encoder setViewport:(MTLViewport){0.0, 0.0, targetWidth, targetHeight, 0.0, 1.0}];
+		[encoder setScissorRect:(MTLScissorRect){0, 0, targetWidth, targetHeight}];
 		MCMetalRenderPass *renderPass = [[MCMetalRenderPass alloc]
 			initWithEncoder:encoder
 			commandBuffer:commandBuffer
-			width:colorWidth
-			height:colorHeight
+			width:targetWidth
+			height:targetHeight
 		];
 		return mc_register_object(renderPass, MCObjectTypeRenderPass, commandBufferHandle);
 	}

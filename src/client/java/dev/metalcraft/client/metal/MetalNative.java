@@ -233,17 +233,16 @@ public final class MetalNative {
 		int[] layoutStepRates
 	);
 
+	/**
+	 * @param colorTargetHandles one handle per color attachment index; zero leaves that index empty
+	 * @param colorFields {@code MetalRenderPass.COLOR_FIELDS} entries per index
+	 * @param colorClearValues {@code MetalRenderPass.COLOR_CLEAR_COMPONENTS} entries per index
+	 */
 	static native long nBeginRenderPass(
 		long commandBufferHandle,
-		long colorTargetHandle,
-		boolean colorTargetIsDrawable,
-		int colorMipLevel,
-		int colorLoadAction,
-		int colorStoreAction,
-		double clearRed,
-		double clearGreen,
-		double clearBlue,
-		double clearAlpha,
+		long[] colorTargetHandles,
+		int[] colorFields,
+		double[] colorClearValues,
 		long depthTargetHandle,
 		int depthMipLevel,
 		int depthLoadAction,
