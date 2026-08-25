@@ -149,6 +149,37 @@ public final class MetalShaderTranslationSmoke {
 		    return in.color;
 		}
 		""";
+	private static final String COMPUTE_MSL = """
+		#include <metal_stdlib>
+		using namespace metal;
+
+		kernel void fill_tint(
+		    texture2d<float, access::write> output [[texture(0)]],
+		    constant float4 &tint [[buffer(0)]],
+		    uint2 pixel [[thread_position_in_grid]]
+		) {
+		    // The dispatch covers whole threadgroups, so the grid overhangs a target this small.
+		    if (pixel.x >= output.get_width() || pixel.y >= output.get_height()) {
+		        return;
+		    }
+		    output.write(tint, pixel);
+		}
+
+		struct ReadbackVaryings {
+		    float4 position [[position]];
+		};
+
+		vertex ReadbackVaryings readback_vertex(uint vertexId [[vertex_id]]) {
+		    const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
+		    ReadbackVaryings out;
+		    out.position = float4(corners[vertexId % 3], 0.0, 1.0);
+		    return out;
+		}
+
+		fragment float4 readback_fragment(texture2d<float, access::read> source [[texture(0)]]) {
+		    return source.read(uint2(0, 0));
+		}
+		""";
 	private static final String MAPPED_VERTEX_GLSL = """
 		#version 450
 		in vec4 Color;
@@ -342,6 +373,7 @@ public final class MetalShaderTranslationSmoke {
 			assertMultipleRenderTargets(device);
 			assertMemorylessTileResolve(device);
 			assertLayeredArrayRendering(device);
+			assertComputeDispatch(device);
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
 			assertBatchedResourceBindings(device);
@@ -659,6 +691,84 @@ public final class MetalShaderTranslationSmoke {
 			} catch (IllegalArgumentException expectedFailure) {
 				// A layered pass covers every layer, so picking one for the attachment is a
 				// contradiction rather than a narrowing.
+			}
+		}
+	}
+
+	/**
+	 * A compute dispatch whose output is read by a render pass in the same command buffer.
+	 *
+	 * <p>The bloom chain and the ambient-occlusion pass in the built-in pack are compute, and both
+	 * of them end by handing a texture to a later render pass. What has to hold for that to work is
+	 * not just that the dispatch runs, but that its writes are visible to the pass after it: Metal
+	 * tracks the hazard across encoders, and this is the assertion that says so rather than assuming
+	 * it. Reading the color back through a second encoder is the point; reading the compute output
+	 * directly would pass even if the ordering were wrong.
+	 */
+	private static void assertComputeDispatch(final MetalDevice device) {
+		int size = 4;
+		try (MetalComputePipeline kernel = device.createComputePipeline(
+				 new MetalComputePipeline.Descriptor(COMPUTE_MSL, "fill_tint"));
+			 MetalRenderPipeline readback = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 COMPUTE_MSL, "readback_vertex", COMPUTE_MSL, "readback_fragment",
+				 List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM)), null,
+				 MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+				 MetalRenderPipeline.RasterState.DEFAULT
+			 ));
+			 MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture computed = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.RGBA8_UNORM, size, size, 1,
+				 MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_SHADER_WRITE
+			 ));
+			 MetalTextureView computedView = computed.createView();
+			 MetalTexture target = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, size, size, 1));
+			 MetalBuffer tint = device.createBuffer(4L * Float.BYTES, MetalBuffer.StorageMode.SHARED)) {
+			if (kernel.maxThreadsPerThreadgroup() < 64 || kernel.threadExecutionWidth() <= 0) {
+				throw new AssertionError(
+					"Metal reported an unusable threadgroup size for a compiled kernel: "
+						+ kernel.maxThreadsPerThreadgroup() + " threads, width " + kernel.threadExecutionWidth()
+				);
+			}
+			try (MetalBuffer.Mapping mapping = tint.map()) {
+				mapping.bytes().order(ByteOrder.nativeOrder()).asFloatBuffer()
+					.put(0.25F).put(0.5F).put(0.75F).put(1.0F);
+			}
+
+			try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+				try (MetalComputePass compute = commands.beginComputePass()) {
+					compute.setPipeline(kernel);
+					compute.setTexture(0, computedView);
+					compute.setBuffer(0, tint, 0L);
+					compute.dispatchCovering(size, size, 8, 8);
+				}
+				try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+					MetalRenderPass.ColorAttachment.clear(target, 0.0, 0.0, 0.0, 1.0)))) {
+					pass.setPipeline(readback);
+					pass.setTexture(0, computedView, MetalRenderPass.STAGE_FRAGMENT);
+					pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				}
+				commands.commitAndWait();
+			}
+
+			ByteBuffer pixels = target.readback(queue, 0);
+			int actual = Byte.toUnsignedInt(pixels.get(0)) << 16
+				| Byte.toUnsignedInt(pixels.get(1)) << 8
+				| Byte.toUnsignedInt(pixels.get(2));
+			int expected = 0x4080BF;
+			if (!isNearColor(actual, expected)) {
+				throw new AssertionError(String.format(
+					"A render pass read %06X from a compute dispatch that wrote %06X", actual, expected
+				));
+			}
+
+			try (MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalComputePass compute = commands.beginComputePass()) {
+				compute.setPipeline(kernel);
+				compute.dispatch(1, 1, 1, 64, 64, 1);
+				throw new AssertionError("A threadgroup larger than the kernel supports was dispatched");
+			} catch (IllegalArgumentException expectedFailure) {
+				// The limit belongs to the compiled kernel rather than the device, so it is worth
+				// reporting against the kernel rather than as an encoder failure.
 			}
 		}
 	}

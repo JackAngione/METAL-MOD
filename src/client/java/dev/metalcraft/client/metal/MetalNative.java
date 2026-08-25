@@ -256,6 +256,36 @@ public final class MetalNative {
 		int gpuTimingKind
 	);
 
+	static native long nCreateComputePipeline(long deviceHandle, String source, String functionName);
+
+	static native int nComputePipelineMaxThreadsPerThreadgroup(long pipelineHandle);
+
+	static native int nComputePipelineThreadExecutionWidth(long pipelineHandle);
+
+	static native void nReleaseComputePipeline(long pipelineHandle);
+
+	static native long nBeginComputePass(long commandBufferHandle);
+
+	static native void nSetComputePipeline(long passHandle, long pipelineHandle);
+
+	static native void nSetComputeBuffer(long passHandle, int index, long bufferHandle, long offset);
+
+	static native void nSetComputeTexture(long passHandle, int index, long textureViewHandle);
+
+	static native void nSetComputeSampler(long passHandle, int index, long samplerHandle);
+
+	static native void nDispatchThreadgroups(
+		long passHandle,
+		int groupsX,
+		int groupsY,
+		int groupsZ,
+		int threadsX,
+		int threadsY,
+		int threadsZ
+	);
+
+	static native void nEndComputePass(long passHandle);
+
 	static native void nSetRenderPipeline(long renderPassHandle, long pipelineHandle);
 
 	static native void nSetScissor(long renderPassHandle, int x, int y, int width, int height);

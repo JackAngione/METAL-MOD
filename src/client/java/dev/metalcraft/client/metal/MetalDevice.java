@@ -22,6 +22,7 @@ public final class MetalDevice implements AutoCloseable {
 	private final Set<MetalFence> fences = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final Set<MetalTimestampQueryPool> timestampQueryPools = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final Set<MetalRenderPipeline> renderPipelines = Collections.newSetFromMap(new IdentityHashMap<>());
+	private final Set<MetalComputePipeline> computePipelines = Collections.newSetFromMap(new IdentityHashMap<>());
 	private long handle;
 	private boolean closing;
 
@@ -253,6 +254,18 @@ public final class MetalDevice implements AutoCloseable {
 		return pipeline;
 	}
 
+	public synchronized MetalComputePipeline createComputePipeline(final MetalComputePipeline.Descriptor descriptor) {
+		long pipelineHandle = MetalNative.nCreateComputePipeline(
+			this.requireOpenHandle(), descriptor.source(), descriptor.functionName()
+		);
+		if (pipelineHandle == 0L) {
+			throw new IllegalStateException("Metal did not create the requested compute pipeline");
+		}
+		MetalComputePipeline pipeline = new MetalComputePipeline(this, pipelineHandle, descriptor);
+		this.computePipelines.add(pipeline);
+		return pipeline;
+	}
+
 	public MetalRenderPipeline createRenderPipeline(final MetalRenderPipeline.GlslDescriptor descriptor) {
 		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
 			descriptor.vertexSource(),
@@ -284,6 +297,7 @@ public final class MetalDevice implements AutoCloseable {
 		List<MetalFence> ownedFences;
 		List<MetalTimestampQueryPool> ownedTimestampQueryPools;
 		List<MetalRenderPipeline> ownedRenderPipelines;
+		List<MetalComputePipeline> ownedComputePipelines;
 		synchronized (this) {
 			if (this.handle == 0L || this.closing) {
 				return;
@@ -297,6 +311,7 @@ public final class MetalDevice implements AutoCloseable {
 			ownedFences = new ArrayList<>(this.fences);
 			ownedTimestampQueryPools = new ArrayList<>(this.timestampQueryPools);
 			ownedRenderPipelines = new ArrayList<>(this.renderPipelines);
+			ownedComputePipelines = new ArrayList<>(this.computePipelines);
 		}
 
 		for (MetalCommandQueue commandQueue : ownedQueues) {
@@ -323,6 +338,9 @@ public final class MetalDevice implements AutoCloseable {
 		for (MetalRenderPipeline renderPipeline : ownedRenderPipelines) {
 			renderPipeline.close();
 		}
+		for (MetalComputePipeline computePipeline : ownedComputePipelines) {
+			computePipeline.close();
+		}
 
 		synchronized (this) {
 			MetalNative.nReleaseDevice(this.handle);
@@ -335,6 +353,7 @@ public final class MetalDevice implements AutoCloseable {
 			this.fences.clear();
 			this.timestampQueryPools.clear();
 			this.renderPipelines.clear();
+			this.computePipelines.clear();
 			this.closing = false;
 		}
 	}
@@ -365,6 +384,10 @@ public final class MetalDevice implements AutoCloseable {
 
 	synchronized void forget(final MetalTimestampQueryPool pool) {
 		this.timestampQueryPools.remove(pool);
+	}
+
+	synchronized void forget(final MetalComputePipeline computePipeline) {
+		this.computePipelines.remove(computePipeline);
 	}
 
 	synchronized void forget(final MetalRenderPipeline renderPipeline) {

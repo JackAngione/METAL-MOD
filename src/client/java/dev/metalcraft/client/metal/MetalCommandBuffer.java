@@ -8,6 +8,7 @@ public final class MetalCommandBuffer implements AutoCloseable {
 	private long handle;
 	private boolean committed;
 	private MetalRenderPass activeRenderPass;
+	private MetalComputePass activeComputePass;
 
 	MetalCommandBuffer(final MetalCommandQueue commandQueue, final long handle) {
 		if (handle == 0L) {
@@ -182,6 +183,19 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		MetalNative.nWriteCommandTimestamp(this.requireEncodingHandle(), pool.requireOpenHandle(), index);
 	}
 
+	public synchronized MetalComputePass beginComputePass() {
+		if (this.activeRenderPass != null || this.activeComputePass != null) {
+			throw new IllegalStateException("A Metal pass is already active on this command buffer");
+		}
+		long passHandle = MetalNative.nBeginComputePass(this.requireEncodingHandle());
+		if (passHandle == 0L) {
+			throw new IllegalStateException("Metal did not create a compute command encoder");
+		}
+		MetalComputePass pass = new MetalComputePass(this, passHandle);
+		this.activeComputePass = pass;
+		return pass;
+	}
+
 	public synchronized MetalRenderPass beginRenderPass(final MetalRenderPass.Descriptor descriptor) {
 		return this.beginRenderPass(descriptor, MetalPassCensus.UNTIMED_KIND);
 	}
@@ -197,8 +211,8 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		if (descriptor == null) {
 			throw new NullPointerException("descriptor");
 		}
-		if (this.activeRenderPass != null) {
-			throw new IllegalStateException("A Metal render pass is already active on this command buffer");
+		if (this.activeRenderPass != null || this.activeComputePass != null) {
+			throw new IllegalStateException("A Metal pass is already active on this command buffer");
 		}
 
 		// One flat array per primitive type, strided by attachment index. A zero handle marks an
@@ -261,8 +275,8 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		if (this.committed) {
 			throw new IllegalStateException("Metal command buffer is already committed");
 		}
-		if (this.activeRenderPass != null) {
-			throw new IllegalStateException("End the active Metal render pass before committing its command buffer");
+		if (this.activeRenderPass != null || this.activeComputePass != null) {
+			throw new IllegalStateException("End the active Metal pass before committing its command buffer");
 		}
 		MetalNative.nCommitCommandBuffer(this.requireOpenHandle());
 		this.committed = true;
@@ -295,11 +309,16 @@ public final class MetalCommandBuffer implements AutoCloseable {
 	@Override
 	public void close() {
 		MetalRenderPass renderPass;
+		MetalComputePass computePass;
 		synchronized (this) {
 			renderPass = this.activeRenderPass;
+			computePass = this.activeComputePass;
 		}
 		if (renderPass != null) {
 			renderPass.close();
+		}
+		if (computePass != null) {
+			computePass.close();
 		}
 		synchronized (this) {
 			if (this.handle == 0L) {
@@ -314,6 +333,12 @@ public final class MetalCommandBuffer implements AutoCloseable {
 	synchronized void forget(final MetalRenderPass renderPass) {
 		if (this.activeRenderPass == renderPass) {
 			this.activeRenderPass = null;
+		}
+	}
+
+	synchronized void forget(final MetalComputePass computePass) {
+		if (this.activeComputePass == computePass) {
+			this.activeComputePass = null;
 		}
 	}
 
