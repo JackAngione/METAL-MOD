@@ -2409,13 +2409,19 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 	jint depthOrLayers,
 	jint mipLevels,
 	jint usage,
-	jboolean cubemap
+	jboolean cubemap,
+	jboolean memoryless
 ) {
 	@autoreleasepool {
 		BOOL isCubemap = cubemap == JNI_TRUE;
+		BOOL isMemoryless = memoryless == JNI_TRUE;
 		BOOL validShape = isCubemap ? width == height && depthOrLayers == 6 : depthOrLayers == 1;
 		if (width <= 0 || height <= 0 || mipLevels <= 0 || !validShape || (usage & ~7) != 0) {
 			mc_throw_state(env, @"A Metal texture requires positive dimensions, mip levels, and valid usage bits");
+			return 0;
+		}
+		if (isMemoryless && (usage != 4 || mipLevels != 1 || isCubemap)) {
+			mc_throw_state(env, @"A memoryless Metal texture must be a single-level two-dimensional render target");
 			return 0;
 		}
 		MTLPixelFormat pixelFormat = mc_pixel_format(env, format);
@@ -2424,6 +2430,12 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 		}
 		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, deviceHandle, MCObjectTypeDevice);
 		if (device == nil) {
+			return 0;
+		}
+		if (isMemoryless && ![device supportsFamily:MTLGPUFamilyApple1]) {
+			// Memoryless attachments are a tile-based-GPU feature. Every Apple silicon GPU has it;
+			// nothing else this backend could run on does.
+			mc_throw_state(env, @"This Metal device has no tile memory, so it cannot allocate a memoryless texture");
 			return 0;
 		}
 		MTLTextureDescriptor *descriptor = [[MTLTextureDescriptor alloc] init];
@@ -2435,7 +2447,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 		descriptor.mipmapLevelCount = (NSUInteger)mipLevels;
 		descriptor.arrayLength = 1;
 		descriptor.sampleCount = 1;
-		descriptor.storageMode = MTLStorageModePrivate;
+		descriptor.storageMode = isMemoryless ? MTLStorageModeMemoryless : MTLStorageModePrivate;
 		descriptor.usage = MTLTextureUsageUnknown;
 		if ((usage & 1) != 0) descriptor.usage |= MTLTextureUsageShaderRead;
 		if ((usage & 2) != 0) descriptor.usage |= MTLTextureUsageShaderWrite;

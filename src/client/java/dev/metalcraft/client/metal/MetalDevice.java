@@ -90,7 +90,8 @@ public final class MetalDevice implements AutoCloseable {
 			descriptor.depthOrLayers(),
 			descriptor.mipLevels(),
 			descriptor.usage(),
-			descriptor.cubemap()
+			descriptor.cubemap(),
+			descriptor.storageMode() == MetalTexture.StorageMode.MEMORYLESS
 		);
 		MetalStallProbe.end(MetalStallProbe.Source.TEXTURE_CREATE, startedNs, descriptor.byteSize());
 		if (textureHandle == 0L) {

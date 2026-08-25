@@ -76,6 +76,49 @@ public final class MetalShaderTranslationSmoke {
 		    target3 = vec4(1.0, 1.0, 0.0, 1.0);
 		}
 		""";
+	/**
+	 * Hand-written MSL, because framebuffer fetch has no GLSL spelling this translator emits and
+	 * because a shader pack authored in MSL reaches the pipeline through this same path.
+	 */
+	private static final String TILE_MSL = """
+		#include <metal_stdlib>
+		using namespace metal;
+
+		struct Varyings {
+		    float4 position [[position]];
+		};
+
+		vertex Varyings tile_vertex(uint vertexId [[vertex_id]]) {
+		    const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
+		    Varyings out;
+		    out.position = float4(corners[vertexId % 3], 0.0, 1.0);
+		    return out;
+		}
+
+		struct TileTargets {
+		    float4 albedo [[color(0)]];
+		    float4 normal [[color(1)]];
+		    float4 scene [[color(2)]];
+		};
+
+		fragment TileTargets tile_fill() {
+		    TileTargets out;
+		    out.albedo = float4(0.5, 0.25, 0.0, 1.0);
+		    out.normal = float4(0.0, 0.5, 0.25, 1.0);
+		    out.scene = float4(0.0, 0.0, 0.0, 1.0);
+		    return out;
+		}
+
+		// The G-buffer arrives as a fragment input rather than a sampled texture: these are the
+		// values the previous draw left in tile memory at this pixel.
+		fragment TileTargets tile_resolve(TileTargets fetched) {
+		    TileTargets out;
+		    out.albedo = fetched.albedo;
+		    out.normal = fetched.normal;
+		    out.scene = float4(fetched.albedo.rgb + fetched.normal.rgb, 1.0);
+		    return out;
+		}
+		""";
 	private static final String MAPPED_VERTEX_GLSL = """
 		#version 450
 		in vec4 Color;
@@ -267,6 +310,7 @@ public final class MetalShaderTranslationSmoke {
 			assertFramebufferOrientation(device);
 			assertMipRenderTargetViewport(device);
 			assertMultipleRenderTargets(device);
+			assertMemorylessTileResolve(device);
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
 			assertBatchedResourceBindings(device);
@@ -413,6 +457,99 @@ public final class MetalShaderTranslationSmoke {
 			}
 		} finally {
 			written.forEach(MetalTexture::close);
+		}
+	}
+
+	/**
+	 * A deferred resolve that never touches device memory.
+	 *
+	 * <p>Two G-buffer attachments are allocated memoryless, filled by one draw, and consumed by a
+	 * second draw in the same pass through Metal's framebuffer fetch, which reads the values still
+	 * sitting in tile memory. Both are discarded at the end of the pass and only the resolved scene
+	 * is stored. This is the mechanism the built-in shader pack is built on, so it is worth pinning
+	 * before anything depends on it: if framebuffer fetch silently read cleared values instead, the
+	 * scene would come back black rather than fail somewhere nearer the cause.
+	 */
+	private static void assertMemorylessTileResolve(final MetalDevice device) {
+		List<MetalRenderPipeline.ColorTarget> fillTargets = List.of(
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			new MetalRenderPipeline.ColorTarget(MetalTexture.Format.RGBA8_UNORM, 0, null)
+		);
+		List<MetalRenderPipeline.ColorTarget> resolveTargets = List.of(
+			new MetalRenderPipeline.ColorTarget(MetalTexture.Format.RGBA8_UNORM, 0, null),
+			new MetalRenderPipeline.ColorTarget(MetalTexture.Format.RGBA8_UNORM, 0, null),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM)
+		);
+		MetalTexture.Descriptor gBufferDescriptor = MetalTexture.Descriptor.memoryless(MetalTexture.Format.RGBA8_UNORM, 4, 4);
+		if (gBufferDescriptor.byteSize() != 0L) {
+			throw new AssertionError("A memoryless Metal texture reported a device footprint of " + gBufferDescriptor.byteSize());
+		}
+		try (MetalRenderPipeline fill = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 TILE_MSL, "tile_vertex", TILE_MSL, "tile_fill", fillTargets, null,
+				 MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+				 MetalRenderPipeline.RasterState.DEFAULT
+			 ));
+			 MetalRenderPipeline resolve = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 TILE_MSL, "tile_vertex", TILE_MSL, "tile_resolve", resolveTargets, null,
+				 MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+				 MetalRenderPipeline.RasterState.DEFAULT
+			 ));
+			 MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture albedo = device.createTexture(gBufferDescriptor);
+			 MetalTexture normal = device.createTexture(gBufferDescriptor);
+			 MetalTexture scene = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 4, 4, 1))) {
+			if (!albedo.isMemoryless() || scene.isMemoryless()) {
+				throw new AssertionError("Metal texture storage mode did not survive creation");
+			}
+			try {
+				albedo.readback(queue, 0);
+				throw new AssertionError("A memoryless Metal texture was read back");
+			} catch (IllegalStateException expected) {
+				// Nothing to read: the texture has no device allocation to read from.
+			}
+
+			List<MetalRenderPass.ColorAttachment> attachments = List.of(
+				new MetalRenderPass.ColorAttachment(
+					albedo, 0, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE, 0.0, 0.0, 0.0, 1.0
+				),
+				new MetalRenderPass.ColorAttachment(
+					normal, 0, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE, 0.0, 0.0, 0.0, 1.0
+				),
+				new MetalRenderPass.ColorAttachment(
+					scene, 0, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.0, 0.0, 0.0, 1.0
+				)
+			);
+			try (MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(attachments, null))) {
+				pass.setPipeline(fill);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				pass.setPipeline(resolve);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				pass.close();
+				commands.commitAndWait();
+			}
+
+			ByteBuffer pixels = scene.readback(queue, 0);
+			int actual = Byte.toUnsignedInt(pixels.get(0)) << 16
+				| Byte.toUnsignedInt(pixels.get(1)) << 8
+				| Byte.toUnsignedInt(pixels.get(2));
+			// (0.5, 0.25, 0.0) + (0.0, 0.5, 0.25), the two G-buffer values summed in tile memory.
+			int expected = 0x80C040;
+			if (!isNearColor(actual, expected)) {
+				throw new AssertionError(String.format(
+					"Deferred tile resolve produced %06X, expected %06X", actual, expected
+				));
+			}
+
+			try {
+				new MetalRenderPass.ColorAttachment(
+					albedo, 0, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.0, 0.0, 0.0, 1.0
+				);
+				throw new AssertionError("A memoryless Metal attachment accepted a store action");
+			} catch (IllegalArgumentException expectedFailure) {
+				// Storing tile memory would need somewhere to store it to.
+			}
 		}
 	}
 

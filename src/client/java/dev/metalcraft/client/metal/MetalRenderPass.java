@@ -72,6 +72,20 @@ public final class MetalRenderPass implements AutoCloseable {
 	public sealed interface ColorTarget permits MetalDrawable, MetalTexture {
 	}
 
+	/**
+	 * A memoryless attachment exists only for the duration of its pass, so there is nothing on the
+	 * way in for a load to read and nowhere on the way out for a store to write. Metal reports both
+	 * mistakes against the encoder; catching them here names the attachment instead.
+	 */
+	private static void validateMemorylessActions(final LoadAction loadAction, final StoreAction storeAction) {
+		if (loadAction == LoadAction.LOAD) {
+			throw new IllegalArgumentException("A memoryless Metal attachment has no previous contents to load");
+		}
+		if (storeAction != StoreAction.DONT_CARE) {
+			throw new IllegalArgumentException("A memoryless Metal attachment cannot be stored");
+		}
+	}
+
 	public record ColorAttachment(
 		ColorTarget target,
 		int mipLevel,
@@ -95,6 +109,9 @@ public final class MetalRenderPass implements AutoCloseable {
 			}
 			if (loadAction == null || storeAction == null) {
 				throw new NullPointerException("Metal color attachment actions cannot be null");
+			}
+			if (target instanceof MetalTexture memoryless && memoryless.isMemoryless()) {
+				validateMemorylessActions(loadAction, storeAction);
 			}
 			validateClearComponent(clearRed);
 			validateClearComponent(clearGreen);
@@ -148,6 +165,9 @@ public final class MetalRenderPass implements AutoCloseable {
 			}
 			if (!Double.isFinite(clearDepth) || clearDepth < 0.0 || clearDepth > 1.0) {
 				throw new IllegalArgumentException("Metal clear depth must be between zero and one");
+			}
+			if (texture.isMemoryless()) {
+				validateMemorylessActions(loadAction, storeAction);
 			}
 		}
 

@@ -178,6 +178,7 @@ public final class MetalNative {
 
 	static native int nCommandBufferRetainedResourceCount(long commandBufferHandle);
 
+	/** @param memoryless whether the texture lives only in tile memory, with no device allocation */
 	static native long nCreateTexture(
 		long deviceHandle,
 		int format,
@@ -186,7 +187,8 @@ public final class MetalNative {
 		int depthOrLayers,
 		int mipLevels,
 		int usage,
-		boolean cubemap
+		boolean cubemap,
+		boolean memoryless
 	);
 
 	static native long nCreateTextureView(long textureHandle, int baseMipLevel, int mipLevels);

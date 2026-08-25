@@ -102,6 +102,23 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 		}
 	}
 
+	/** Where a texture's contents live. */
+	public enum StorageMode {
+		/** Device memory. Uploadable, readable back, and readable by a later pass. */
+		PRIVATE,
+		/**
+		 * Tile memory only, with no device allocation at all.
+		 *
+		 * <p>A memoryless texture exists for the duration of the pass that renders into it. Nothing
+		 * outside that pass can see it, so it cannot be uploaded, read back, sampled, or loaded from
+		 * - it can only be cleared, written, read by a later draw in the same pass through Metal's
+		 * framebuffer fetch, and discarded. That is exactly the lifetime of a deferred G-buffer, and
+		 * skipping its round trip to device memory is the point of rendering deferred on a
+		 * tile-based GPU.
+		 */
+		MEMORYLESS
+	}
+
 	public record Descriptor(
 		Format format,
 		int width,
@@ -109,19 +126,40 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 		int depthOrLayers,
 		int mipLevels,
 		int usage,
-		boolean cubemap
+		boolean cubemap,
+		StorageMode storageMode
 	) {
 		public Descriptor(final Format format, final int width, final int height, final int mipLevels) {
-			this(format, width, height, 1, mipLevels, USAGE_SHADER_READ | USAGE_RENDER_TARGET, false);
+			this(format, width, height, 1, mipLevels, USAGE_SHADER_READ | USAGE_RENDER_TARGET, false, StorageMode.PRIVATE);
 		}
 
 		public Descriptor(final Format format, final int width, final int height, final int mipLevels, final int usage) {
-			this(format, width, height, 1, mipLevels, usage, false);
+			this(format, width, height, 1, mipLevels, usage, false, StorageMode.PRIVATE);
+		}
+
+		public Descriptor(
+			final Format format,
+			final int width,
+			final int height,
+			final int depthOrLayers,
+			final int mipLevels,
+			final int usage,
+			final boolean cubemap
+		) {
+			this(format, width, height, depthOrLayers, mipLevels, usage, cubemap, StorageMode.PRIVATE);
+		}
+
+		/** A render target that never leaves tile memory. */
+		public static Descriptor memoryless(final Format format, final int width, final int height) {
+			return new Descriptor(format, width, height, 1, 1, USAGE_RENDER_TARGET, false, StorageMode.MEMORYLESS);
 		}
 
 		public Descriptor {
 			if (format == null) {
 				throw new NullPointerException("format");
+			}
+			if (storageMode == null) {
+				throw new NullPointerException("storageMode");
 			}
 			if (width <= 0 || height <= 0 || mipLevels <= 0) {
 				throw new IllegalArgumentException("Metal texture dimensions and mip levels must be positive");
@@ -140,10 +178,23 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 			if ((usage & ~USAGE_ALL) != 0) {
 				throw new IllegalArgumentException("Metal texture usage contains unknown bits");
 			}
+			if (storageMode == StorageMode.MEMORYLESS) {
+				// Each of these would need the texture to exist somewhere a later pass, a shader, or
+				// the CPU could reach it, and a memoryless texture is never allocated anywhere.
+				if (usage != USAGE_RENDER_TARGET) {
+					throw new IllegalArgumentException("A memoryless Metal texture can only be a render target");
+				}
+				if (mipLevels != 1 || cubemap || depthOrLayers != 1) {
+					throw new IllegalArgumentException("A memoryless Metal texture must be a single two-dimensional mip level");
+				}
+			}
 		}
 
 		/** Approximate device footprint of every mip level and layer, for allocation telemetry. */
 		public long byteSize() {
+			if (this.storageMode == StorageMode.MEMORYLESS) {
+				return 0L;
+			}
 			long total = 0L;
 			for (int level = 0; level < this.mipLevels; level++) {
 				long levelWidth = Math.max(1, this.width >> level);
@@ -177,11 +228,27 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 		return this.descriptor;
 	}
 
+	/** @return whether this texture's contents exist only inside the pass that renders into them */
+	public boolean isMemoryless() {
+		return this.descriptor.storageMode() == StorageMode.MEMORYLESS;
+	}
+
+	/**
+	 * A memoryless texture has no device allocation, so every operation that needs an address into
+	 * one is rejected here rather than by Metal, which reports it against the encoder instead.
+	 */
+	private void requireAddressable(final String operation) {
+		if (this.isMemoryless()) {
+			throw new IllegalStateException("A memoryless Metal texture cannot be " + operation);
+		}
+	}
+
 	public synchronized MetalTextureView createView() {
 		return this.createView(0, this.descriptor.mipLevels());
 	}
 
 	public synchronized MetalTextureView createView(final int baseMipLevel, final int mipLevels) {
+		this.requireAddressable("viewed");
 		if (baseMipLevel < 0 || mipLevels <= 0 || baseMipLevel > this.descriptor.mipLevels() || mipLevels > this.descriptor.mipLevels() - baseMipLevel) {
 			throw new IllegalArgumentException("Metal texture-view mip range is out of bounds");
 		}
@@ -195,6 +262,7 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 	}
 
 	public void upload(final MetalCommandQueue commandQueue, final int mipLevel, final ByteBuffer source) {
+		this.requireAddressable("uploaded to");
 		this.requireSameDevice(commandQueue);
 		int width = this.widthAtMip(mipLevel);
 		int height = this.heightAtMip(mipLevel);
@@ -217,6 +285,7 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 	}
 
 	public ByteBuffer readback(final MetalCommandQueue commandQueue, final int mipLevel) {
+		this.requireAddressable("read back");
 		this.requireSameDevice(commandQueue);
 		int width = this.widthAtMip(mipLevel);
 		int height = this.heightAtMip(mipLevel);
