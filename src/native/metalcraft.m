@@ -1181,6 +1181,11 @@ static MTLColorWriteMask mc_color_write_mask(JNIEnv *env, jint mask) {
 	return result;
 }
 
+/** @return the slices a texture addresses: a cubemap's six faces, or its array length. */
+static NSUInteger mc_texture_slice_count(id<MTLTexture> texture) {
+	return texture.textureType == MTLTextureTypeCube ? 6 : texture.arrayLength;
+}
+
 static BOOL mc_read_int_array(
 	JNIEnv *env,
 	jintArray array,
@@ -1872,6 +1877,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyTextureToBuffer(
 	jlong commandBufferHandle,
 	jlong textureHandle,
 	jint mipLevel,
+	jint arrayLayer,
 	jlong destinationHandle,
 	jlong destinationOffset,
 	jlong bytesPerRow
@@ -1890,6 +1896,10 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyTextureToBuffer(
 			mc_throw_state(env, @"Metal texture readback mip level is out of bounds");
 			return;
 		}
+		if (arrayLayer < 0 || (NSUInteger)arrayLayer >= mc_texture_slice_count(texture)) {
+			mc_throw_state(env, @"Metal texture readback array layer is out of bounds");
+			return;
+		}
 		NSUInteger width = MAX((NSUInteger)1, texture.width >> mipLevel);
 		NSUInteger height = MAX((NSUInteger)1, texture.height >> mipLevel);
 		NSUInteger bytesPerPixel = mc_bytes_per_pixel(texture.pixelFormat);
@@ -1902,7 +1912,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyTextureToBuffer(
 		[commandBuffer pin:destination];
 		id<MTLBlitCommandEncoder> blit = [commandBuffer blitEncoder];
 		[blit copyFromTexture:texture
-			sourceSlice:0
+			sourceSlice:(NSUInteger)arrayLayer
 			sourceLevel:(NSUInteger)mipLevel
 			sourceOrigin:MTLOriginMake(0, 0, 0)
 			sourceSize:MTLSizeMake(width, height, 1)
@@ -1937,7 +1947,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyBufferToTextureRegion(
 		MCMetalCommandBuffer *commandBuffer = objects[0];
 		id<MTLBuffer> source = objects[1];
 		id<MTLTexture> texture = objects[2];
-		NSUInteger sliceCount = texture.textureType == MTLTextureTypeCube ? 6 : 1;
+		NSUInteger sliceCount = texture.textureType == MTLTextureTypeCube ? 6 : texture.arrayLength;
 		if (mipLevel < 0 || (NSUInteger)mipLevel >= texture.mipmapLevelCount
 			|| arrayLayer < 0 || (NSUInteger)arrayLayer >= sliceCount
 			|| destinationX < 0 || destinationY < 0 || width <= 0 || height <= 0) {
@@ -2415,7 +2425,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 	@autoreleasepool {
 		BOOL isCubemap = cubemap == JNI_TRUE;
 		BOOL isMemoryless = memoryless == JNI_TRUE;
-		BOOL validShape = isCubemap ? width == height && depthOrLayers == 6 : depthOrLayers == 1;
+		BOOL validShape = isCubemap ? width == height && depthOrLayers == 6 : depthOrLayers >= 1;
 		if (width <= 0 || height <= 0 || mipLevels <= 0 || !validShape || (usage & ~7) != 0) {
 			mc_throw_state(env, @"A Metal texture requires positive dimensions, mip levels, and valid usage bits");
 			return 0;
@@ -2438,14 +2448,16 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 			mc_throw_state(env, @"This Metal device has no tile memory, so it cannot allocate a memoryless texture");
 			return 0;
 		}
+		BOOL isArray = !isCubemap && depthOrLayers > 1;
 		MTLTextureDescriptor *descriptor = [[MTLTextureDescriptor alloc] init];
-		descriptor.textureType = isCubemap ? MTLTextureTypeCube : MTLTextureType2D;
+		descriptor.textureType = isCubemap ? MTLTextureTypeCube : (isArray ? MTLTextureType2DArray : MTLTextureType2D);
 		descriptor.pixelFormat = pixelFormat;
 		descriptor.width = (NSUInteger)width;
 		descriptor.height = (NSUInteger)height;
 		descriptor.depth = 1;
 		descriptor.mipmapLevelCount = (NSUInteger)mipLevels;
-		descriptor.arrayLength = 1;
+		// A cubemap addresses six faces as slices while still reporting one array element.
+		descriptor.arrayLength = isCubemap ? 1 : (NSUInteger)depthOrLayers;
 		descriptor.sampleCount = 1;
 		descriptor.storageMode = isMemoryless ? MTLStorageModeMemoryless : MTLStorageModePrivate;
 		descriptor.usage = MTLTextureUsageUnknown;
@@ -2480,7 +2492,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTextureView(
 			mc_throw_state(env, @"Metal texture-view mip range is out of bounds");
 			return 0;
 		}
-		NSUInteger sliceCount = texture.textureType == MTLTextureTypeCube ? 6 : 1;
+		NSUInteger sliceCount = texture.textureType == MTLTextureTypeCube ? 6 : texture.arrayLength;
 		id<MTLTexture> textureView = [texture
 			newTextureViewWithPixelFormat:texture.pixelFormat
 			textureType:texture.textureType
@@ -2570,6 +2582,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 	jfloat depthBiasConstant,
 	jint cullMode,
 	jint fillMode,
+	jint topologyClass,
 	jintArray attributeLocationsValue,
 	jintArray attributeBufferIndicesValue,
 	jintArray attributeOffsetsValue,
@@ -2644,6 +2657,10 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 		MTLPixelFormat depthStencilPixelFormat = depthStencilFormat < 0 ? MTLPixelFormatInvalid : mc_pixel_format(env, depthStencilFormat);
 		MTLCompareFunction nativeCompareFunction = mc_compare_function(env, depthCompareFunction);
 		MTLCullMode nativeCullMode = mc_cull_mode(env, cullMode);
+		if (topologyClass < 0 || topologyClass > 3) {
+			mc_throw_state(env, @"Unsupported Metal primitive topology class");
+			return 0;
+		}
 		MTLTriangleFillMode nativeFillMode = mc_fill_mode(env, fillMode);
 		if ((*env)->ExceptionCheck(env)) {
 			return 0;
@@ -2733,6 +2750,14 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 		if ((*env)->ExceptionCheck(env)) {
 			return 0;
 		}
+		// Declared up front only when asked for: a vertex stage that picks a render-target layer
+		// resolves it before the primitive is assembled, so Metal cannot infer the class from the
+		// draw call the way it does for every other pipeline.
+		if (topologyClass != 0) {
+			descriptor.inputPrimitiveTopology = topologyClass == 1
+				? MTLPrimitiveTopologyClassPoint
+				: (topologyClass == 2 ? MTLPrimitiveTopologyClassLine : MTLPrimitiveTopologyClassTriangle);
+		}
 		if (mc_pixel_format_has_depth(depthStencilPixelFormat)) {
 			descriptor.depthAttachmentPixelFormat = depthStencilPixelFormat;
 		}
@@ -2800,11 +2825,12 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 
 // Attachment-array layout, mirrored by MetalRenderPass.COLOR_FIELD_* on the Java side.
 #define MC_MAX_COLOR_ATTACHMENTS 8
-#define MC_COLOR_FIELDS 4
+#define MC_COLOR_FIELDS 5
 #define MC_COLOR_FIELD_IS_DRAWABLE 0
 #define MC_COLOR_FIELD_MIP_LEVEL 1
 #define MC_COLOR_FIELD_LOAD_ACTION 2
 #define MC_COLOR_FIELD_STORE_ACTION 3
+#define MC_COLOR_FIELD_ARRAY_SLICE 4
 #define MC_COLOR_CLEAR_COMPONENTS 4
 #define MC_MAX_PASS_OBJECTS (1 + MC_MAX_COLOR_ATTACHMENTS + 1)
 
@@ -2818,9 +2844,11 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 	jdoubleArray colorClearValuesValue,
 	jlong depthTargetHandle,
 	jint depthMipLevel,
+	jint depthArraySlice,
 	jint depthLoadAction,
 	jint depthStoreAction,
 	jdouble clearDepth,
+	jint renderTargetArrayLength,
 	jint gpuTimingKind
 ) {
 	@autoreleasepool {
@@ -2900,6 +2928,14 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			mc_throw_state(env, @"A Metal depth attachment requires a depth texture");
 			return 0;
 		}
+		if (depthTexture != nil && (depthArraySlice < 0 || (NSUInteger)depthArraySlice >= mc_texture_slice_count(depthTexture))) {
+			mc_throw_state(env, @"Metal render-pass attachment array slice is out of bounds");
+			return 0;
+		}
+		if (renderTargetArrayLength < 0) {
+			mc_throw_state(env, @"A layered Metal render pass cannot have a negative layer count");
+			return 0;
+		}
 
 		// Every attachment covers the same pixels, so the first one to be resolved fixes the size
 		// the rest have to agree with.
@@ -2919,6 +2955,11 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			jint mipLevel = fields[MC_COLOR_FIELD_MIP_LEVEL];
 			if (mipLevel < 0 || (NSUInteger)mipLevel >= texture.mipmapLevelCount || (isDrawable && mipLevel != 0)) {
 				mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
+				return 0;
+			}
+			jint arraySlice = fields[MC_COLOR_FIELD_ARRAY_SLICE];
+			if (arraySlice < 0 || (NSUInteger)arraySlice >= mc_texture_slice_count(texture)) {
+				mc_throw_state(env, @"Metal render-pass attachment array slice is out of bounds");
 				return 0;
 			}
 			if (mc_pixel_format_has_depth(texture.pixelFormat) || mc_pixel_format_has_stencil(texture.pixelFormat)) {
@@ -2963,6 +3004,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			}
 			descriptor.colorAttachments[index].texture = colorTextures[index];
 			descriptor.colorAttachments[index].level = (NSUInteger)fields[MC_COLOR_FIELD_MIP_LEVEL];
+			descriptor.colorAttachments[index].slice = (NSUInteger)fields[MC_COLOR_FIELD_ARRAY_SLICE];
 			descriptor.colorAttachments[index].loadAction = loadAction;
 			descriptor.colorAttachments[index].storeAction = storeAction;
 			descriptor.colorAttachments[index].clearColor = MTLClearColorMake(clear[0], clear[1], clear[2], clear[3]);
@@ -2972,6 +3014,11 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			descriptor.renderTargetWidth = targetWidth;
 			descriptor.renderTargetHeight = targetHeight;
 		}
+		if (renderTargetArrayLength > 0) {
+			// Every layer is covered by the one pass; the vertex stage picks which one each
+			// primitive lands on through [[render_target_array_index]].
+			descriptor.renderTargetArrayLength = (NSUInteger)renderTargetArrayLength;
+		}
 		if (depthTexture != nil) {
 			MTLLoadAction nativeDepthLoadAction = mc_load_action(env, depthLoadAction);
 			MTLStoreAction nativeDepthStoreAction = mc_store_action(env, depthStoreAction);
@@ -2980,12 +3027,14 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			}
 			descriptor.depthAttachment.texture = depthTexture;
 			descriptor.depthAttachment.level = (NSUInteger)depthMipLevel;
+			descriptor.depthAttachment.slice = (NSUInteger)depthArraySlice;
 			descriptor.depthAttachment.loadAction = nativeDepthLoadAction;
 			descriptor.depthAttachment.storeAction = nativeDepthStoreAction;
 			descriptor.depthAttachment.clearDepth = clearDepth;
 			if (mc_pixel_format_has_stencil(depthTexture.pixelFormat)) {
 				descriptor.stencilAttachment.texture = depthTexture;
 				descriptor.stencilAttachment.level = (NSUInteger)depthMipLevel;
+				descriptor.stencilAttachment.slice = (NSUInteger)depthArraySlice;
 				descriptor.stencilAttachment.loadAction = nativeDepthLoadAction;
 				descriptor.stencilAttachment.storeAction = nativeDepthStoreAction;
 				descriptor.stencilAttachment.clearStencil = 0;

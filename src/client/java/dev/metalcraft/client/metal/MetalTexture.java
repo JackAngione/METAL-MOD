@@ -154,6 +154,24 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 			return new Descriptor(format, width, height, 1, 1, USAGE_RENDER_TARGET, false, StorageMode.MEMORYLESS);
 		}
 
+		/** A layered two-dimensional array, as a shadow cascade or a layered attachment needs. */
+		public static Descriptor array(final Format format, final int width, final int height, final int layers, final int usage) {
+			if (layers < 1) {
+				throw new IllegalArgumentException("A Metal texture array requires at least one layer");
+			}
+			return new Descriptor(format, width, height, layers, 1, usage, false, StorageMode.PRIVATE);
+		}
+
+		/** @return whether this descriptor is a two-dimensional array rather than a single image */
+		public boolean isArray() {
+			return !this.cubemap && this.depthOrLayers > 1;
+		}
+
+		/** @return the addressable slices: array layers, or a cubemap's six faces. */
+		public int sliceCount() {
+			return this.depthOrLayers;
+		}
+
 		public Descriptor {
 			if (format == null) {
 				throw new NullPointerException("format");
@@ -168,8 +186,8 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 				if (width != height || depthOrLayers != 6) {
 					throw new IllegalArgumentException("A Metal cubemap requires six square faces");
 				}
-			} else if (depthOrLayers != 1) {
-				throw new IllegalArgumentException("Only two-dimensional and single-cubemap Metal textures are supported");
+			} else if (depthOrLayers < 1) {
+				throw new IllegalArgumentException("A Metal texture requires at least one array layer");
 			}
 			int maximumMipLevels = 32 - Integer.numberOfLeadingZeros(Math.max(width, height));
 			if (mipLevels > maximumMipLevels) {
@@ -285,7 +303,15 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 	}
 
 	public ByteBuffer readback(final MetalCommandQueue commandQueue, final int mipLevel) {
+		return this.readback(commandQueue, mipLevel, 0);
+	}
+
+	/** @param arrayLayer the array layer, or cubemap face, to read */
+	public ByteBuffer readback(final MetalCommandQueue commandQueue, final int mipLevel, final int arrayLayer) {
 		this.requireAddressable("read back");
+		if (arrayLayer < 0 || arrayLayer >= this.descriptor.sliceCount()) {
+			throw new IllegalArgumentException("Metal texture readback array layer is out of bounds");
+		}
 		this.requireSameDevice(commandQueue);
 		int width = this.widthAtMip(mipLevel);
 		int height = this.heightAtMip(mipLevel);
@@ -295,7 +321,7 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 		ByteBuffer result = ByteBuffer.allocateDirect(Math.multiplyExact(tightBytesPerRow, height));
 		try (MetalBuffer staging = this.device.createBuffer(stagingSize, MetalBuffer.StorageMode.SHARED)) {
 			try (MetalCommandBuffer commands = commandQueue.createCommandBuffer()) {
-				commands.copyTextureToBuffer(this, mipLevel, staging, 0L, stagingBytesPerRow);
+				commands.copyTextureToBuffer(this, mipLevel, arrayLayer, staging, 0L, stagingBytesPerRow);
 				commands.commitAndWait();
 			}
 			try (MetalBuffer.Mapping mapping = staging.map()) {

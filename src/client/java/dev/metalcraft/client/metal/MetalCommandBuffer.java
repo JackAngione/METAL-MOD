@@ -76,11 +76,23 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		final long destinationOffset,
 		final long bytesPerRow
 	) {
+		this.copyTextureToBuffer(source, mipLevel, 0, destination, destinationOffset, bytesPerRow);
+	}
+
+	public synchronized void copyTextureToBuffer(
+		final MetalTexture source,
+		final int mipLevel,
+		final int arrayLayer,
+		final MetalBuffer destination,
+		final long destinationOffset,
+		final long bytesPerRow
+	) {
 		source.validateTransfer(mipLevel, bytesPerRow, destination.size(), destinationOffset);
 		MetalNative.nCopyTextureToBuffer(
 			this.requireEncodingHandle(),
 			source.requireOpenHandle(),
 			mipLevel,
+			arrayLayer,
 			destination.requireOpenHandle(),
 			destinationOffset,
 			bytesPerRow
@@ -214,6 +226,7 @@ public final class MetalCommandBuffer implements AutoCloseable {
 			colorFields[field + MetalRenderPass.COLOR_FIELD_MIP_LEVEL] = color.mipLevel();
 			colorFields[field + MetalRenderPass.COLOR_FIELD_LOAD_ACTION] = color.loadAction().ordinal();
 			colorFields[field + MetalRenderPass.COLOR_FIELD_STORE_ACTION] = color.storeAction().ordinal();
+			colorFields[field + MetalRenderPass.COLOR_FIELD_ARRAY_SLICE] = color.arraySlice();
 			int clear = index * MetalRenderPass.COLOR_CLEAR_COMPONENTS;
 			colorClearValues[clear] = color.clearRed();
 			colorClearValues[clear + 1] = color.clearGreen();
@@ -229,9 +242,11 @@ public final class MetalCommandBuffer implements AutoCloseable {
 			colorClearValues,
 			depth == null ? 0L : depth.texture().requireOpenHandle(),
 			depth == null ? 0 : depth.mipLevel(),
+			depth == null ? 0 : depth.arraySlice(),
 			depth == null ? 0 : depth.loadAction().ordinal(),
 			depth == null ? 0 : depth.storeAction().ordinal(),
 			depth == null ? 1.0 : depth.clearDepth(),
+			descriptor.renderTargetArrayLength(),
 			gpuTimingKind
 		);
 		if (renderPassHandle == 0L) {

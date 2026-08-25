@@ -235,6 +235,7 @@ public final class MetalDevice implements AutoCloseable {
 			depth.biasConstant(),
 			descriptor.rasterState().cullMode().nativeCode(),
 			descriptor.rasterState().fillMode().nativeCode(),
+			descriptor.rasterState().topologyClass().nativeCode(),
 			attributeLocations,
 			attributeBufferIndices,
 			attributeOffsets,

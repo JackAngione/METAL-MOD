@@ -30,11 +30,12 @@ public final class MetalRenderPass implements AutoCloseable {
 	 * <p>One flat array per primitive type, strided by attachment, keeps the native signature to a
 	 * handful of parameters rather than eight copies of every attachment field.
 	 */
-	static final int COLOR_FIELDS = 4;
+	static final int COLOR_FIELDS = 5;
 	static final int COLOR_FIELD_IS_DRAWABLE = 0;
 	static final int COLOR_FIELD_MIP_LEVEL = 1;
 	static final int COLOR_FIELD_LOAD_ACTION = 2;
 	static final int COLOR_FIELD_STORE_ACTION = 3;
+	static final int COLOR_FIELD_ARRAY_SLICE = 4;
 	/** Clear components per color attachment, in red, green, blue, alpha order. */
 	static final int COLOR_CLEAR_COMPONENTS = 4;
 
@@ -72,6 +73,11 @@ public final class MetalRenderPass implements AutoCloseable {
 	public sealed interface ColorTarget permits MetalDrawable, MetalTexture {
 	}
 
+	/** @return the slices a color target addresses: array layers, a cubemap's faces, or one image */
+	private static int sliceCount(final ColorTarget target) {
+		return target instanceof MetalTexture texture ? texture.descriptor().sliceCount() : 1;
+	}
+
 	/**
 	 * A memoryless attachment exists only for the duration of its pass, so there is nothing on the
 	 * way in for a load to read and nowhere on the way out for a store to write. Metal reports both
@@ -89,6 +95,7 @@ public final class MetalRenderPass implements AutoCloseable {
 	public record ColorAttachment(
 		ColorTarget target,
 		int mipLevel,
+		int arraySlice,
 		LoadAction loadAction,
 		StoreAction storeAction,
 		double clearRed,
@@ -107,6 +114,9 @@ public final class MetalRenderPass implements AutoCloseable {
 				|| target instanceof MetalTexture texture && mipLevel >= texture.descriptor().mipLevels()) {
 				throw new IllegalArgumentException("Metal color attachment mip level is out of bounds");
 			}
+			if (arraySlice < 0 || arraySlice >= sliceCount(target)) {
+				throw new IllegalArgumentException("Metal color attachment array slice is out of bounds");
+			}
 			if (loadAction == null || storeAction == null) {
 				throw new NullPointerException("Metal color attachment actions cannot be null");
 			}
@@ -121,6 +131,7 @@ public final class MetalRenderPass implements AutoCloseable {
 
 		public ColorAttachment(
 			final ColorTarget target,
+			final int mipLevel,
 			final LoadAction loadAction,
 			final StoreAction storeAction,
 			final double clearRed,
@@ -128,15 +139,27 @@ public final class MetalRenderPass implements AutoCloseable {
 			final double clearBlue,
 			final double clearAlpha
 		) {
-			this(target, 0, loadAction, storeAction, clearRed, clearGreen, clearBlue, clearAlpha);
+			this(target, mipLevel, 0, loadAction, storeAction, clearRed, clearGreen, clearBlue, clearAlpha);
+		}
+
+		public ColorAttachment(
+			final ColorTarget target,
+			final LoadAction loadAction,
+			final StoreAction storeAction,
+			final double clearRed,
+			final double clearGreen,
+			final double clearBlue,
+			final double clearAlpha
+		) {
+			this(target, 0, 0, loadAction, storeAction, clearRed, clearGreen, clearBlue, clearAlpha);
 		}
 
 		public static ColorAttachment clear(final MetalDrawable drawable, final double red, final double green, final double blue, final double alpha) {
-			return new ColorAttachment(drawable, 0, LoadAction.CLEAR, StoreAction.STORE, red, green, blue, alpha);
+			return new ColorAttachment(drawable, 0, 0, LoadAction.CLEAR, StoreAction.STORE, red, green, blue, alpha);
 		}
 
 		public static ColorAttachment clear(final MetalTexture texture, final double red, final double green, final double blue, final double alpha) {
-			return new ColorAttachment(texture, 0, LoadAction.CLEAR, StoreAction.STORE, red, green, blue, alpha);
+			return new ColorAttachment(texture, 0, 0, LoadAction.CLEAR, StoreAction.STORE, red, green, blue, alpha);
 		}
 
 		private static void validateClearComponent(final double value) {
@@ -149,6 +172,7 @@ public final class MetalRenderPass implements AutoCloseable {
 	public record DepthAttachment(
 		MetalTexture texture,
 		int mipLevel,
+		int arraySlice,
 		LoadAction loadAction,
 		StoreAction storeAction,
 		double clearDepth
@@ -163,6 +187,9 @@ public final class MetalRenderPass implements AutoCloseable {
 			if (mipLevel < 0 || mipLevel >= texture.descriptor().mipLevels()) {
 				throw new IllegalArgumentException("Metal depth attachment mip level is out of bounds");
 			}
+			if (arraySlice < 0 || arraySlice >= texture.descriptor().sliceCount()) {
+				throw new IllegalArgumentException("Metal depth attachment array slice is out of bounds");
+			}
 			if (!Double.isFinite(clearDepth) || clearDepth < 0.0 || clearDepth > 1.0) {
 				throw new IllegalArgumentException("Metal clear depth must be between zero and one");
 			}
@@ -173,11 +200,21 @@ public final class MetalRenderPass implements AutoCloseable {
 
 		public DepthAttachment(
 			final MetalTexture texture,
+			final int mipLevel,
 			final LoadAction loadAction,
 			final StoreAction storeAction,
 			final double clearDepth
 		) {
-			this(texture, 0, loadAction, storeAction, clearDepth);
+			this(texture, mipLevel, 0, loadAction, storeAction, clearDepth);
+		}
+
+		public DepthAttachment(
+			final MetalTexture texture,
+			final LoadAction loadAction,
+			final StoreAction storeAction,
+			final double clearDepth
+		) {
+			this(texture, 0, 0, loadAction, storeAction, clearDepth);
 		}
 	}
 
@@ -192,7 +229,11 @@ public final class MetalRenderPass implements AutoCloseable {
 	 *
 	 * <p>Color may be absent entirely, but a pass with no attachment at all would render nowhere.
 	 */
-	public record Descriptor(List<@Nullable ColorAttachment> colorAttachments, DepthAttachment depthAttachment) {
+	public record Descriptor(
+		List<@Nullable ColorAttachment> colorAttachments,
+		DepthAttachment depthAttachment,
+		int renderTargetArrayLength
+	) {
 		public Descriptor {
 			// Not List.copyOf: a null entry is meaningful here, and List.copyOf rejects one.
 			colorAttachments = Collections.unmodifiableList(new ArrayList<>(colorAttachments));
@@ -205,21 +246,63 @@ public final class MetalRenderPass implements AutoCloseable {
 			if (depthAttachment == null && colorAttachments.stream().allMatch(attachment -> attachment == null)) {
 				throw new IllegalArgumentException("A Metal render pass requires at least one attachment");
 			}
+			if (renderTargetArrayLength < 0) {
+				throw new IllegalArgumentException("A layered Metal render pass cannot have a negative layer count");
+			}
+			if (renderTargetArrayLength > 0) {
+				// Layered rendering routes each primitive to a layer chosen in the vertex stage, so
+				// the pass covers every layer at once and no attachment may pick one for itself.
+				for (ColorAttachment attachment : colorAttachments) {
+					if (attachment == null) {
+						continue;
+					}
+					requireLayered(sliceCount(attachment.target()), attachment.arraySlice(), renderTargetArrayLength, "color");
+				}
+				if (depthAttachment != null) {
+					requireLayered(
+						depthAttachment.texture().descriptor().sliceCount(),
+						depthAttachment.arraySlice(),
+						renderTargetArrayLength,
+						"depth"
+					);
+				}
+			}
+		}
+
+		private static void requireLayered(final int slices, final int slice, final int layers, final String kind) {
+			if (slice != 0) {
+				throw new IllegalArgumentException("A layered Metal render pass cannot also select a single " + kind + " slice");
+			}
+			if (slices < layers) {
+				throw new IllegalArgumentException(
+					"A layered Metal render pass over " + layers + " layers needs a " + kind
+						+ " attachment with at least that many slices, not " + slices
+				);
+			}
 		}
 
 		public static Descriptor depthOnly(final DepthAttachment depthAttachment) {
 			if (depthAttachment == null) {
 				throw new NullPointerException("depthAttachment");
 			}
-			return new Descriptor(List.of(), depthAttachment);
+			return new Descriptor(List.of(), depthAttachment, 0);
+		}
+
+		public Descriptor(final List<@Nullable ColorAttachment> colorAttachments, final DepthAttachment depthAttachment) {
+			this(colorAttachments, depthAttachment, 0);
 		}
 
 		public Descriptor(final ColorAttachment colorAttachment, final DepthAttachment depthAttachment) {
-			this(Collections.singletonList(colorAttachment), depthAttachment);
+			this(Collections.singletonList(colorAttachment), depthAttachment, 0);
 		}
 
 		public Descriptor(final ColorAttachment colorAttachment) {
-			this(Collections.singletonList(colorAttachment), null);
+			this(Collections.singletonList(colorAttachment), null, 0);
+		}
+
+		/** @return whether every primitive picks its own target layer in the vertex stage */
+		public boolean isLayered() {
+			return this.renderTargetArrayLength > 0;
 		}
 
 		/** @return the attachment at {@code index}, or null when the pass leaves that index empty */

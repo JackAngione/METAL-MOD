@@ -219,11 +219,33 @@ public final class MetalRenderPipeline implements AutoCloseable {
 		}
 	}
 
-	public record RasterState(CullMode cullMode, FillMode fillMode) {
-		public static final RasterState DEFAULT = new RasterState(CullMode.NONE, FillMode.FILL);
+	/**
+	 * The primitive class a pipeline will be drawn with.
+	 *
+	 * <p>Metal infers this from the draw call unless the vertex stage writes
+	 * {@code [[render_target_array_index]]}, in which case the pipeline has to declare it up front,
+	 * because the layer is resolved before the primitive is assembled.
+	 */
+	public enum TopologyClass {
+		UNSPECIFIED,
+		POINT,
+		LINE,
+		TRIANGLE;
+
+		public int nativeCode() {
+			return this.ordinal();
+		}
+	}
+
+	public record RasterState(CullMode cullMode, FillMode fillMode, TopologyClass topologyClass) {
+		public static final RasterState DEFAULT = new RasterState(CullMode.NONE, FillMode.FILL, TopologyClass.UNSPECIFIED);
+
+		public RasterState(final CullMode cullMode, final FillMode fillMode) {
+			this(cullMode, fillMode, TopologyClass.UNSPECIFIED);
+		}
 
 		public RasterState {
-			if (cullMode == null || fillMode == null) {
+			if (cullMode == null || fillMode == null || topologyClass == null) {
 				throw new NullPointerException("Metal raster state fields cannot be null");
 			}
 		}

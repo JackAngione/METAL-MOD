@@ -119,6 +119,36 @@ public final class MetalShaderTranslationSmoke {
 		    return out;
 		}
 		""";
+	/** One instance per layer, each routed to its own slice by the vertex stage. */
+	private static final String LAYERED_MSL = """
+		#include <metal_stdlib>
+		using namespace metal;
+
+		struct LayeredVaryings {
+		    float4 position [[position]];
+		    uint layer [[render_target_array_index]];
+		    float4 color;
+		};
+
+		vertex LayeredVaryings layered_vertex(uint vertexId [[vertex_id]], uint instanceId [[instance_id]]) {
+		    const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
+		    const float4 colors[4] = {
+		        float4(1.0, 0.0, 0.0, 1.0),
+		        float4(0.0, 1.0, 0.0, 1.0),
+		        float4(0.0, 0.0, 1.0, 1.0),
+		        float4(1.0, 1.0, 0.0, 1.0)
+		    };
+		    LayeredVaryings out;
+		    out.position = float4(corners[vertexId % 3], 0.0, 1.0);
+		    out.layer = instanceId;
+		    out.color = colors[instanceId % 4];
+		    return out;
+		}
+
+		fragment float4 layered_fragment(LayeredVaryings in [[stage_in]]) {
+		    return in.color;
+		}
+		""";
 	private static final String MAPPED_VERTEX_GLSL = """
 		#version 450
 		in vec4 Color;
@@ -311,6 +341,7 @@ public final class MetalShaderTranslationSmoke {
 			assertMipRenderTargetViewport(device);
 			assertMultipleRenderTargets(device);
 			assertMemorylessTileResolve(device);
+			assertLayeredArrayRendering(device);
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
 			assertBatchedResourceBindings(device);
@@ -549,6 +580,85 @@ public final class MetalShaderTranslationSmoke {
 				throw new AssertionError("A memoryless Metal attachment accepted a store action");
 			} catch (IllegalArgumentException expectedFailure) {
 				// Storing tile memory would need somewhere to store it to.
+			}
+		}
+	}
+
+	/**
+	 * Four array layers filled by one encoder.
+	 *
+	 * <p>A shadow cascade is four renders of the same world from four frusta, and encoding it as
+	 * four passes costs four encoder boundaries on a GPU where a boundary is a tile flush. Layered
+	 * rendering covers every layer in one pass and lets the vertex stage choose which layer each
+	 * primitive lands on, so one instanced draw fills the whole cascade.
+	 *
+	 * <p>Each layer is given its own color and read back separately, because a pass that ignored
+	 * the layer index would write every instance to layer zero and still look like it worked from
+	 * layer zero alone.
+	 */
+	private static void assertLayeredArrayRendering(final MetalDevice device) {
+		int layers = 4;
+		int[] expected = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00};
+		try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 LAYERED_MSL, "layered_vertex", LAYERED_MSL, "layered_fragment",
+				 List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM)), null,
+				 MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+				 new MetalRenderPipeline.RasterState(
+					 MetalRenderPipeline.CullMode.NONE,
+					 MetalRenderPipeline.FillMode.FILL,
+					 MetalRenderPipeline.TopologyClass.TRIANGLE
+				 )
+			 ));
+			 MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture cascade = device.createTexture(MetalTexture.Descriptor.array(
+				 MetalTexture.Format.RGBA8_UNORM, 4, 4, layers, MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_RENDER_TARGET
+			 ))) {
+			if (!cascade.descriptor().isArray() || cascade.descriptor().sliceCount() != layers) {
+				throw new AssertionError("Metal array texture did not keep its layer count");
+			}
+			MetalRenderPass.Descriptor descriptor = new MetalRenderPass.Descriptor(
+				List.of(new MetalRenderPass.ColorAttachment(
+					cascade, 0, 0, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.0, 0.0, 0.0, 1.0
+				)),
+				null,
+				layers
+			);
+			if (!descriptor.isLayered()) {
+				throw new AssertionError("A layered Metal render pass did not report itself as layered");
+			}
+			try (MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalRenderPass pass = commands.beginRenderPass(descriptor)) {
+				pass.setPipeline(pipeline);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, layers, 0);
+				pass.close();
+				commands.commitAndWait();
+			}
+
+			for (int layer = 0; layer < layers; layer++) {
+				ByteBuffer pixels = cascade.readback(queue, 0, layer);
+				int actual = Byte.toUnsignedInt(pixels.get(0)) << 16
+					| Byte.toUnsignedInt(pixels.get(1)) << 8
+					| Byte.toUnsignedInt(pixels.get(2));
+				if (!isNearColor(actual, expected[layer])) {
+					throw new AssertionError(String.format(
+						"Metal array layer %d holds %06X, expected %06X: the layer index did not reach the attachment",
+						layer, actual, expected[layer]
+					));
+				}
+			}
+
+			try {
+				new MetalRenderPass.Descriptor(
+					List.of(new MetalRenderPass.ColorAttachment(
+						cascade, 0, 2, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.0, 0.0, 0.0, 1.0
+					)),
+					null,
+					layers
+				);
+				throw new AssertionError("A layered Metal pass also selected a single slice");
+			} catch (IllegalArgumentException expectedFailure) {
+				// A layered pass covers every layer, so picking one for the attachment is a
+				// contradiction rather than a narrowing.
 			}
 		}
 	}

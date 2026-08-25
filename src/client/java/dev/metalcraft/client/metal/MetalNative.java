@@ -112,7 +112,7 @@ public final class MetalNative {
 
 	static native void nCopyBufferToTexture(long commandBufferHandle, long sourceHandle, long sourceOffset, long bytesPerRow, long textureHandle, int mipLevel);
 
-	static native void nCopyTextureToBuffer(long commandBufferHandle, long textureHandle, int mipLevel, long destinationHandle, long destinationOffset, long bytesPerRow);
+	static native void nCopyTextureToBuffer(long commandBufferHandle, long textureHandle, int mipLevel, int arrayLayer, long destinationHandle, long destinationOffset, long bytesPerRow);
 
 	static native void nCopyBufferToTextureRegion(
 		long commandBufferHandle,
@@ -226,6 +226,7 @@ public final class MetalNative {
 		float depthBiasConstant,
 		int cullMode,
 		int fillMode,
+		int topologyClass,
 		int[] attributeLocations,
 		int[] attributeBufferIndices,
 		int[] attributeOffsets,
@@ -247,9 +248,11 @@ public final class MetalNative {
 		double[] colorClearValues,
 		long depthTargetHandle,
 		int depthMipLevel,
+		int depthArraySlice,
 		int depthLoadAction,
 		int depthStoreAction,
 		double clearDepth,
+		int renderTargetArrayLength,
 		int gpuTimingKind
 	);
 
