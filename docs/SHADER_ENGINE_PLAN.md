@@ -175,16 +175,34 @@ Each phase ends in something that renders. Do not start the next until the curre
 
 Everything here is a hard blocker for a later phase; nothing here is speculative.
 
-- Multiple render targets through the pass layer: widen `MetalRenderPass.Descriptor`, the native
-  descriptor builder, `MetalCommandEncoder.createRenderPass`, and `MetalRenderPassBackend` from one
-  colour attachment to eight.
-- Per-attachment load and store actions, including `DontCare`, driven by the caller rather than the
-  current unconditional store.
-- `MTLStorageModeMemoryless` textures, and tile-memory reads in a fragment function.
-- Texture arrays, and layered rendering via `[[render_target_array_index]]`.
-- Compute pipeline state, dispatch, threadgroup memory, and the barriers between a compute write and
-  a later sampled read.
-- A persistent `MTLBinaryArchive` pipeline cache keyed on a content hash.
+Branch: `metal-shader-engine`. Every item below is verified against the M4 Max by
+`shaderTranslationSmoke`, and each assertion was checked to fail when its expectation is wrong,
+because a GPU test that passes vacuously is worse than none.
+
+- [x] **Multiple render targets through the pass layer.** The descriptor carries a positional list
+  where a null entry reserves an index nothing is attached to, matching Blaze3D's
+  `withUnusedColorAttachment`. `setPipeline` matches pipeline to pass index by index and names the
+  index that disagrees. Relaxing that match also lets a pass with no colour attachments bind a
+  pipeline whose targets are all unused, which is how the shadow pass in Phase 3 will draw.
+- [x] **`MTLStorageModeMemoryless` textures and tile-memory reads.** Everything needing an address
+  into such a texture - upload, readback, views, a load with nothing to load, a store with nowhere
+  to store - is rejected where the caller can see it. The test fills two memoryless attachments and
+  consumes them in a second draw in the same pass through framebuffer fetch.
+- [x] **Texture arrays and layered rendering.** One instanced draw fills a four-layer array through
+  `[[render_target_array_index]]`. Metal cannot infer a pipeline's primitive class when the vertex
+  stage writes that, so raster state gained a topology class; leaving it unspecified keeps every
+  existing pipeline as it was. Readback takes a layer, since a pass that ignored the layer index
+  would still look correct from layer zero alone.
+- [x] **Compute pipeline state and dispatch.** Encoders use serial dispatch, so one dispatch reads
+  what the one before it wrote. Across encoders Metal's hazard tracking orders a compute write
+  against a later render read, which is what the test measures rather than assumes.
+- [ ] **Per-attachment load and store actions driven by the caller.** Available at the
+  `MetalRenderPass` layer, which is what the engine will use. The Blaze3D adapter still stores
+  unconditionally because `RenderPassDescriptor` has no discard concept to derive liveness from;
+  that stays the separate ranked item in [NEXT_STEPS.md](NEXT_STEPS.md).
+- [ ] **A persistent `MTLBinaryArchive` pipeline cache keyed on a content hash.** Not started. A
+  startup-time optimisation rather than a blocker for Phase 1, so it is the item to defer if
+  anything is.
 
 Exit: the smoke test draws into four attachments in one pass with two of them memoryless, reads the
 result through tile memory in a merged second pass, dispatches a compute pass over the output, renders
