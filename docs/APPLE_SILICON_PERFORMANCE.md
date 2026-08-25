@@ -618,6 +618,67 @@ depending on machine and display state.
 
 Only a floor is asserted on the numbers, because a target has to come from measurement rather than from the harness.
 
+### Merging compatible passes
+
+`submitRenderPass` no longer ends the Metal render encoder. It holds it open, and the next
+`createRenderPass` continues into the same encoder when `canMerge` accepts: identical attachments at
+identical mip levels, and no clear on the new pass. The previous pass's load action is irrelevant,
+because whatever it loaded or cleared has already happened - which is what lets a clearing pass be
+followed by loading ones, the shape the sky actually has.
+
+Safety rests on one seam. Every command-buffer operation in `MetalCommandEncoder` already reached the
+buffer through `commands()`, so ending the deferred pass there covers copies, blits, present, fences,
+timestamps, the region and depth clears, and any non-mergeable pass, in one place. The two paths that
+could have bypassed it do not: `MetalTransientMemory` only receives the command buffer at submission,
+and `MetalGpuSurface.blitFromTexture` routes through `blitToDrawable`.
+
+It merges about four times per frame, and it merges more than the sky. With merging on, `Stars`,
+`Sky moon`, `Sky sun`, `Sunrise sunset` **and** `Section layers for opaque` all disappear from
+`gpuPassSpans`, absorbed into `Sky disc` - one span per frame covering the whole merged group. The
+main scene becomes a single encoder. **This defeats the per-pass instrument**, which is what
+`-PmetalPassMerging=false` is for: turn merging off to get the per-pass breakdown back.
+
+#### What a round trip costs, measured in isolation
+
+The game measurement is confounded (below), so the mechanism was measured on its own: N passes into a
+3840x2104 colour and depth32 target, interleaved separate-versus-merged so any drift hits both alike,
+median of 60 iterations, with no drawable and no compositor involved.
+
+| Passes, 3840x2104 colour + depth | Separate encoders | One merged encoder | Saved |
+|---|---:|---:|---:|
+| 5, full-screen coverage | 0.225 ms | 0.056 ms | 0.169 ms |
+| 13, full-screen coverage | 0.893 ms | 0.081 ms | 0.812 ms |
+| 5, tiny geometry | 0.078 ms | 0.046 ms | 0.033 ms |
+
+An avoided round trip is worth 0.04 to 0.07 ms when the attachment is genuinely dirty. The third row
+is the important caveat: with only a small triangle drawn, separate encoders cost barely more than a
+merged one, so **Apple's driver is already eliding most of the round trip when little was written**.
+The saving is real, but it scales with how much of the attachment a pass actually dirties rather than
+with the number of passes.
+
+#### Why there is still no frame-rate number
+
+Four paired game runs were taken and **none of them is a valid A/B**, because presentation pacing
+changed between runs of the identical build. In every pair one run sat at exactly 120.0 FPS with an
+8.33 ms interval and a ~5 ms `p50AcquireMs`, while the other free-ran at 210-290 FPS with
+`p50AcquireMs` around 0.017 ms. Reversing the order moved the pacing to the other configuration, and
+inserting a throwaway warm-up run did not remove it.
+
+Both states report `presentMode=IMMEDIATE displaySync=false`, so this is not the layer's own
+synchronisation - `MCMetalSurface` has it switched off. It is the compositor retiring drawables at a
+fixed rate, which is the explanation the standing ~4.55 ms acquire question in
+[NEXT_STEPS.md](NEXT_STEPS.md) had been missing: the wait is intermittent, it is not display sync,
+and it toggles between runs of one build.
+
+`gpu_frame` is no way around it. Under pacing the command buffer's `GPUEndTime` absorbs presentation
+waiting, so GPU busy per frame reads *higher* when paced - 6.5 ms against 4.9 ms for the same scene -
+and the paced and free comparisons then point in opposite directions.
+
+The one free-running run of each configuration that exists suggests roughly 3 to 4% higher average
+FPS, and the traversal repeats did not overlap. That is recorded only as a reason to keep going. **It
+is not a result**: the two runs come from different pairs, which is exactly the cross-session
+comparison this document's own methodology forbids.
+
 ## Ranked implementation plan
 
 Current status of each item, and the work that is open now, is tracked in [NEXT_STEPS.md](NEXT_STEPS.md). Some descriptions below predate later changes; that file names which.

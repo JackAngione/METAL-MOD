@@ -152,6 +152,15 @@ public final class MetalStallProbe {
 		 */
 		GPU_FRAME,
 		/**
+		 * Consecutive render passes continued in one Metal encoder instead of opening a new one.
+		 *
+		 * <p>A count, not a duration - the nanoseconds are always zero, and the number after the
+		 * slash is what this source exists to report. What it saves is a tile-memory resolve and
+		 * reload of the pass's attachments, which happens on the GPU and so shows up in
+		 * {@link MetalPassCensus} and {@code GPU_FRAME} rather than on the render thread.
+		 */
+		RENDER_PASS_MERGE,
+		/**
 		 * Time the JVM spent collecting during the frame.
 		 *
 		 * <p>Not a Metal call, but a collection pause lands in the frame interval exactly like a

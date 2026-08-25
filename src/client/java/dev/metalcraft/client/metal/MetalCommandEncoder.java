@@ -21,6 +21,16 @@ import org.joml.Vector4fc;
 
 /** Persistent Blaze3D encoder that rotates owned Metal command buffers on submit. */
 final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable {
+	/**
+	 * Whether consecutive passes sharing their attachments continue in one Metal encoder.
+	 *
+	 * <p>A kill switch rather than a setting, for the reason the command-batching one exists:
+	 * turning it off restores the pass-per-encoder path exactly, which is what makes the two
+	 * comparable back to back in one session - the only comparison this renderer's run-to-run
+	 * spread admits.
+	 */
+	private static final boolean PASS_MERGING = Boolean.parseBoolean(System.getProperty("metalcraft.passMerging", "true"));
+
 	private final MetalGpuDevice device;
 	private final MetalCommandQueue commandQueue;
 	private final MetalTransientMemory transientMemory;
@@ -28,6 +38,23 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	private final List<Runnable> completionCallbacks = new ArrayList<>();
 	private MetalCommandBuffer commands;
 	private MetalRenderPass renderPass;
+	/** The attachments {@link #renderPass} was opened against, for {@link #canMerge}. */
+	private MetalRenderPass.Descriptor renderPassDescriptor;
+	/**
+	 * A pass Blaze3D has submitted whose Metal encoder is deliberately still open.
+	 *
+	 * <p>Ending a render encoder on a tile renderer is not free: it resolves the tile memory out to
+	 * the attachments, and beginning the next one loads them back in. At 3840x2104 that is a full
+	 * colour and depth round trip per pass, and the sky alone is five consecutive passes - stars,
+	 * moon, sun, sunrise/sunset and the disc - drawing very little geometry each into exactly the
+	 * same attachments with no clear between them.
+	 *
+	 * <p>So the encoder is left open at {@code submitRenderPass} and only ended when something
+	 * actually needs it ended. If the next thing is a pass that {@link #canMerge} accepts, it
+	 * continues into the same encoder and the round trip never happens.
+	 */
+	private MetalRenderPass deferredRenderPass;
+	private MetalRenderPass.Descriptor deferredDescriptor;
 	/** Reused across passes; only one pass can be active on an encoder at a time. */
 	private MetalRenderPassBackend renderPassBackend;
 	private boolean closed;
@@ -85,8 +112,20 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 				depth.clearValue().orElse(1.0)
 			);
 		}
-		this.renderPass = this.commands().beginRenderPass(
-			new MetalRenderPass.Descriptor(colorAttachment, depthAttachment), passKind(descriptor));
+		MetalRenderPass.Descriptor next = new MetalRenderPass.Descriptor(colorAttachment, depthAttachment);
+		if (PASS_MERGING && this.deferredRenderPass != null && canMerge(this.deferredDescriptor, next)) {
+			// Continue into the encoder the previous pass left open, so its attachments are never
+			// resolved out and loaded back in.
+			this.renderPass = this.deferredRenderPass;
+			this.deferredRenderPass = null;
+			this.deferredDescriptor = null;
+			MetalStallProbe.record(MetalStallProbe.Source.RENDER_PASS_MERGE, 0L, 1L, 0L);
+		} else {
+			// commands() ends any deferred pass first, which is what keeps a non-mergeable pass
+			// ordered after the one before it.
+			this.renderPass = this.commands().beginRenderPass(next, passKind(descriptor));
+		}
+		this.renderPassDescriptor = next;
 		RenderPass.RenderArea area = descriptor.renderArea;
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
 		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
@@ -99,9 +138,56 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (this.renderPass == null) {
 			throw new IllegalStateException("No direct Metal render pass is active");
 		}
-		this.renderPass.close();
+		// Held open rather than closed. Nothing may reach the command buffer without going through
+		// commands(), which ends it, so deferring cannot reorder this pass against anything.
+		this.deferredRenderPass = this.renderPass;
+		this.deferredDescriptor = this.renderPassDescriptor;
 		this.renderPass = null;
+		this.renderPassDescriptor = null;
 		if (this.renderPassBackend != null) this.renderPassBackend.finish();
+	}
+
+	/**
+	 * Whether {@code next} can continue in the encoder {@code open} left behind.
+	 *
+	 * <p>Deliberately narrow: the same attachments at the same mip levels, and no clear on the new
+	 * pass. A clear is the one thing an already-running encoder cannot be asked to do, and differing
+	 * attachments would render into the wrong texture rather than merely slowly. The previous pass's
+	 * load actions do not matter - whatever it loaded or cleared has already happened.
+	 */
+	private static boolean canMerge(final MetalRenderPass.Descriptor open, final MetalRenderPass.Descriptor next) {
+		if (open == null || next == null) {
+			return false;
+		}
+		MetalRenderPass.ColorAttachment openColor = open.colorAttachment();
+		MetalRenderPass.ColorAttachment nextColor = next.colorAttachment();
+		if (openColor == null || nextColor == null) {
+			return openColor == nextColor;
+		}
+		if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel()
+			|| nextColor.loadAction() != MetalRenderPass.LoadAction.LOAD
+			|| openColor.storeAction() != MetalRenderPass.StoreAction.STORE) {
+			return false;
+		}
+		MetalRenderPass.DepthAttachment openDepth = open.depthAttachment();
+		MetalRenderPass.DepthAttachment nextDepth = next.depthAttachment();
+		if (openDepth == null || nextDepth == null) {
+			return openDepth == nextDepth;
+		}
+		return openDepth.texture() == nextDepth.texture()
+			&& openDepth.mipLevel() == nextDepth.mipLevel()
+			&& nextDepth.loadAction() == MetalRenderPass.LoadAction.LOAD
+			&& openDepth.storeAction() == MetalRenderPass.StoreAction.STORE;
+	}
+
+	/** Ends the pass left open by {@link #submitRenderPass}, resolving its attachments. */
+	private void endDeferredRenderPass() {
+		MetalRenderPass deferred = this.deferredRenderPass;
+		if (deferred != null) {
+			this.deferredRenderPass = null;
+			this.deferredDescriptor = null;
+			deferred.close();
+		}
 	}
 
 	@Override
@@ -350,14 +436,25 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		}
 	}
 
+	/**
+	 * The command buffer, with any deferred render pass ended first.
+	 *
+	 * <p>Every command-buffer operation in this class reaches it through here, which is what makes
+	 * holding a render encoder open safe: a copy, a blit, a present, a fence, a timestamp or a
+	 * non-mergeable pass all end the deferred pass before they encode, so nothing can be reordered
+	 * ahead of the passes already recorded into it. {@code createRenderPass} is the one caller that
+	 * may skip this, and only when {@link #canMerge} says the work continues in the same encoder.
+	 */
 	private MetalCommandBuffer commands() {
 		if (this.closed) throw new IllegalStateException("Metal command encoder is closed");
+		this.endDeferredRenderPass();
 		if (this.commands == null) this.commands = this.commandQueue.createCommandBuffer();
 		return this.commands;
 	}
 
 	private void finishSubmission(final boolean wait) {
 		if (this.renderPass != null) throw new IllegalStateException("Cannot submit with an active Metal render pass");
+		this.endDeferredRenderPass();
 		MetalCommandBuffer submitted = this.commands;
 		boolean completed = wait || !this.completionCallbacks.isEmpty();
 		if (submitted != null) {

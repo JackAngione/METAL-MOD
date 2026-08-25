@@ -88,7 +88,9 @@ def benchmarkProperties = [
 	// The command-batching kill switch and its checked ABI, so a run can be compared against the
 	// per-command path back to back rather than across sessions.
 	metalCommandBatching: 'metalcraft.commandBatching',
-	metalCheckedCommands: 'metalcraft.checkedCommands'
+	metalCheckedCommands: 'metalcraft.checkedCommands',
+	// The pass-merging kill switch, for the same back-to-back comparison.
+	metalPassMerging: 'metalcraft.passMerging'
 ]
 
 tasks.named('runClient') {

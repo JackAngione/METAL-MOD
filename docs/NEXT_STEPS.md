@@ -125,6 +125,17 @@ Only render-thread events are recorded, deliberately.
   the backend, so it fails loudly - but reset it to `"default"` rather than debugging the assertion.
 - **A sleeping or locked display** makes `glfwGetPrimaryMonitor` return nothing and aborts the run.
   This has now cost time twice. Always pass an explicit resolution.
+- **The first benchmark run of a session is compositor-paced, and the second is not.** This was
+  found by running the same paired comparison twice with the order reversed: whichever configuration
+  ran *first* sat at exactly 120.0 FPS with an 8.33 ms interval and a ~5 ms `p50AcquireMs`, and
+  whichever ran *second* free-ran at 210-290 FPS with `p50AcquireMs` around 0.017 ms. The pacing
+  follows the run order, not the build - both runs log the same
+  `presentMode=IMMEDIATE displaySync=false`. So **a two-run A/B is never valid here**: it compares a
+  paced run against a free-running one. Run a throwaway first, then the two runs being compared, and
+  check `p50AcquireMs` on both before believing anything.
+- **`gpu_frame` is not a way around that.** In a paced run the command buffer's `GPUEndTime` absorbs
+  presentation waiting, so GPU busy per frame reads *higher* under pacing - 6.5 ms against 4.9 ms for
+  the same scene. Under pacing it is not a measure of GPU work.
 - **Machine state dominates absolute numbers.** Across one afternoon the identical scenario ran
   between 117 and 361 FPS. A run can be GPU-bound (watch for `p50AcquireMs` in the milliseconds) or
   free-running (`p50AcquireMs` around 0.009 to 0.3). These are not comparable. Compare only runs
@@ -337,10 +348,18 @@ From `APPLE_SILICON_PERFORMANCE.md`, with current status:
   the row-at-a-time private-temporary copy paths in `MetalCommandEncoder.copyBufferToTexture` and
   the padded `copyTextureToBuffer`, and isolating readback submissions so a pending callback does
   not turn `submit()` into `waitUntilCompleted()`.
-- **Item 3, load/store liveness and pass merging.** Open. The general pass adapter always stores
-  both colour and depth, even when an attachment is dead after the pass. Now measurable per pass -
-  take a `gpuPasses` reading before picking a pass to change, because this is exactly the kind of
-  change that has measured as noise every time it was chosen by reading code.
+- **Item 3, pass merging.** Done. `submitRenderPass` holds the Metal encoder open and the next pass
+  continues in it when the attachments match and it has no clear - about four merges per frame, and
+  the sky plus the opaque chunk pass collapse into one encoder. An avoided round trip measures 0.04
+  to 0.07 ms at 3840x2104 with colour and depth, but only when the attachment is genuinely dirty;
+  with little drawn, Apple's driver already elides most of it. **What it is worth in a real frame is
+  still unmeasured** - see the pacing pitfall above, which invalidated four paired runs.
+  `-PmetalPassMerging=false` restores the pass-per-encoder path.
+- **Item 3, load/store liveness.** Still open. The general pass adapter always stores both colour and
+  depth, even when an attachment is dead after the pass. Now measurable per pass - take a
+  `gpuPassSpans` reading with `-PmetalPassMerging=false` first, because merging hides the breakdown,
+  and because this is exactly the kind of change that has measured as noise every time it was chosen
+  by reading code.
 - **Items 4-7.** Shader library/PSO caching and binary archives; argument buffers and ICBs;
   direct-to-drawable final pass; private heaps and aliasing. All untouched, all still ranked.
 

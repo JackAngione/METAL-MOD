@@ -73,7 +73,9 @@ This milestone proved that Minecraft 26.2's backend abstraction is usable, but i
 - [x] Separate the client gametest harness's frame handoff from Minecraft's task queue: the 170 ms traversal spike was the harness parking the render thread, and the queue's own drain measures 0.000 ms on that frame.
 - [ ] Reduce the real traversal tail, which is collection: 15-20 ms frames of which 12-17 ms is a pause, driven by vanilla chunk meshing's allocation rather than by this renderer.
 - [x] Batch the render ABI so a bind-and-draw sequence crosses JNI once rather than per command: `drawMultipleIndexed` records ~14,000 commands per 4K frame into a flat record array and submits them in three to nine crossings, for 22-25% less render-thread CPU per frame.
-- [ ] Propagate attachment liveness so dead attachments store `DontCare`, and merge compatible passes.
+- [x] Merge compatible passes: a submitted pass holds its Metal encoder open, and the next pass continues in it when the attachments match and it has no clear. The sky's five passes and the opaque chunk pass collapse into one encoder, about four merges per frame.
+- [ ] Propagate attachment liveness so dead attachments store `DontCare`.
+- [ ] Establish what pass merging is worth in a real frame: every game A/B so far is confounded by compositor pacing, and only the isolated mechanism cost has been measured.
 - [x] Localise GPU time to a render pass with stage-boundary counter samples, keyed by the Blaze3D pass label: Apple silicon samples counters only at encoder stage boundaries, so the pass descriptor's `sampleBufferAttachments` carry the timing and the mid-encoder `nWriteRenderTimestamp` path can never run on this hardware. Pass spans overlap and rank passes rather than partitioning the frame; the first reading puts clouds third in the frame and the sky in five separate full-size passes.
 - [ ] Compare OpenGL and Vulkan/Metal on M1, M2, M3, and M4 families.
 - [ ] Tune MoltenVK settings only when measurements demonstrate a win.
