@@ -90,7 +90,9 @@ def benchmarkProperties = [
 	metalCommandBatching: 'metalcraft.commandBatching',
 	metalCheckedCommands: 'metalcraft.checkedCommands',
 	// The pass-merging kill switch, for the same back-to-back comparison.
-	metalPassMerging: 'metalcraft.passMerging'
+	metalPassMerging: 'metalcraft.passMerging',
+	// The shader-pack kill switch, likewise.
+	metalShaderPack: 'metalcraft.shaderPack'
 ]
 
 tasks.named('runClient') {

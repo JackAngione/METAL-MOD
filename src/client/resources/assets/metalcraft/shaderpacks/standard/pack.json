@@ -2,7 +2,17 @@
   "format": 1,
   "name": "MetalCraft Standard",
   "targets": {
-    "scene": {
+    "gbuffer_albedo": {
+      "format": "rgba8_unorm",
+      "scale": 1.0,
+      "lifetime": "frame"
+    },
+    "gbuffer_normal": {
+      "format": "rgba8_unorm",
+      "scale": 1.0,
+      "lifetime": "frame"
+    },
+    "gbuffer_light": {
       "format": "rgba8_unorm",
       "scale": 1.0,
       "lifetime": "frame"
@@ -10,13 +20,27 @@
   },
   "passes": [
     {
+      "id": "gbuffer",
+      "kind": "geometry",
+      "geometry": "terrain,entities,blockentities",
+      "writes": ["scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light", "depth"]
+    },
+    {
       "id": "final",
       "kind": "fullscreen",
-      "reads": ["scene"],
+      "reads": ["scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light", "depth"],
       "writes": ["drawable"]
     }
   ],
   "options": [
+    {
+      "id": "debug_view",
+      "category": "debug",
+      "type": "enum",
+      "values": ["off", "albedo", "normal", "light", "material", "depth"],
+      "default": "off",
+      "apply": "uniform"
+    },
     {
       "id": "exposure",
       "category": "tonemap",
@@ -36,11 +60,11 @@
     },
     {
       "id": "upscale_filter",
-	  "category": "quality",
-	  "type": "enum",
-	  "values": ["nearest", "linear"],
-	  "default": "linear",
-	  "apply": "reload"
+      "category": "quality",
+      "type": "enum",
+      "values": ["nearest", "linear"],
+      "default": "linear",
+      "apply": "reload"
     }
   ]
 }

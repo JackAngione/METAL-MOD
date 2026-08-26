@@ -16,7 +16,15 @@ import java.util.Set;
 
 /** Validates declared shader dataflow and compiles it into an execution graph. */
 public final class ShaderGraphCompiler {
-	private static final Set<String> RESERVED_TARGETS = Set.of("depth", "drawable");
+	/**
+	 * Targets the host supplies rather than the pack allocating.
+	 *
+	 * <p>{@code scene} is Minecraft's own colour attachment, {@code depth} its depth attachment, and
+	 * {@code drawable} the surface being presented. A pack names them the same way it names its own
+	 * targets, and the engine resolves them per frame, which is what lets a geometry pass declare
+	 * that it writes the world into Minecraft's attachment alongside its own G-buffer channels.
+	 */
+	public static final Set<String> RESERVED_TARGETS = Set.of("scene", "depth", "drawable");
 
 	public enum LoadAction {
 		LOAD,
@@ -290,7 +298,7 @@ public final class ShaderGraphCompiler {
 				validateReference(manifest, pass.id(), target, "write");
 				ShaderPack.Target declaration = manifest.targets().get(target);
 				if (pass.kind() == ShaderPack.PassKind.COMPUTE
-					&& (target.equals("depth") || target.equals("drawable") || declaration != null && !declaration.format().isColor())) {
+					&& (RESERVED_TARGETS.contains(target) || declaration != null && !declaration.format().isColor())) {
 					throw new CompileException("Compute pass '" + pass.id() + "' cannot write attachment target '" + target + "'");
 				}
 			}

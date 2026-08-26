@@ -47,12 +47,36 @@ public final class Blaze3DMetalMappings {
 		}
 		MetalShaderTranslator.Translation vertex = shaders.vertex();
 		MetalShaderTranslator.Translation fragment = shaders.fragment();
+		return pipelineDescriptor(
+			pipeline, vertex.metalSource(), vertex.entryPoint(), fragment.metalSource(), fragment.entryPoint()
+		);
+	}
+
+	/**
+	 * The same fixed-function state, over shader sources that were never GLSL.
+	 *
+	 * <p>A shader pack authors its programs in MSL, so there is nothing for the translator to
+	 * produce. Everything else about the pipeline - its color targets, vertex layout, depth state
+	 * and raster state - is still described by the Blaze3D pipeline it stands in for, and reading it
+	 * from there is what keeps a substituted pipeline interchangeable with the one it replaces.
+	 */
+	public static MetalRenderPipeline.Descriptor pipelineDescriptor(
+		final RenderPipeline pipeline,
+		final String vertexSource,
+		final String vertexFunction,
+		final String fragmentSource,
+		final String fragmentFunction
+	) {
+		if (pipeline == null || vertexSource == null || vertexFunction == null
+			|| fragmentSource == null || fragmentFunction == null) {
+			throw new NullPointerException("Blaze3D pipeline and Metal shader sources cannot be null");
+		}
 		DepthStencilState depthStencil = pipeline.getDepthStencilState();
 		return new MetalRenderPipeline.Descriptor(
-			vertex.metalSource(),
-			vertex.entryPoint(),
-			fragment.metalSource(),
-			fragment.entryPoint(),
+			vertexSource,
+			vertexFunction,
+			fragmentSource,
+			fragmentFunction,
 			colorTargets(pipeline.getColorTargetStates()),
 			depthStencil == null ? null : MetalTexture.Format.DEPTH32_FLOAT,
 			vertexDescriptor(pipeline.getVertexFormatBindings()),
@@ -65,6 +89,30 @@ public final class Blaze3DMetalMappings {
 				}
 			)
 		);
+	}
+
+	/**
+	 * The Blaze3D format a Metal one stands for, for a texture this renderer allocated itself.
+	 *
+	 * <p>A shader-pack target is described in Metal terms and then handed to Minecraft as a
+	 * {@code GpuTexture}, which has to state a Blaze3D format. Searching {@link #textureFormat} for
+	 * its inverse keeps the two directions from drifting apart, which a second hand-written table
+	 * would eventually do.
+	 */
+	public static GpuFormat gpuFormat(final MetalTexture.Format format) {
+		if (format == null) {
+			throw new NullPointerException("format");
+		}
+		for (GpuFormat candidate : GpuFormat.values()) {
+			try {
+				if (textureFormat(candidate) == format) {
+					return candidate;
+				}
+			} catch (UnsupportedOperationException ignored) {
+				// A Blaze3D format with no byte-compatible Metal representation is not the inverse.
+			}
+		}
+		throw new UnsupportedOperationException("Metal texture format " + format + " has no Blaze3D equivalent");
 	}
 
 	public static MetalTexture.Format textureFormat(final GpuFormat format) {

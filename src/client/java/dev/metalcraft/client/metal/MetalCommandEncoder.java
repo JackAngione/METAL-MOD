@@ -441,7 +441,11 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 
 	void renderShaderPack(final MetalShaderEngine engine, final MetalTexture texture, final MetalDrawable drawable) {
 		MetalCommandBuffer commands = this.commands();
-		engine.encode(commands, texture, drawable);
+		// A pack whose graph begins in the world has nothing to composite on a screen with no world
+		// behind it, and says so rather than presenting an empty G-buffer.
+		if (!engine.encode(commands, texture, drawable)) {
+			commands.blitToDrawable(texture, drawable);
+		}
 		commands.present(drawable);
 	}
 

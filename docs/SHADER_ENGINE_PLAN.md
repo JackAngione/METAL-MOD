@@ -91,6 +91,13 @@ wrong.
 }
 ```
 
+Three target names are reserved for attachments the host supplies rather than the pack allocating:
+`scene` is Minecraft's own colour attachment, `depth` its depth attachment, and `drawable` the
+surface being presented. A geometry pass writes `scene` first and `depth` alongside its own
+channels, which is what keeps Minecraft's attachment at colour index zero for the geometry this
+engine does not route, and what gives substituted and unsubstituted draws one depth order between
+them.
+
 `lifetime: "transient"` plus a `merge_with` that consumes it is what earns a target
 `MTLStorageModeMemoryless` and a `tile_reads` binding instead of a sampler. The engine verifies the
 claim: a target declared transient that is read by an unmerged pass is a load error naming both
@@ -227,16 +234,51 @@ pack switch, survives resize and resource reload, and exposes one option of each
 
 ### Phase 2 — G-buffer fill
 
-- Intercept the world draw and route terrain, entities, and block entities into the pack's G-buffer
-  pass. The substitution point is the frame graph and `RenderType`, above the backend: by the time
-  `MetalRenderPassBackend.setPipeline` sees a pipeline, the pass has already begun with vanilla's
-  single attachment.
-- MSL geometry programs for the vanilla vertex formats, with normals reconstructed from depth
-  derivatives.
-- Material classification: which draws are emissive, which are foliage, which are water.
+- [x] **Intercept the world draw** at the two places Minecraft opens a pass over its main target and
+  binds a pipeline: `ChunkSectionsToRender.renderGroup` for terrain and
+  `PreparedRenderType.drawFromBuffer` for entities, block entities, and every other feature. Two
+  redirects each - the pass gains the pack's channels where it is created, the pipeline is swapped
+  where it is bound - so the atlas and lightmap binds, the per-section uniform slices, and the
+  batched multi-draw all keep running unchanged. A stand-in pipeline carries the vanilla one's
+  bind-group layouts and vertex bindings verbatim, so every name the caller binds resolves to the
+  same Metal slot; only the programs differ, and `MetalGpuDevice` gained a seam that compiles a
+  pack's MSL in place of translating GLSL that was never written.
+- [x] **MSL geometry programs for the three vanilla world formats** - `core/terrain`, `core/block`,
+  `core/entity` - reproducing Minecraft's own shading into colour zero, because nothing lights the
+  G-buffer yet and the game has to look the same. Terrain and loose block models reconstruct their
+  normal from screen-space derivatives of camera-relative position; entities read the one world
+  vertex format that carries a real normal. Minecraft's colour attachment stays at index zero, so
+  unsubstituted geometry and the composite that follows still land where they always did.
+- [x] **Material classification** from the pipeline's own compiled-in defines rather than a table of
+  pipeline names, so a render type added by a mod is classified the way a vanilla one is: alpha
+  cutout on world terrain is foliage, an entity program compiled without a lightmap is emissive.
+  Water is a declared class that nothing reaches yet, because water is translucent terrain and
+  Phase 4 is where translucency gets a forward pass.
 
-Exit: a debug view of each G-buffer channel is correct across terrain, entities, block entities, and
-cutout foliage.
+**The coverage bar, stated rather than discovered.** A draw is routed only when its vertex program is
+one of the three, its colour target does not blend, its vertex format and bind-group layout match
+what the program reads, and every compile-time define it carries is one the pack implements. A
+blended draw cannot write a G-buffer - a normal, a material class and a light level are not
+quantities that blend - which is what keeps translucent terrain, translucent entities and the glint
+layer out on their own terms. Minecraft's item program (`core/item`: held items, dropped items, item
+frames, maps) and its GUI programs are not implemented in this phase, and neither are the sky,
+clouds, weather, particles, outlines or text. Every pipeline offered and declined is logged once per
+pack.
+
+Exit, met: `shaderTranslationSmoke` compiles all five substituted world variants on the device
+through the real substitution path, refuses a blended one and a variant carrying an unimplemented
+define, and draws one tilted quad through the terrain program to read back all four attachments
+against the values the format specifies. In the client, the same world rendered with and without
+`-PmetalShaderPack=false` is pixel-identical outside the first-person arm, whose animation phase
+differs by the same amount between two runs of the baseline itself. The normal channel reads
+(128, 255, 217) across flat ground - octahedral +Y with solid roughness - the material channel
+separates terrain from entities, and the light channel reads full sky light and no block light in
+open daylight.
+
+One thing the runtime does not do yet, and refuses rather than half-runs: the graph compiler already
+schedules merged pass groups and compute passes, because Phase 0 proved both mechanisms against the
+hardware, but nothing executes them. A pack that declares either is rejected at load with a message
+naming the pass, so a pack cannot render half of what it declared.
 
 ### Phase 3 — shadows
 

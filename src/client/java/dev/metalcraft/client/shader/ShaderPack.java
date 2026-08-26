@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 /** An immutable, validated shader-pack manifest and its MSL sources. */
 public record ShaderPack(String id, Manifest manifest, Map<String, String> metalSources) {
 	private static final Pattern ID = Pattern.compile("[A-Za-z][A-Za-z0-9_.-]*");
+	/** Names a pack may reference but never declare; the engine binds these per frame. */
+	private static final Set<String> RESERVED_TARGET_IDS = Set.of("scene", "depth", "drawable");
 
 	public ShaderPack {
 		if (id == null || id.isBlank()) {
@@ -45,8 +47,8 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 			targets = immutableMap(targets);
 			for (Map.Entry<String, Target> target : targets.entrySet()) {
 				requireId(target.getKey(), "target");
-				if (target.getKey().equals("depth") || target.getKey().equals("drawable")) {
-					throw new IllegalArgumentException("Target ID '" + target.getKey() + "' is reserved");
+				if (RESERVED_TARGET_IDS.contains(target.getKey())) {
+					throw new IllegalArgumentException("Target ID '" + target.getKey() + "' is reserved for a host-supplied attachment");
 				}
 				Objects.requireNonNull(target.getValue(), "target " + target.getKey());
 			}

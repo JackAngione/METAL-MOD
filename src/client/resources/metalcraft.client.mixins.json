@@ -5,6 +5,7 @@
   "client": [
     "BlockableEventLoopDrainMixin",
     "BlockableEventLoopTaskCensusMixin",
+    "ChunkSectionsToRenderMixin",
     "CreativeModeInventoryScreenInvoker",
     "FramerateLimitBypassMixin",
     "GametestHandoffMixin",
@@ -13,6 +14,7 @@
     "MinecraftTickPhaseMixin",
     "OptionsSubScreenAccessor",
     "PreferredGraphicsApiMixin",
+    "PreparedRenderTypeMixin",
     "ShaderManagerMixin",
     "VideoSettingsScreenMixin",
     "WindowFramebufferAccessor",

@@ -24,6 +24,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import com.mojang.blaze3d.pipeline.BindGroupLayout;
+import com.mojang.blaze3d.shaders.UniformType;
 import net.minecraft.resources.Identifier;
 import dev.metalcraft.client.shader.ShaderPack;
 import dev.metalcraft.client.shader.ShaderGraphCompiler;
@@ -230,6 +232,7 @@ public final class MetalShaderTranslationSmoke {
 	private static final String PHASE_ONE_MSL = """
 		#include <metal_stdlib>
 		using namespace metal;
+		#ifdef MC_PASS_FINAL
 		struct FinalVaryings { float4 position [[position]]; };
 		vertex FinalVaryings final_vertex(uint vertexId [[vertex_id]]) {
 		    const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
@@ -237,10 +240,11 @@ public final class MetalShaderTranslationSmoke {
 		}
 		fragment float4 final_fragment(
 		    FinalVaryings in [[stage_in]],
-		    texture2d<float, access::read> scene [[texture(0)]],
+		    texture2d<float, access::read> scene [[texture(MC_TEX_SCENE)]],
 		    constant float &exposure [[buffer(0)]]) {
 		    return scene.read(uint2(in.position.xy)) * exposure;
 		}
+		#endif
 		""";
 	private static final String MAPPED_VERTEX_GLSL = """
 		#version 450
@@ -414,6 +418,7 @@ public final class MetalShaderTranslationSmoke {
 		assertPhaseZeroExit();
 		assertDeclaredShaderGraph();
 		assertPhaseOneRuntime();
+		assertPhaseTwoGBuffer();
 		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow();
 			 MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
 				 VERTEX_GLSL,
@@ -464,6 +469,393 @@ public final class MetalShaderTranslationSmoke {
 		} catch (IllegalArgumentException expected) {
 			if (!expected.getMessage().contains("smoke/broken.vert")) {
 				throw new AssertionError("Shader diagnostic omitted its source name", expected);
+			}
+		}
+	}
+
+	/**
+	 * Phase 2's exit: every world program the pack substitutes compiles on the device, a blended
+	 * draw is refused, and one terrain draw fills all four attachments with the values the format
+	 * says it should.
+	 *
+	 * <p>Driven through the real substitution rather than a hand-built pipeline, so what is compiled
+	 * here is exactly what a frame would compile: the same stand-in, built from the same bind-group
+	 * layout, with the same slot and material defines. The draw then reads back every channel,
+	 * because a G-buffer that renders without erroring and packs the wrong bits into the wrong
+	 * channel is the failure this phase is most likely to have.
+	 */
+	private static void assertPhaseTwoGBuffer() {
+		Path root = Path.of("build", "phase-two-shaderpacks");
+		Path settings = Path.of("build", "phase-two-shader-settings.json");
+		deleteTree(root);
+		try {
+			Files.deleteIfExists(settings);
+			Files.createDirectories(root);
+		} catch (IOException error) {
+			throw new AssertionError("Could not create the Phase 2 shader-pack fixture", error);
+		}
+
+		MetalDevice device = MetalNative.openDefaultDevice().orElseThrow();
+		MetalGpuDevice gpuDevice = new MetalGpuDevice(device, (id, type) -> null);
+		try {
+			try (MetalShaderEngine engine = new MetalShaderEngine(device, root, settings)) {
+				engine.attachDevice(gpuDevice);
+				engine.resize(GBUFFER_SIZE, GBUFFER_SIZE);
+				MetalWorldGeometry world = MetalWorldGeometry.active();
+				if (world == null) {
+					throw new AssertionError("The built-in pack declares no geometry pass");
+				}
+				if (world.channels().size() != 3) {
+					throw new AssertionError("The built-in G-buffer has " + world.channels().size() + " channels, not three");
+				}
+
+				assertStandInCompiles(gpuDevice, world, terrainPipeline(null), "solid terrain");
+				assertStandInCompiles(gpuDevice, world, terrainPipeline("0.1"), "cutout terrain");
+				assertStandInCompiles(gpuDevice, world, blockPipeline(), "loose block models");
+				assertStandInCompiles(gpuDevice, world, entityPipeline(true), "entities");
+				assertStandInCompiles(gpuDevice, world, entityPipeline(false), "emissive entities");
+
+				// A blended draw is refused on its own terms rather than by name, which is what keeps
+				// translucent terrain, translucent entities and the glint layer out of the G-buffer.
+				if (world.standInFor(translucentTerrainPipeline()) != null) {
+					throw new AssertionError("A blended pipeline was routed into the G-buffer");
+				}
+				// And so is a variant switch this pack's programs do not implement, because routing
+				// it would render the same geometry a quietly different way.
+				if (world.standInFor(dissolveEntityPipeline()) != null) {
+					throw new AssertionError("A pipeline with an unimplemented shader define was routed into the G-buffer");
+				}
+
+				assertTerrainGBufferChannels(device, gpuDevice, world);
+			}
+		} finally {
+			gpuDevice.close();
+		}
+	}
+
+	private static void assertStandInCompiles(
+		final MetalGpuDevice gpuDevice,
+		final MetalWorldGeometry world,
+		final RenderPipeline vanilla,
+		final String description
+	) {
+		RenderPipeline standIn = world.standInFor(vanilla);
+		if (standIn == null) {
+			throw new AssertionError("The G-buffer pack declined to stand in for " + description);
+		}
+		if (standIn.getColorTargetStates().length != 4) {
+			throw new AssertionError(
+				"The stand-in for " + description + " declares " + standIn.getColorTargetStates().length
+					+ " colour targets, not Minecraft's plus three G-buffer channels"
+			);
+		}
+		if (!gpuDevice.getOrCompilePipeline(standIn).isValid()) {
+			throw new AssertionError("The pack's G-buffer program for " + description + " did not compile on this device");
+		}
+	}
+
+	/**
+	 * Draws one tilted quad through the terrain program and reads every attachment back.
+	 *
+	 * <p>The quad is tilted so its reconstructed normal has all three components: a face normal
+	 * taken from screen-space derivatives is exact for a flat surface, and a tilt is what makes a
+	 * wrong sign or a swapped pair of derivatives produce a different number rather than the same
+	 * axis. The uniform blocks are filled the way Minecraft fills them, so a field read from the
+	 * wrong std140 offset moves the geometry and fails the normal rather than passing quietly.
+	 */
+	private static void assertTerrainGBufferChannels(
+		final MetalDevice device,
+		final MetalGpuDevice gpuDevice,
+		final MetalWorldGeometry world
+	) {
+		RenderPipeline standIn = world.standInFor(terrainPipeline(null));
+		MetalRenderPipeline pipeline = gpuDevice.getOrCompilePipeline(standIn).metal(true);
+		int size = GBUFFER_SIZE;
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture scene = device.createTexture(colorTarget(size));
+			 MetalTexture albedo = device.createTexture(colorTarget(size));
+			 MetalTexture normal = device.createTexture(colorTarget(size));
+			 MetalTexture light = device.createTexture(colorTarget(size));
+			 MetalTexture depth = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.DEPTH32_FLOAT, size, size, 1, MetalTexture.USAGE_RENDER_TARGET));
+			 MetalTexture atlas = whiteTexture(device, queue);
+			 MetalTexture lightmap = whiteTexture(device, queue);
+			 MetalTextureView atlasView = atlas.createView();
+			 MetalTextureView lightmapView = lightmap.createView();
+			 MetalSampler sampler = device.createSampler(new MetalSampler.Descriptor(
+				 MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE));
+			 MetalBuffer vertices = uploadBuffer(device, terrainQuad());
+			 MetalBuffer projection = uploadBuffer(device, projectionBlock());
+			 MetalBuffer fog = uploadBuffer(device, fogBlock());
+			 MetalBuffer globals = uploadBuffer(device, globalsBlock());
+			 MetalBuffer section = uploadBuffer(device, chunkSectionBlock());
+			 MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+				List.of(
+					MetalRenderPass.ColorAttachment.clear(scene, 0.0, 0.0, 0.0, 0.0),
+					MetalRenderPass.ColorAttachment.clear(albedo, 0.0, 0.0, 0.0, 0.0),
+					MetalRenderPass.ColorAttachment.clear(normal, 0.5, 0.5, 0.0, 0.0),
+					MetalRenderPass.ColorAttachment.clear(light, 0.0, 0.0, 0.0, 0.0)
+				),
+				new MetalRenderPass.DepthAttachment(
+					depth, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE, 1.0)
+			))) {
+				pass.setPipeline(pipeline);
+				pass.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, vertices, 0L);
+				pass.setUniformBuffer(SLOT_PROJECTION, projection, 0L, MetalRenderPass.STAGE_ALL);
+				pass.setUniformBuffer(SLOT_FOG, fog, 0L, MetalRenderPass.STAGE_ALL);
+				pass.setUniformBuffer(SLOT_GLOBALS, globals, 0L, MetalRenderPass.STAGE_ALL);
+				pass.setUniformBuffer(SLOT_CHUNK_SECTION, section, 0L, MetalRenderPass.STAGE_ALL);
+				pass.setTexture(SLOT_SAMPLER0, atlasView, MetalRenderPass.STAGE_ALL);
+				pass.setSampler(SLOT_SAMPLER0, sampler, MetalRenderPass.STAGE_ALL);
+				pass.setTexture(SLOT_SAMPLER2, lightmapView, MetalRenderPass.STAGE_ALL);
+				pass.setSampler(SLOT_SAMPLER2, sampler, MetalRenderPass.STAGE_ALL);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+			}
+			commands.commitAndWait();
+
+			// Minecraft's own attachment still carries the fully shaded fragment, because nothing
+			// lights the G-buffer yet and the game has to look the same as it did.
+			assertChannel(scene.readback(queue, 0), new int[] {255, 128, 64, 255}, 2, "scene");
+			// Albedo is the surface before the light: texture times vertex tint, no lightmap, no fog.
+			// Alpha is one past the material class, and solid terrain is class zero.
+			assertChannel(albedo.readback(queue, 0), new int[] {255, 128, 64, 1}, 2, "gbuffer_albedo");
+			// The octahedral encoding of the tilted quad's face normal, plus solid's roughness.
+			assertChannel(normal.readback(queue, 0), new int[] {223, 191, 217, 0}, 3, "gbuffer_normal");
+			// Block light 240/240, sky light 120/240, not emissive, alpha reserved.
+			assertChannel(light.readback(queue, 0), new int[] {255, 128, 0, 0}, 2, "gbuffer_light");
+		}
+	}
+
+	// ---- Phase 2 fixtures --------------------------------------------------------------------
+
+	/** The resource slots the fixture pipelines' bind-group layout produces, in flattened order. */
+	private static final int SLOT_PROJECTION = 0;
+	private static final int SLOT_FOG = 1;
+	private static final int SLOT_GLOBALS = 2;
+	private static final int SLOT_CHUNK_SECTION = 3;
+	private static final int SLOT_SAMPLER0 = 4;
+	private static final int SLOT_SAMPLER2 = 5;
+	private static final int GBUFFER_SIZE = 8;
+
+	private static VertexFormat blockVertexFormat() {
+		return VertexFormat.builder(0)
+			.addAttribute("Position", GpuFormat.RGB32_FLOAT)
+			.addAttribute("Color", GpuFormat.RGBA8_UNORM)
+			.addAttribute("UV0", GpuFormat.RG32_FLOAT)
+			.addAttribute("UV2", GpuFormat.RG16_SINT)
+			.build();
+	}
+
+	private static VertexFormat entityVertexFormat() {
+		return VertexFormat.builder(0)
+			.addAttribute("Position", GpuFormat.RGB32_FLOAT)
+			.addAttribute("Color", GpuFormat.RGBA8_UNORM)
+			.addAttribute("UV0", GpuFormat.RG32_FLOAT)
+			.addAttribute("UV1", GpuFormat.RG16_SINT)
+			.addAttribute("UV2", GpuFormat.RG16_SINT)
+			.addAttribute("Normal", GpuFormat.RGBA8_SNORM)
+			.build();
+	}
+
+	private static RenderPipeline.Builder worldPipeline(final String location, final String program) {
+		return RenderPipeline.builder()
+			.withLocation(Identifier.fromNamespaceAndPath("metalcraft", location))
+			.withVertexShader(Identifier.fromNamespaceAndPath("minecraft", program))
+			.withFragmentShader(Identifier.fromNamespaceAndPath("minecraft", program))
+			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+			.withDepthStencilState(new DepthStencilState(CompareOp.LESS_THAN_OR_EQUAL, true))
+			.withPolygonMode(PolygonMode.FILL)
+			.withCull(false);
+	}
+
+	/** The layout Minecraft's terrain pipelines carry, in the order that fixes every Metal slot. */
+	private static BindGroupLayout terrainBindings() {
+		return BindGroupLayout.builder()
+			.withUniform("Projection", UniformType.UNIFORM_BUFFER)
+			.withUniform("Fog", UniformType.UNIFORM_BUFFER)
+			.withUniform("Globals", UniformType.UNIFORM_BUFFER)
+			.withUniform("ChunkSection", UniformType.UNIFORM_BUFFER)
+			.withSampler("Sampler0")
+			.withSampler("Sampler2")
+			.build();
+	}
+
+	private static RenderPipeline terrainPipeline(final String alphaCutout) {
+		RenderPipeline.Builder builder = worldPipeline(
+			alphaCutout == null ? "smoke_solid_terrain" : "smoke_cutout_terrain", "core/terrain"
+		)
+			.withBindGroupLayout(terrainBindings())
+			.withVertexBinding(0, blockVertexFormat())
+			.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL));
+		return alphaCutout == null ? builder.build() : builder.withShaderDefine("ALPHA_CUTOUT", Float.parseFloat(alphaCutout)).build();
+	}
+
+	private static RenderPipeline translucentTerrainPipeline() {
+		return worldPipeline("smoke_translucent_terrain", "core/terrain")
+			.withBindGroupLayout(terrainBindings())
+			.withVertexBinding(0, blockVertexFormat())
+			.withColorTargetState(new ColorTargetState(
+				Optional.of(BlendFunction.TRANSLUCENT), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL))
+			.build();
+	}
+
+	private static RenderPipeline blockPipeline() {
+		return worldPipeline("smoke_solid_block", "core/block")
+			.withBindGroupLayout(BindGroupLayout.builder()
+				.withUniform("Projection", UniformType.UNIFORM_BUFFER)
+				.withUniform("Fog", UniformType.UNIFORM_BUFFER)
+				.withUniform("DynamicTransforms", UniformType.UNIFORM_BUFFER)
+				.withSampler("Sampler0")
+				.withSampler("Sampler2")
+				.build())
+			.withVertexBinding(0, blockVertexFormat())
+			.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL))
+			.build();
+	}
+
+	/** With a lightmap and overlay, or the emissive variant that has neither. */
+	private static RenderPipeline entityPipeline(final boolean lit) {
+		BindGroupLayout.Builder bindings = BindGroupLayout.builder()
+			.withUniform("Projection", UniformType.UNIFORM_BUFFER)
+			.withUniform("Fog", UniformType.UNIFORM_BUFFER)
+			.withUniform("Lighting", UniformType.UNIFORM_BUFFER)
+			.withUniform("DynamicTransforms", UniformType.UNIFORM_BUFFER)
+			.withSampler("Sampler0");
+		if (lit) {
+			bindings = bindings.withSampler("Sampler1").withSampler("Sampler2");
+		}
+		RenderPipeline.Builder builder = worldPipeline(lit ? "smoke_entity_solid" : "smoke_entity_emissive", "core/entity")
+			.withBindGroupLayout(bindings.build())
+			.withVertexBinding(0, entityVertexFormat())
+			.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL));
+		return lit ? builder.build() : builder.withShaderDefine("EMISSIVE").withShaderDefine("NO_OVERLAY").build();
+	}
+
+	/** An entity variant this pack's program does not implement, which must therefore be declined. */
+	private static RenderPipeline dissolveEntityPipeline() {
+		return worldPipeline("smoke_entity_dissolve", "core/entity")
+			.withBindGroupLayout(BindGroupLayout.builder()
+				.withUniform("Projection", UniformType.UNIFORM_BUFFER)
+				.withUniform("Fog", UniformType.UNIFORM_BUFFER)
+				.withUniform("Lighting", UniformType.UNIFORM_BUFFER)
+				.withUniform("DynamicTransforms", UniformType.UNIFORM_BUFFER)
+				.withSampler("Sampler0")
+				.withSampler("Sampler1")
+				.withSampler("Sampler2")
+				.withSampler("DissolveMaskSampler")
+				.build())
+			.withVertexBinding(0, entityVertexFormat())
+			.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL))
+			.withShaderDefine("DISSOLVE")
+			.build();
+	}
+
+	private static MetalTexture.Descriptor colorTarget(final int size) {
+		return new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, size, size, 1, MetalTexture.USAGE_ALL);
+	}
+
+	private static MetalTexture whiteTexture(final MetalDevice device, final MetalCommandQueue queue) {
+		MetalTexture texture = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 16, 16, 1));
+		ByteBuffer white = ByteBuffer.allocateDirect(16 * 16 * 4);
+		while (white.hasRemaining()) {
+			white.put((byte)0xFF);
+		}
+		white.flip();
+		texture.upload(queue, 0, white);
+		return texture;
+	}
+
+	private static MetalBuffer uploadBuffer(final MetalDevice device, final ByteBuffer contents) {
+		MetalBuffer buffer = device.createBuffer(contents.remaining(), MetalBuffer.StorageMode.SHARED);
+		try (MetalBuffer.Mapping mapping = buffer.map()) {
+			mapping.bytes().put(contents.duplicate());
+		}
+		return buffer;
+	}
+
+	/**
+	 * One tilted triangle covering the viewport, in Minecraft's BLOCK vertex format.
+	 *
+	 * <p>The z of each vertex puts the surface on the plane {@code z = 2x + y}, which after the
+	 * chunk's origin offset becomes {@code z = 2x + y + 2} in camera-relative world space: a plane
+	 * that never passes through the camera, so the reconstructed normal's facing test has one
+	 * answer across the whole quad.
+	 */
+	private static ByteBuffer terrainQuad() {
+		ByteBuffer vertices = ByteBuffer.allocateDirect(3 * 28).order(ByteOrder.nativeOrder());
+		float[][] corners = {{-1.0F, -1.0F}, {3.0F, -1.0F}, {-1.0F, 3.0F}};
+		for (float[] corner : corners) {
+			vertices.putFloat(corner[0]).putFloat(corner[1]).putFloat(2.0F * corner[0] + corner[1]);
+			vertices.put((byte)0xFF).put((byte)0x80).put((byte)0x40).put((byte)0xFF);
+			vertices.putFloat(0.5F).putFloat(0.5F);
+			vertices.putShort((short)240).putShort((short)120);
+		}
+		return vertices.flip();
+	}
+
+	/** A projection that keeps x and y and pins z, so the quad's tilt reaches only the G-buffer. */
+	private static ByteBuffer projectionBlock() {
+		ByteBuffer block = ByteBuffer.allocateDirect(64).order(ByteOrder.nativeOrder());
+		float[] columnMajor = {
+			1.0F, 0.0F, 0.0F, 0.0F,
+			0.0F, 1.0F, 0.0F, 0.0F,
+			0.0F, 0.0F, 0.0F, 0.0F,
+			0.0F, 0.0F, 0.5F, 1.0F
+		};
+		for (float value : columnMajor) {
+			block.putFloat(value);
+		}
+		return block.flip();
+	}
+
+	/** Fog with zero alpha, which makes the fog blend a no-op without disabling the code path. */
+	private static ByteBuffer fogBlock() {
+		ByteBuffer block = ByteBuffer.allocateDirect(48).order(ByteOrder.nativeOrder());
+		block.putFloat(0.0F).putFloat(0.0F).putFloat(0.0F).putFloat(0.0F);
+		block.putFloat(0.0F).putFloat(1000.0F).putFloat(0.0F).putFloat(1000.0F).putFloat(1000.0F).putFloat(1000.0F);
+		return block.flip();
+	}
+
+	private static ByteBuffer globalsBlock() {
+		ByteBuffer block = ByteBuffer.allocateDirect(64).order(ByteOrder.nativeOrder());
+		block.putInt(5).putInt(6).putInt(5).putInt(0);          // CameraBlockPos, padded to a vec4 slot
+		block.putFloat(0.0F).putFloat(0.0F).putFloat(0.0F).putFloat(0.0F);  // CameraOffset, likewise
+		block.putFloat(GBUFFER_SIZE).putFloat(GBUFFER_SIZE);    // ScreenSize
+		block.putFloat(1.0F).putFloat(0.0F);                    // GlintAlpha, GameTime
+		block.putInt(0).putInt(0);                              // MenuBlurRadius, UseRgss
+		return block.flip();
+	}
+
+	private static ByteBuffer chunkSectionBlock() {
+		ByteBuffer block = ByteBuffer.allocateDirect(96).order(ByteOrder.nativeOrder());
+		float[] identity = {
+			1.0F, 0.0F, 0.0F, 0.0F,
+			0.0F, 1.0F, 0.0F, 0.0F,
+			0.0F, 0.0F, 1.0F, 0.0F,
+			0.0F, 0.0F, 0.0F, 1.0F
+		};
+		for (float value : identity) {
+			block.putFloat(value);
+		}
+		block.putFloat(1.0F).putFloat(0.0F);                    // ChunkVisibility, then std140 padding
+		block.putInt(16).putInt(16);                            // TextureSize
+		block.putInt(5).putInt(6).putInt(7).putInt(0);          // ChunkPosition, padded to a vec4 slot
+		return block.flip();
+	}
+
+	private static void assertChannel(
+		final ByteBuffer pixels,
+		final int[] expected,
+		final int tolerance,
+		final String description
+	) {
+		for (int component = 0; component < expected.length; component++) {
+			int actual = Byte.toUnsignedInt(pixels.get(component));
+			if (Math.abs(actual - expected[component]) > tolerance) {
+				throw new AssertionError(String.format(
+					"%s component %d is %d, expected %d (+/-%d)", description, component, actual, expected[component], tolerance
+				));
 			}
 		}
 	}
@@ -558,11 +950,13 @@ public final class MetalShaderTranslationSmoke {
 					throw new AssertionError("The built-in shader pack does not expose all three apply modes");
 				}
 				engine.resize(32, 24);
-				assertBuiltInPackRenders(device, engine);
+				assertNoWorldDeclinesPresentation(device, engine);
 				engine.setOption("exposure", 1.25);
 				engine.setOption("invert", true);
 				engine.setOption("upscale_filter", "nearest");
 				engine.selectPack("external-copy");
+				// The external pack has no geometry pass, so it composites whatever it is handed.
+				assertPackBlitsScene(device, engine, "External scene-to-drawable pack");
 				engine.setOption("quality", 2);
 				engine.selectPack("external-copy");
 				engine.resize(48, 32);
@@ -584,7 +978,8 @@ public final class MetalShaderTranslationSmoke {
 		}
 	}
 
-	private static void assertBuiltInPackRenders(final MetalDevice device, final MetalShaderEngine engine) {
+	/** A pack with no geometry pass composites whatever it is handed, unconditionally. */
+	private static void assertPackBlitsScene(final MetalDevice device, final MetalShaderEngine engine, final String description) {
 		int size = 4;
 		try (MetalCommandQueue queue = device.createCommandQueue();
 			 MetalTexture scene = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, size, size, 1));
@@ -596,10 +991,32 @@ public final class MetalShaderTranslationSmoke {
 			gray.flip();
 			scene.upload(queue, 0, gray);
 			try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
-				engine.encodeForTesting(commands, scene, output);
+				if (!engine.encodeForTesting(commands, scene, output)) {
+					throw new AssertionError(description + " declined to composite a scene it does not need a world for");
+				}
 				commands.commitAndWait();
 			}
-			assertFirstPixel(output.readback(queue, 0), 0x808080, "Built-in Phase 1 pack");
+			assertFirstPixel(output.readback(queue, 0), 0x808080, description);
+		}
+	}
+
+	/**
+	 * A pack whose graph starts in the world declines to present when no world was drawn.
+	 *
+	 * <p>Asserted rather than assumed, because the failure it prevents is a black screen on every
+	 * menu: the built-in pack's last pass reads a G-buffer and a depth attachment that only exist
+	 * once Minecraft has rendered a level into them.
+	 */
+	private static void assertNoWorldDeclinesPresentation(final MetalDevice device, final MetalShaderEngine engine) {
+		int size = 4;
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture scene = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, size, size, 1));
+			 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.BGRA8_UNORM, size, size, 1));
+			 MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			if (engine.encodeForTesting(commands, scene, output)) {
+				throw new AssertionError("The G-buffer pack presented a frame in which no world was drawn");
+			}
+			commands.commitAndWait();
 		}
 	}
 
@@ -612,11 +1029,11 @@ public final class MetalShaderTranslationSmoke {
 			  "name": "Declared Graph",
 			  "targets": {
 			    "g": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "transient"},
-			    "scene": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "frame"}
+			    "lit": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "frame"}
 			  },
 			  "passes": [
-			    {"id": "resolve", "kind": "fullscreen", "tile_reads": ["g"], "merge_with": "gbuffer", "writes": ["scene"]},
-			    {"id": "final", "kind": "fullscreen", "reads": ["scene"], "writes": ["drawable"]},
+			    {"id": "resolve", "kind": "fullscreen", "tile_reads": ["g"], "merge_with": "gbuffer", "writes": ["lit"]},
+			    {"id": "final", "kind": "fullscreen", "reads": ["lit"], "writes": ["drawable"]},
 			    {"id": "gbuffer", "kind": "geometry", "geometry": "terrain", "writes": ["g"]}
 			  ],
 			  "options": []
@@ -674,13 +1091,12 @@ public final class MetalShaderTranslationSmoke {
 			{
 			  "format": 1,
 			  "name": "%s",
-			  "targets": {
-			    "scene": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "frame"}
-			  },
+			  "targets": {},
 			  "passes": [
 			    {"id": "final", "kind": "fullscreen", "reads": ["scene"], "writes": ["drawable"]}
 			  ],
 			  "options": [
+			    {"id": "exposure", "category": "test", "type": "float", "min": 0.5, "max": 2.0, "default": 1.0, "apply": "uniform"},
 			    {"id": "quality", "category": "test", "type": "enum", "values": [1, 2], "default": 1, "apply": "reload"}
 			  ]
 			}

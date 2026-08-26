@@ -3,6 +3,7 @@ package dev.metalcraft.client.metal;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
+import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.shader.ShaderGraphCompiler;
 import dev.metalcraft.client.shader.ShaderPack;
@@ -17,21 +18,50 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import net.fabricmc.loader.api.FabricLoader;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-/** Loads, compiles, and presents the selected first-party MSL shader pack. */
+/** Loads, compiles, and executes the selected first-party MSL shader pack. */
 public final class MetalShaderEngine implements AutoCloseable {
 	private static final Logger LOGGER = LogUtils.getLogger();
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Type SETTINGS_TYPE = new TypeToken<SettingsData>() { }.getType();
 	private static final String BUILTIN_ID = "metalcraft-standard";
 	private static final String BUILTIN_ROOT = "assets/metalcraft/shaderpacks/standard";
+	/** Minecraft's own colour attachment, written by a geometry pass and read by the passes after it. */
+	private static final String TARGET_SCENE = "scene";
+	/** Minecraft's own depth attachment, shared with the world draw so depth ordering stays global. */
+	private static final String TARGET_DEPTH = "depth";
+	/** The surface being presented; only the last pass can write it. */
+	private static final String TARGET_DRAWABLE = "drawable";
 	private static volatile MetalShaderEngine active;
 
 	public record PackChoice(String id, String name) {
+	}
+
+	/** One allocated pack target: the Metal texture, plus the Blaze3D view the world draw binds. */
+	private record Attachment(MetalGpuTexture texture, MetalGpuTextureView view) implements AutoCloseable {
+		MetalTexture metal() {
+			return this.texture.metal();
+		}
+
+		@Override
+		public void close() {
+			this.view.close();
+			this.texture.close();
+		}
+	}
+
+	/** A fullscreen pass and the pipeline compiled for it, in execution order. */
+	private record PostPass(ShaderGraphCompiler.CompiledPass compiled, MetalRenderPipeline pipeline) implements AutoCloseable {
+		@Override
+		public void close() {
+			this.pipeline.close();
+		}
 	}
 
 	private final MetalDevice device;
@@ -39,13 +69,26 @@ public final class MetalShaderEngine implements AutoCloseable {
 	private final Path settingsPath;
 	private final MetalPipelineCache pipelineCache;
 	private final Map<String, ShaderPackLoader.PackRef> discovered = new LinkedHashMap<>();
-	private final Map<String, MetalTexture> targets = new LinkedHashMap<>();
+	private final Map<String, Attachment> targets = new LinkedHashMap<>();
+	private final List<PostPass> postPasses = new ArrayList<>();
 	private final SettingsData settings;
+	private @Nullable MetalGpuDevice gpuDevice;
 	private ShaderPack pack;
 	private ShaderGraphCompiler.CompiledGraph graph;
-	private MetalRenderPipeline finalPipeline;
+	private ShaderGraphCompiler.@Nullable CompiledPass geometryPass;
+	private @Nullable MetalWorldGeometry worldGeometry;
 	private MetalBuffer uniforms;
-	private MetalSampler sceneSampler;
+	private MetalSampler filteredSampler;
+	private MetalSampler unfilteredSampler;
+	/**
+	 * A view of Minecraft's colour attachment, remade only when that attachment changes.
+	 *
+	 * <p>The engine is handed the texture rather than a view, and a Metal texture view is an owned
+	 * object. Creating one per frame was affordable while the graph was a single blit; a pack that
+	 * samples the scene from several passes would create several per frame for no reason.
+	 */
+	private @Nullable MetalTexture sceneTexture;
+	private @Nullable MetalTextureView sceneView;
 	private int width = 1;
 	private int height = 1;
 	private boolean closed;
@@ -91,6 +134,19 @@ public final class MetalShaderEngine implements AutoCloseable {
 		active = this;
 	}
 
+	/**
+	 * Hands the engine the Blaze3D device, once that device exists.
+	 *
+	 * <p>The device constructs the engine, so the engine cannot be given the device at construction.
+	 * Nothing before this point needs it: a geometry pass only reaches a pipeline when the world is
+	 * drawn, which is long after both objects exist.
+	 */
+	synchronized void attachDevice(final MetalGpuDevice attached) {
+		this.requireOpen();
+		this.gpuDevice = Objects.requireNonNull(attached, "device");
+		this.rebuildWorldGeometry();
+	}
+
 	public synchronized List<PackChoice> availablePacks() {
 		this.requireOpen();
 		List<PackChoice> choices = new ArrayList<>();
@@ -102,14 +158,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 				try {
 					ShaderPack candidate = ShaderPackLoader.load(ref);
 					ShaderGraphCompiler.CompiledGraph candidateGraph = ShaderGraphCompiler.compile(candidate);
-					validatePhaseOneGraph(candidate, candidateGraph);
-					Map<String, Object> defaults = new LinkedHashMap<>();
-					for (ShaderPack.Option option : candidate.manifest().options()) {
-						defaults.put(option.id(), option.defaultValue());
-					}
-					try (MetalRenderPipeline ignored = this.createFinalPipeline(candidate, candidateGraph, defaults)) {
-						// Pipeline creation validates the pack's MSL and entry-point conventions.
-					}
+					validateSupportedGraph(candidate, candidateGraph);
 					choices.add(new PackChoice(candidate.id(), candidate.manifest().name()));
 				} catch (IOException | RuntimeException error) {
 					LOGGER.warn("Ignoring invalid shader pack {}", ref.path(), error);
@@ -151,7 +200,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 			this.settings.selectedPack = id;
 			this.saveSettings();
 		} catch (IOException | RuntimeException error) {
-			if ((this.finalPipeline == null || this.uniforms == null || this.sceneSampler == null) && !BUILTIN_ID.equals(id)) {
+			if (this.postPasses.isEmpty() && !BUILTIN_ID.equals(id)) {
 				try {
 					this.loadPack(BUILTIN_ID);
 					this.settings.selectedPack = BUILTIN_ID;
@@ -173,7 +222,10 @@ public final class MetalShaderEngine implements AutoCloseable {
 		try {
 			switch (option.apply()) {
 				case UNIFORM -> this.writeUniforms();
-				case RECOMPILE -> this.compileFinalPipeline();
+				case RECOMPILE -> {
+					this.compilePostPasses();
+					this.rebuildWorldGeometry();
+				}
 				case RELOAD -> this.allocateTargets();
 			}
 			this.saveSettings();
@@ -206,41 +258,95 @@ public final class MetalShaderEngine implements AutoCloseable {
 		}
 	}
 
+	/**
+	 * Resizes the graph to the size the world is actually being drawn at.
+	 *
+	 * <p>{@link #resize} is driven by the surface, which is the right size for the drawable but not
+	 * necessarily for Minecraft's world attachments. The G-buffer has to match those, because a
+	 * render pass admits only one attachment size, so the world's size wins and the last pass
+	 * upscales to the drawable through the pack's own filter option.
+	 */
+	synchronized void resizeToWorld(final int width, final int height) {
+		this.resize(width, height);
+	}
+
 	/** Re-reads the selected pack, used by Minecraft's resource-reload pipeline. */
 	public synchronized void reload() {
 		this.selectPack(this.pack.id());
 	}
 
-	void encode(final MetalCommandBuffer commands, final MetalTexture scene, final MetalDrawable drawable) {
-		this.encodeTarget(commands, scene, drawable);
+	/**
+	 * Runs the passes that follow the world draw and writes the drawable.
+	 *
+	 * @return whether the pack ran; false asks the caller to present the scene unchanged, which is
+	 *     what happens on a screen with no world behind it when the pack needs one
+	 */
+	boolean encode(final MetalCommandBuffer commands, final MetalTexture scene, final MetalDrawable drawable) {
+		return this.encodeTarget(commands, scene, drawable);
 	}
 
-	void encodeForTesting(final MetalCommandBuffer commands, final MetalTexture scene, final MetalTexture output) {
-		this.encodeTarget(commands, scene, output);
+	boolean encodeForTesting(final MetalCommandBuffer commands, final MetalTexture scene, final MetalTexture output) {
+		return this.encodeTarget(commands, scene, output);
 	}
 
-	private void encodeTarget(
+	private synchronized boolean encodeTarget(
 		final MetalCommandBuffer commands,
 		final MetalTexture scene,
 		final MetalRenderPass.ColorTarget output
 	) {
-		synchronized (this) {
-			this.requireOpen();
-			ShaderGraphCompiler.WriteDecision drawable = this.graph.passes().getFirst().writes().stream()
-				.filter(write -> write.target().equals("drawable"))
-				.findFirst()
-				.orElseThrow();
-			try (MetalTextureView sceneView = scene.createView();
-				 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
-					 new MetalRenderPass.ColorAttachment(
-						 output, loadAction(drawable.loadAction()), storeAction(drawable.storeAction()),
-						 0.0, 0.0, 0.0, 1.0)))) {
-				pass.setPipeline(this.finalPipeline);
-				pass.setTexture(0, sceneView, MetalRenderPass.STAGE_FRAGMENT);
-				pass.setSampler(0, this.sceneSampler, MetalRenderPass.STAGE_FRAGMENT);
-				pass.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
-				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+		this.requireOpen();
+		try {
+			if (this.geometryPass != null && this.worldDepth() == null) {
+				// A pack whose graph starts in the world has nothing to composite when no world was
+				// drawn - a title screen, a loading screen, a menu over no level.
+				return false;
 			}
+			this.bindSceneTexture(scene);
+			for (PostPass pass : this.postPasses) {
+				this.encodePass(commands, pass, output);
+			}
+			return true;
+		} finally {
+			if (this.worldGeometry != null) {
+				this.worldGeometry.beginFrame();
+			}
+		}
+	}
+
+	private void encodePass(
+		final MetalCommandBuffer commands,
+		final PostPass pass,
+		final MetalRenderPass.ColorTarget output
+	) {
+		List<MetalRenderPass.@Nullable ColorAttachment> colors = new ArrayList<>();
+		MetalRenderPass.DepthAttachment depth = null;
+		for (ShaderGraphCompiler.WriteDecision write : pass.compiled().writes()) {
+			if (TARGET_DEPTH.equals(write.target())) {
+				depth = new MetalRenderPass.DepthAttachment(
+					this.requireWorldDepth().texture(), loadAction(write.loadAction()), storeAction(write.storeAction()), 1.0
+				);
+				continue;
+			}
+			colors.add(new MetalRenderPass.ColorAttachment(
+				this.colorTarget(write.target(), output), loadAction(write.loadAction()), storeAction(write.storeAction()),
+				0.0, 0.0, 0.0, 1.0
+			));
+		}
+		try (MetalRenderPass render = commands.beginRenderPass(new MetalRenderPass.Descriptor(colors, depth))) {
+			render.setPipeline(pass.pipeline());
+			int slot = 0;
+			for (String read : pass.compiled().declaration().reads()) {
+				MetalTextureView view = this.readView(read);
+				render.setTexture(slot, view, MetalRenderPass.STAGE_FRAGMENT);
+				render.setSampler(
+					slot,
+					view.texture().descriptor().format().hasDepthAspect() ? this.unfilteredSampler : this.filteredSampler,
+					MetalRenderPass.STAGE_FRAGMENT
+				);
+				slot++;
+			}
+			render.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
+			render.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 		}
 	}
 
@@ -259,10 +365,14 @@ public final class MetalShaderEngine implements AutoCloseable {
 	private void loadPack(final String id) throws IOException {
 		ShaderPack loaded = this.loadById(id);
 		ShaderGraphCompiler.CompiledGraph compiled = ShaderGraphCompiler.compile(loaded);
-		validatePhaseOneGraph(loaded, compiled);
+		validateSupportedGraph(loaded, compiled);
 		this.closeResources();
 		this.pack = loaded;
 		this.graph = compiled;
+		this.geometryPass = compiled.passes().stream()
+			.filter(pass -> pass.declaration().kind() == ShaderPack.PassKind.GEOMETRY)
+			.findFirst()
+			.orElse(null);
 		this.settings.packs.computeIfAbsent(id, ignored -> new LinkedHashMap<>());
 		Map<String, Object> values = this.settings.packs.get(id);
 		for (ShaderPack.Option option : loaded.manifest().options()) {
@@ -278,11 +388,14 @@ public final class MetalShaderEngine implements AutoCloseable {
 			.filter(option -> option.apply() == ShaderPack.ApplyMode.UNIFORM)
 			.count();
 		this.uniforms = this.device.createBuffer(Math.max(16L, uniformCount * 4L), MetalBuffer.StorageMode.SHARED);
-		this.compileFinalPipeline();
 		this.allocateTargets();
+		this.compilePostPasses();
+		this.rebuildWorldGeometry();
 		this.writeUniforms();
-		LOGGER.info("Loaded MetalCraft shader pack '{}' with {} pass and {} option(s)",
-			loaded.manifest().name(), compiled.passes().size(), loaded.manifest().options().size());
+		LOGGER.info("Loaded MetalCraft shader pack '{}': {} pass(es), {} target(s), {} option(s), geometry pass {}",
+			loaded.manifest().name(), compiled.passes().size(), compiled.targets().size(),
+			loaded.manifest().options().size(),
+			this.geometryPass == null ? "absent" : this.geometryPass.declaration().id());
 	}
 
 	private ShaderPack loadById(final String id) throws IOException {
@@ -296,92 +409,307 @@ public final class MetalShaderEngine implements AutoCloseable {
 		return ShaderPackLoader.load(ref);
 	}
 
-	private void compileFinalPipeline() {
-		MetalRenderPipeline replacement = this.createFinalPipeline(this.pack, this.graph, this.packSettings());
-		MetalRenderPipeline previous = this.finalPipeline;
-		this.finalPipeline = replacement;
-		if (previous != null) {
-			previous.close();
+	/**
+	 * Compiles one pipeline per fullscreen pass, replacing whatever was compiled before.
+	 *
+	 * <p>Built as a whole and swapped in as a whole: a pack whose third pass fails to compile must
+	 * leave the previous pack running rather than half of two.
+	 */
+	private void compilePostPasses() {
+		List<PostPass> replacements = new ArrayList<>();
+		try {
+			for (ShaderGraphCompiler.CompiledPass pass : this.graph.passes()) {
+				if (pass.declaration().kind() == ShaderPack.PassKind.GEOMETRY) {
+					continue;
+				}
+				replacements.add(new PostPass(pass, this.createPassPipeline(pass)));
+			}
+		} catch (RuntimeException error) {
+			replacements.forEach(PostPass::close);
+			throw error;
 		}
+		this.postPasses.forEach(PostPass::close);
+		this.postPasses.clear();
+		this.postPasses.addAll(replacements);
 	}
 
-	private MetalRenderPipeline createFinalPipeline(
-		final ShaderPack selectedPack,
-		final ShaderGraphCompiler.CompiledGraph selectedGraph,
-		final Map<String, Object> values
-	) {
-		String source = combinedSource(selectedPack);
-		StringBuilder preamble = new StringBuilder();
-		for (ShaderPack.Option option : selectedPack.manifest().options()) {
-			if (option.apply() == ShaderPack.ApplyMode.RECOMPILE) {
-				preamble.append("#define MC_OPTION_")
-					.append(option.id().toUpperCase(java.util.Locale.ROOT).replace('.', '_').replace('-', '_'))
-					.append(' ').append(compileConstant(option, values.getOrDefault(option.id(), option.defaultValue()))).append('\n');
+	private MetalRenderPipeline createPassPipeline(final ShaderGraphCompiler.CompiledPass pass) {
+		List<MetalRenderPipeline.ColorTarget> colorTargets = new ArrayList<>();
+		MetalTexture.Format depthFormat = null;
+		for (ShaderGraphCompiler.WriteDecision write : pass.writes()) {
+			if (TARGET_DEPTH.equals(write.target())) {
+				depthFormat = MetalTexture.Format.DEPTH32_FLOAT;
+				continue;
 			}
+			colorTargets.add(MetalRenderPipeline.ColorTarget.opaque(this.writeFormat(write.target())));
 		}
-		String configuredSource = preamble + source;
-		ShaderPack.Pass pass = selectedGraph.passes().getFirst().declaration();
+		String passId = pass.declaration().id();
+		String source = this.passDefines(pass) + this.configuredSource();
 		return this.pipelineCache.createRenderPipeline(new MetalRenderPipeline.Descriptor(
-			configuredSource, pass.id() + "_vertex", configuredSource, pass.id() + "_fragment",
-			List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.BGRA8_UNORM)), null,
-			MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
-			MetalRenderPipeline.RasterState.DEFAULT
+			source, passId + "_vertex", source, passId + "_fragment",
+			colorTargets, depthFormat, MetalRenderPipeline.VertexDescriptor.EMPTY,
+			MetalRenderPipeline.DepthState.DISABLED, MetalRenderPipeline.RasterState.DEFAULT
 		));
 	}
 
+	/**
+	 * What a fullscreen pass cannot know about itself: which pass is being compiled, and which
+	 * texture and colour index each of its declared reads and writes occupies.
+	 *
+	 * <p>Every pass's programs live in the same source, because a pack is one translation unit per
+	 * compile - so {@code MC_PASS_<ID>} is also what keeps one pass's programs out of another's
+	 * compilation, where its indices would not be defined.
+	 */
+	private String passDefines(final ShaderGraphCompiler.CompiledPass pass) {
+		StringBuilder defines = new StringBuilder();
+		defines.append("#define MC_PASS_").append(symbol(pass.declaration().id())).append(" 1\n");
+		int read = 0;
+		for (String target : pass.declaration().reads()) {
+			defines.append("#define MC_TEX_").append(symbol(target)).append(' ').append(read++).append('\n');
+		}
+		int color = 0;
+		for (ShaderGraphCompiler.WriteDecision write : pass.writes()) {
+			if (!TARGET_DEPTH.equals(write.target())) {
+				defines.append("#define MC_TARGET_").append(symbol(write.target())).append(' ').append(color++).append('\n');
+			}
+		}
+		return defines.toString();
+	}
+
+	private static String symbol(final String id) {
+		return id.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_');
+	}
+
+	/**
+	 * Builds the world binding for the loaded pack, or clears it when the pack has no geometry pass.
+	 *
+	 * <p>Also called when a recompile-mode option changes, because the option defines are compiled
+	 * into the geometry programs the same way they are into the fullscreen ones.
+	 */
+	private void rebuildWorldGeometry() {
+		if (this.worldGeometry != null) {
+			this.worldGeometry.close();
+			this.worldGeometry = null;
+		}
+		if (this.geometryPass == null || this.gpuDevice == null) {
+			MetalWorldGeometry.setActive(null);
+			return;
+		}
+		List<String> writes = this.geometryPass.declaration().writes();
+		List<MetalWorldGeometry.Channel> channels = new ArrayList<>();
+		for (String target : writes) {
+			if (TARGET_SCENE.equals(target) || TARGET_DEPTH.equals(target)) {
+				continue;
+			}
+			Attachment attachment = this.targets.get(target);
+			if (attachment == null) {
+				throw new IllegalStateException("Geometry pass writes unallocated target '" + target + "'");
+			}
+			channels.add(new MetalWorldGeometry.Channel(target, attachment.view(), MetalWorldGeometry.clearColorFor(target)));
+		}
+		MetalWorldGeometry binding = new MetalWorldGeometry(
+			this.gpuDevice,
+			this,
+			this.pipelineCache,
+			this.pack.id(),
+			this.geometryPass.declaration().id(),
+			this.configuredSource(),
+			this.targetDefines(),
+			channels
+		);
+		this.worldGeometry = binding;
+		MetalWorldGeometry.setActive(binding);
+	}
+
+	/**
+	 * The colour index each of the geometry pass's targets occupies, as preprocessor defines.
+	 *
+	 * <p>A pack writes {@code [[color(MC_TARGET_GBUFFER_ALBEDO)]]} rather than a literal, so the
+	 * order of the pass's declared writes is the single place the layout is decided, and adding a
+	 * channel does not mean renumbering the programs.
+	 */
+	private String targetDefines() {
+		StringBuilder defines = new StringBuilder();
+		int index = 0;
+		for (String target : this.geometryPass.declaration().writes()) {
+			if (TARGET_DEPTH.equals(target)) {
+				continue;
+			}
+			defines.append("#define MC_TARGET_").append(symbol(target)).append(' ').append(index++).append('\n');
+		}
+		return defines.toString();
+	}
+
+	/**
+	 * Allocates every target the pack produces, at the size its declaration asks for.
+	 *
+	 * <p>The reserved targets are not among them: {@code scene} and {@code depth} are Minecraft's
+	 * attachments and {@code drawable} is the surface, so the pack names them but the host supplies
+	 * them. Everything else is allocated here and reallocated on resize and on a reload-mode option.
+	 */
 	private void allocateTargets() {
-		Map<String, MetalTexture> replacements = new LinkedHashMap<>();
-		MetalSampler replacementSampler = null;
+		Map<String, Attachment> replacements = new LinkedHashMap<>();
+		MetalSampler filtered = null;
+		MetalSampler unfiltered = null;
 		try {
 			for (Map.Entry<String, ShaderGraphCompiler.TargetInfo> entry : this.graph.targets().entrySet()) {
 				if (entry.getValue().producer().isEmpty()) {
 					continue;
 				}
-				ShaderPack.Target target = entry.getValue().declaration();
-				int targetWidth;
-				int targetHeight;
-				if (target.extent() instanceof ShaderPack.Scale scale) {
-					targetWidth = Math.max(1, (int)Math.round(this.width * scale.value()));
-					targetHeight = Math.max(1, (int)Math.round(this.height * scale.value()));
-				} else {
-					int size = ((ShaderPack.FixedSize)target.extent()).value();
-					targetWidth = size;
-					targetHeight = size;
-				}
-				MetalTexture.Format format = MetalTexture.Format.valueOf(target.format().name());
-				MetalTexture.Descriptor descriptor = entry.getValue().memoryless()
-					? MetalTexture.Descriptor.memoryless(format, targetWidth, targetHeight)
-					: target.layers() > 1
-						? MetalTexture.Descriptor.array(format, targetWidth, targetHeight, target.layers(), MetalTexture.USAGE_ALL)
-						: new MetalTexture.Descriptor(format, targetWidth, targetHeight, 1, MetalTexture.USAGE_ALL);
-				replacements.put(entry.getKey(), this.device.createTexture(descriptor));
+				replacements.put(entry.getKey(), this.allocate(entry.getKey(), entry.getValue()));
 			}
-			MetalSampler.Filter filter = this.pack.manifest().options().stream()
-				.filter(option -> option.apply() == ShaderPack.ApplyMode.RELOAD && option.id().equals("upscale_filter"))
-				.findFirst()
-				.map(option -> "nearest".equals(this.optionValue(option.id())) ? MetalSampler.Filter.NEAREST : MetalSampler.Filter.LINEAR)
-				.orElse(MetalSampler.Filter.LINEAR);
-			replacementSampler = this.device.createSampler(new MetalSampler.Descriptor(
+			MetalSampler.Filter filter = "nearest".equals(this.reloadOption("upscale_filter"))
+				? MetalSampler.Filter.NEAREST
+				: MetalSampler.Filter.LINEAR;
+			filtered = this.device.createSampler(new MetalSampler.Descriptor(
 				filter, filter, MetalSampler.AddressMode.CLAMP_TO_EDGE));
+			// Depth formats are not filterable on this hardware, so a sampled depth read needs its
+			// own sampler rather than whichever filter the pack's option happens to select.
+			unfiltered = this.device.createSampler(new MetalSampler.Descriptor(
+				MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE));
 		} catch (RuntimeException error) {
-			replacements.values().forEach(MetalTexture::close);
-			if (replacementSampler != null) {
-				replacementSampler.close();
+			replacements.values().forEach(Attachment::close);
+			if (filtered != null) {
+				filtered.close();
+			}
+			if (unfiltered != null) {
+				unfiltered.close();
 			}
 			throw error;
 		}
-		this.targets.values().forEach(MetalTexture::close);
+		this.targets.values().forEach(Attachment::close);
 		this.targets.clear();
 		this.targets.putAll(replacements);
-		if (this.sceneSampler != null) {
-			this.sceneSampler.close();
+		if (this.filteredSampler != null) {
+			this.filteredSampler.close();
 		}
-		this.sceneSampler = replacementSampler;
+		if (this.unfilteredSampler != null) {
+			this.unfilteredSampler.close();
+		}
+		this.filteredSampler = filtered;
+		this.unfilteredSampler = unfiltered;
+		// The world binding holds views of the textures just replaced, so it has to be rebuilt with
+		// them rather than left pointing at closed ones.
+		if (this.worldGeometry != null) {
+			this.rebuildWorldGeometry();
+		}
+	}
+
+	private Attachment allocate(final String id, final ShaderGraphCompiler.TargetInfo info) {
+		ShaderPack.Target target = info.declaration();
+		int targetWidth;
+		int targetHeight;
+		if (target.extent() instanceof ShaderPack.Scale scale) {
+			targetWidth = Math.max(1, (int)Math.round(this.width * scale.value()));
+			targetHeight = Math.max(1, (int)Math.round(this.height * scale.value()));
+		} else {
+			int size = ((ShaderPack.FixedSize)target.extent()).value();
+			targetWidth = size;
+			targetHeight = size;
+		}
+		MetalTexture.Format format = MetalTexture.Format.valueOf(target.format().name());
+		MetalTexture.Descriptor descriptor = info.memoryless()
+			? MetalTexture.Descriptor.memoryless(format, targetWidth, targetHeight)
+			: target.layers() > 1
+				? MetalTexture.Descriptor.array(format, targetWidth, targetHeight, target.layers(), MetalTexture.USAGE_ALL)
+				: new MetalTexture.Descriptor(format, targetWidth, targetHeight, 1, MetalTexture.USAGE_ALL);
+		MetalTexture metal = this.device.createTexture(descriptor);
+		try {
+			MetalGpuTexture texture = new MetalGpuTexture(
+				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT,
+				"metalcraft:" + id,
+				Blaze3DMetalMappings.gpuFormat(format),
+				targetWidth, targetHeight, target.layers(), 1, metal
+			);
+			return new Attachment(texture, new MetalGpuTextureView(texture, 0, 1, metal.createView()));
+		} catch (RuntimeException error) {
+			metal.close();
+			throw error;
+		}
+	}
+
+	private void bindSceneTexture(final MetalTexture scene) {
+		if (this.sceneTexture == scene && this.sceneView != null && !this.sceneView.isClosed()) {
+			return;
+		}
+		if (this.sceneView != null) {
+			this.sceneView.close();
+		}
+		this.sceneTexture = scene;
+		this.sceneView = scene.createView();
+	}
+
+	private MetalRenderPass.ColorTarget colorTarget(final String id, final MetalRenderPass.ColorTarget output) {
+		return switch (id) {
+			case TARGET_DRAWABLE -> output;
+			case TARGET_SCENE -> Objects.requireNonNull(this.sceneTexture, "scene texture");
+			default -> this.requireAttachment(id).metal();
+		};
+	}
+
+	private MetalTextureView readView(final String id) {
+		return switch (id) {
+			case TARGET_SCENE -> Objects.requireNonNull(this.sceneView, "scene view");
+			case TARGET_DEPTH -> this.requireWorldDepth();
+			case TARGET_DRAWABLE -> throw new IllegalStateException("The drawable cannot be sampled");
+			default -> this.requireAttachment(id).view().metal();
+		};
+	}
+
+	private @Nullable MetalTextureView worldDepth() {
+		return this.worldGeometry == null ? null : this.worldGeometry.worldDepth();
+	}
+
+	private MetalTextureView requireWorldDepth() {
+		MetalTextureView depth = this.worldDepth();
+		if (depth == null) {
+			throw new IllegalStateException("Shader pack '" + this.pack.id() + "' reads depth but no world was drawn");
+		}
+		return depth;
+	}
+
+	private Attachment requireAttachment(final String id) {
+		Attachment attachment = this.targets.get(id);
+		if (attachment == null) {
+			throw new IllegalStateException("Shader target '" + id + "' is not allocated");
+		}
+		return attachment;
+	}
+
+	/** The colour format a pass's pipeline must declare for the target it writes. */
+	private MetalTexture.Format writeFormat(final String id) {
+		if (TARGET_DRAWABLE.equals(id)) {
+			return MetalTexture.Format.BGRA8_UNORM;
+		}
+		if (TARGET_SCENE.equals(id)) {
+			return this.sceneTexture == null ? MetalTexture.Format.RGBA8_UNORM : this.sceneTexture.descriptor().format();
+		}
+		return MetalTexture.Format.valueOf(this.graph.targets().get(id).declaration().format().name());
+	}
+
+	/** The pack MSL with the recompile-mode options compiled in, shared by every program. */
+	private String configuredSource() {
+		StringBuilder preamble = new StringBuilder();
+		Map<String, Object> values = this.packSettings();
+		for (ShaderPack.Option option : this.pack.manifest().options()) {
+			if (option.apply() == ShaderPack.ApplyMode.RECOMPILE) {
+				preamble.append("#define MC_OPTION_").append(symbol(option.id()))
+					.append(' ').append(compileConstant(option, values.getOrDefault(option.id(), option.defaultValue())))
+					.append('\n');
+			}
+		}
+		return preamble + combinedSource(this.pack);
 	}
 
 	private void writeUniforms() {
 		try (MetalBuffer.Mapping mapping = this.uniforms.map()) {
 			var bytes = mapping.bytes().order(ByteOrder.nativeOrder());
+			// Zeroed first, because the buffer is rounded up to a minimum size and a pack with fewer
+			// uniform options than that would otherwise read whatever the allocation came with.
+			while (bytes.hasRemaining()) {
+				bytes.put((byte)0);
+			}
+			bytes.rewind();
 			for (ShaderPack.Option option : this.pack.manifest().options()) {
 				if (option.apply() != ShaderPack.ApplyMode.UNIFORM) {
 					continue;
@@ -402,6 +730,14 @@ public final class MetalShaderEngine implements AutoCloseable {
 			.filter(option -> option.id().equals(id))
 			.findFirst()
 			.orElseThrow(() -> new IllegalArgumentException("Unknown shader option '" + id + "'"));
+	}
+
+	private @Nullable Object reloadOption(final String id) {
+		return this.pack.manifest().options().stream()
+			.filter(option -> option.apply() == ShaderPack.ApplyMode.RELOAD && option.id().equals(id))
+			.findFirst()
+			.map(option -> this.packSettings().getOrDefault(option.id(), option.defaultValue()))
+			.orElse(null);
 	}
 
 	private Map<String, Object> packSettings() {
@@ -440,19 +776,32 @@ public final class MetalShaderEngine implements AutoCloseable {
 	}
 
 	private void closeResources() {
-		this.targets.values().forEach(MetalTexture::close);
+		if (this.worldGeometry != null) {
+			this.worldGeometry.close();
+			this.worldGeometry = null;
+		}
+		MetalWorldGeometry.setActive(null);
+		this.postPasses.forEach(PostPass::close);
+		this.postPasses.clear();
+		this.targets.values().forEach(Attachment::close);
 		this.targets.clear();
+		this.geometryPass = null;
+		if (this.sceneView != null) {
+			this.sceneView.close();
+			this.sceneView = null;
+		}
+		this.sceneTexture = null;
 		if (this.uniforms != null) {
 			this.uniforms.close();
 			this.uniforms = null;
 		}
-		if (this.finalPipeline != null) {
-			this.finalPipeline.close();
-			this.finalPipeline = null;
+		if (this.filteredSampler != null) {
+			this.filteredSampler.close();
+			this.filteredSampler = null;
 		}
-		if (this.sceneSampler != null) {
-			this.sceneSampler.close();
-			this.sceneSampler = null;
+		if (this.unfilteredSampler != null) {
+			this.unfilteredSampler.close();
+			this.unfilteredSampler = null;
 		}
 	}
 
@@ -490,20 +839,66 @@ public final class MetalShaderEngine implements AutoCloseable {
 			: MetalRenderPass.StoreAction.DONT_CARE;
 	}
 
-	private static void validatePhaseOneGraph(
+	/**
+	 * Rejects the parts of the declared format the runtime does not execute yet.
+	 *
+	 * <p>The graph compiler validates more than the runtime can run: it already schedules merged
+	 * pass groups and compute passes, because Phase 0 proved both mechanisms against the hardware.
+	 * Loading a pack that uses them would produce a graph nothing executes, so the refusal is here
+	 * and names the pass, rather than leaving a pack to render half of what it declared.
+	 */
+	private static void validateSupportedGraph(
 		final ShaderPack pack,
 		final ShaderGraphCompiler.CompiledGraph graph
 	) {
-		if (graph.passes().size() != 1) {
-			throw new IllegalArgumentException("Phase 1 pack '" + pack.id() + "' must contain exactly one pass");
-		}
-		ShaderPack.Pass pass = graph.passes().getFirst().declaration();
-		if (pass.kind() != ShaderPack.PassKind.FULLSCREEN
-			|| !pass.reads().equals(List.of("scene"))
-			|| !pass.writes().equals(List.of("drawable"))) {
+		long geometryPasses = graph.passes().stream()
+			.filter(pass -> pass.declaration().kind() == ShaderPack.PassKind.GEOMETRY)
+			.count();
+		if (geometryPasses > 1) {
 			throw new IllegalArgumentException(
-				"Phase 1 pack '" + pack.id() + "' must be one fullscreen scene-to-drawable pass"
+				"Shader pack '" + pack.id() + "' declares " + geometryPasses + " geometry passes; the engine runs at most one"
 			);
+		}
+		for (ShaderGraphCompiler.PassGroup group : graph.groups()) {
+			if (group.passes().size() > 1) {
+				throw new IllegalArgumentException(
+					"Shader pack '" + pack.id() + "' merges passes " + group.passes()
+						+ "; merged pass groups are not executed until the deferred resolve exists"
+				);
+			}
+		}
+		for (ShaderGraphCompiler.CompiledPass pass : graph.passes()) {
+			if (pass.declaration().kind() == ShaderPack.PassKind.COMPUTE) {
+				throw new IllegalArgumentException(
+					"Shader pack '" + pack.id() + "' declares compute pass '" + pass.declaration().id()
+						+ "'; compute passes are not executed until the effects phase exists"
+				);
+			}
+			if (pass.declaration().kind() != ShaderPack.PassKind.GEOMETRY) {
+				if (pass.declaration().writes().contains(TARGET_SCENE)) {
+					throw new IllegalArgumentException(
+						"Pass '" + pass.declaration().id() + "' writes 'scene', which only a geometry pass may do:"
+							+ " Minecraft's colour attachment has no declared format for a pipeline to be built against"
+					);
+				}
+				continue;
+			}
+			List<String> writes = pass.declaration().writes();
+			if (writes.isEmpty() || !TARGET_SCENE.equals(writes.getFirst())) {
+				throw new IllegalArgumentException(
+					"Geometry pass '" + pass.declaration().id() + "' must write 'scene' first: Minecraft's own colour"
+						+ " attachment stays at colour index zero so unsubstituted geometry still lands in it"
+				);
+			}
+			if (!writes.contains(TARGET_DEPTH)) {
+				throw new IllegalArgumentException(
+					"Geometry pass '" + pass.declaration().id() + "' must write 'depth': the world draw shares"
+						+ " Minecraft's depth attachment so one depth order covers substituted and unsubstituted geometry"
+				);
+			}
+		}
+		if (graph.passes().getLast().declaration().writes().stream().noneMatch(TARGET_DRAWABLE::equals)) {
+			throw new IllegalArgumentException("Shader pack '" + pack.id() + "' never writes the drawable");
 		}
 	}
 
