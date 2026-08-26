@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "name": "MetalCraft Standard",
+  "targets": {
+    "scene": {
+      "format": "rgba8_unorm",
+      "scale": 1.0,
+      "lifetime": "frame"
+    }
+  },
+  "passes": [
+    {
+      "id": "final",
+      "kind": "fullscreen",
+      "reads": ["scene"],
+      "writes": ["drawable"]
+    }
+  ],
+  "options": [
+    {
+      "id": "exposure",
+      "category": "tonemap",
+      "type": "float",
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.25,
+      "default": 1.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "invert",
+      "category": "tonemap",
+      "type": "bool",
+      "default": false,
+      "apply": "recompile"
+    },
+    {
+      "id": "upscale_filter",
+	  "category": "quality",
+	  "type": "enum",
+	  "values": ["nearest", "linear"],
+	  "default": "linear",
+	  "apply": "reload"
+    }
+  ]
+}

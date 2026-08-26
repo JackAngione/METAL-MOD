@@ -233,7 +233,9 @@ public final class MetalNative {
 		int[] attributeFormats,
 		int[] layoutBufferIndices,
 		int[] layoutStrides,
-		int[] layoutStepRates
+		int[] layoutStepRates,
+		String archivePath,
+		boolean archiveWarm
 	);
 
 	/**
@@ -256,7 +258,13 @@ public final class MetalNative {
 		int gpuTimingKind
 	);
 
-	static native long nCreateComputePipeline(long deviceHandle, String source, String functionName);
+	static native long nCreateComputePipeline(
+		long deviceHandle,
+		String source,
+		String functionName,
+		String archivePath,
+		boolean archiveWarm
+	);
 
 	static native int nComputePipelineMaxThreadsPerThreadgroup(long pipelineHandle);
 

@@ -96,9 +96,10 @@ wrong.
 claim: a target declared transient that is read by an unmerged pass is a load error naming both
 passes, not a silent promotion to DRAM.
 
-Compilation is ahead-of-time and cached. Import hashes the pack's MSL plus its state descriptors,
-compiles the pipeline states, and writes them to an `MTLBinaryArchive` under
-`run/shaderpacks/.cache/<hash>/`. A warm cache means switching packs compiles nothing.
+Pipeline-state compilation is ahead-of-time and cached. Import hashes the pack's MSL plus its state
+descriptors, compiles the pipeline states, and writes them to an `MTLBinaryArchive` under
+`run/shaderpacks/.cache/<hash>/`. A warm cache means switching packs compiles no pipeline states;
+Metal may still recreate an `MTLLibrary` from source before resolving its functions from the archive.
 
 ## The built-in pack
 
@@ -196,25 +197,28 @@ because a GPU test that passes vacuously is worse than none.
 - [x] **Compute pipeline state and dispatch.** Encoders use serial dispatch, so one dispatch reads
   what the one before it wrote. Across encoders Metal's hazard tracking orders a compute write
   against a later render read, which is what the test measures rather than assumes.
-- [ ] **Per-attachment load and store actions driven by the caller.** Available at the
-  `MetalRenderPass` layer, which is what the engine will use. The Blaze3D adapter still stores
-  unconditionally because `RenderPassDescriptor` has no discard concept to derive liveness from;
-  that stays the separate ranked item in [NEXT_STEPS.md](NEXT_STEPS.md).
-- [ ] **A persistent `MTLBinaryArchive` pipeline cache keyed on a content hash.** Not started. A
-  startup-time optimisation rather than a blocker for Phase 1, so it is the item to defer if
-  anything is.
+- [x] **Per-attachment load and store actions driven by the caller.** `MetalRenderPass` carries the
+  actions and the graph compiler now derives them from declared reads, writes, target lifetime, and
+  merged tile consumers. The Blaze3D adapter still stores unconditionally because its
+  `RenderPassDescriptor` has no discard concept; that stays the separate ranked item in
+  [NEXT_STEPS.md](NEXT_STEPS.md).
+- [x] **A persistent `MTLBinaryArchive` pipeline cache keyed on a content hash.** Render and compute
+  descriptors are hashed with all shader and fixed-function state, cold entries explicitly add
+  their functions and serialize under the hash, and warm entries fail on an archive miss rather
+  than silently recompiling the pipeline state. An invalid persisted archive is logged, discarded,
+  and rebuilt as a cold entry.
 
 Exit: the smoke test draws into four attachments in one pass with two of them memoryless, reads the
 result through tile memory in a merged second pass, dispatches a compute pass over the output, renders
-four array layers in one encoder, and on a second launch compiles nothing.
+four array layers in one encoder, and on a fresh-device second launch compiles no pipeline states.
 
 ### Phase 1 — graph runtime, pack format, and the menu skeleton
 
-- Pack discovery, `pack.json` parsing and validation, MSL compilation, binary-archive caching.
-- The graph compiler: lifetime analysis, memoryless promotion, pass merging, load/store derivation,
+- [x] Pack discovery, `pack.json` parsing and validation, MSL compilation, binary-archive caching.
+- [x] The graph compiler: lifetime analysis, memoryless promotion, pass merging, load/store derivation,
   and the validation errors that name the offending pass when a declaration is inconsistent.
-- Resource allocation and reallocation on resize and pack switch.
-- The generated menu, wired to the three apply modes, with whatever handful of options the trivial
+- [x] Resource allocation and reallocation on resize and pack switch.
+- [x] The generated menu, wired to the three apply modes, with whatever handful of options the trivial
   pack declares. It costs little once the manifest exists, and every later phase then gets its
   options in the UI for free rather than as a deferred task.
 

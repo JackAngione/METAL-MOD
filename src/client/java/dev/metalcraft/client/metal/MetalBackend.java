@@ -47,7 +47,7 @@ public final class MetalBackend implements GpuBackend {
 		}
 		MetalDevice metal = MetalNative.openDefaultDevice().orElseThrow(() -> failure("Metal did not provide a default device", null));
 		try {
-			return new GpuDevice(new MetalGpuDevice(metal, defaultShaderSource), criticalShaderLoader);
+			return new GpuDevice(new MetalGpuDevice(metal, defaultShaderSource, true), criticalShaderLoader);
 		} catch (RuntimeException error) {
 			metal.close();
 			throw failure("MetalCraft could not create its Blaze3D device adapter", error);

@@ -868,6 +868,51 @@ static void mc_throw_state(JNIEnv *env, NSString *message) {
 	}
 }
 
+/** Creates an empty archive for a cold key, or opens the archive for a warm key. */
+static id<MTLBinaryArchive> mc_create_binary_archive(
+	JNIEnv *env,
+	id<MTLDevice> device,
+	jstring pathValue,
+	jboolean warm,
+	NSURL **serializationURL
+) {
+	*serializationURL = nil;
+	if (pathValue == NULL) {
+		return nil;
+	}
+	const char *pathCharacters = (*env)->GetStringUTFChars(env, pathValue, NULL);
+	if (pathCharacters == NULL) {
+		return nil;
+	}
+	NSString *path = [NSString stringWithUTF8String:pathCharacters];
+	(*env)->ReleaseStringUTFChars(env, pathValue, pathCharacters);
+	NSURL *url = [NSURL fileURLWithPath:path isDirectory:NO];
+	MTLBinaryArchiveDescriptor *descriptor = [[MTLBinaryArchiveDescriptor alloc] init];
+	descriptor.url = warm ? url : nil;
+	NSError *error = nil;
+	id<MTLBinaryArchive> archive = [device newBinaryArchiveWithDescriptor:descriptor error:&error];
+	if (archive == nil) {
+		mc_throw_state(env, [NSString stringWithFormat:@"Metal could not %@ pipeline archive %@: %@",
+			warm ? @"open" : @"create", path, error.localizedDescription]);
+		return nil;
+	}
+	*serializationURL = url;
+	return archive;
+}
+
+static BOOL mc_serialize_binary_archive(JNIEnv *env, id<MTLBinaryArchive> archive, NSURL *url) {
+	if (archive == nil || url == nil) {
+		return YES;
+	}
+	NSError *error = nil;
+	if (![archive serializeToURL:url error:&error]) {
+		mc_throw_state(env, [NSString stringWithFormat:@"Metal could not persist pipeline archive %@: %@",
+			url.path, error.localizedDescription]);
+		return NO;
+	}
+	return YES;
+}
+
 static NSString *mc_type_name(MCObjectType type) {
 	switch (type) {
 		case MCObjectTypeDevice:
@@ -2631,7 +2676,9 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 	jintArray attributeFormatsValue,
 	jintArray layoutBufferIndicesValue,
 	jintArray layoutStridesValue,
-	jintArray layoutStepRatesValue
+	jintArray layoutStepRatesValue,
+	jstring archivePathValue,
+	jboolean archiveWarm
 ) {
 	@autoreleasepool {
 		if (vertexSourceValue == NULL || vertexFunctionValue == NULL || fragmentSourceValue == NULL || fragmentFunctionValue == NULL) {
@@ -2716,6 +2763,11 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 		if (device == nil) {
 			return 0;
 		}
+		NSURL *archiveURL = nil;
+		id<MTLBinaryArchive> archive = mc_create_binary_archive(env, device, archivePathValue, archiveWarm, &archiveURL);
+		if (archivePathValue != NULL && archive == nil) {
+			return 0;
+		}
 
 		const char *vertexSourceCharacters = (*env)->GetStringUTFChars(env, vertexSourceValue, NULL);
 		const char *vertexFunctionCharacters = (*env)->GetStringUTFChars(env, vertexFunctionValue, NULL);
@@ -2775,6 +2827,9 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 		descriptor.label = @"MetalCraft render pipeline";
 		descriptor.vertexFunction = vertexFunction;
 		descriptor.fragmentFunction = fragmentFunction;
+		if (archive != nil) {
+			descriptor.binaryArchives = @[archive];
+		}
 		for (jsize index = 0; index < colorCount; index++) {
 			MTLRenderPipelineColorAttachmentDescriptor *color = descriptor.colorAttachments[index];
 			color.pixelFormat = colorPixelFormats[index];
@@ -2837,10 +2892,25 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 			}
 			descriptor.vertexDescriptor = vertexDescriptor;
 		}
+		if (archive != nil && !archiveWarm) {
+			NSError *archiveError = nil;
+			if (![archive addRenderPipelineFunctionsWithDescriptor:descriptor error:&archiveError]) {
+				mc_throw_state(env, [NSString stringWithFormat:@"Metal could not add render pipeline functions to its archive: %@",
+					archiveError.localizedDescription]);
+				return 0;
+			}
+		}
 		NSError *pipelineError = nil;
-		id<MTLRenderPipelineState> pipelineState = [device newRenderPipelineStateWithDescriptor:descriptor error:&pipelineError];
+		id<MTLRenderPipelineState> pipelineState = [device
+			newRenderPipelineStateWithDescriptor:descriptor
+			options:archiveWarm ? MTLPipelineOptionFailOnBinaryArchiveMiss : MTLPipelineOptionNone
+			reflection:nil
+			error:&pipelineError];
 		if (pipelineState == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal render-pipeline creation failed: %@", pipelineError.localizedDescription]);
+			return 0;
+		}
+		if (!archiveWarm && !mc_serialize_binary_archive(env, archive, archiveURL)) {
 			return 0;
 		}
 
@@ -4069,11 +4139,18 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateComputePipeline(
 	jclass type,
 	jlong deviceHandle,
 	jstring sourceValue,
-	jstring functionValue
+	jstring functionValue,
+	jstring archivePathValue,
+	jboolean archiveWarm
 ) {
 	@autoreleasepool {
 		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, deviceHandle, MCObjectTypeDevice);
 		if (device == nil) {
+			return 0;
+		}
+		NSURL *archiveURL = nil;
+		id<MTLBinaryArchive> archive = mc_create_binary_archive(env, device, archivePathValue, archiveWarm, &archiveURL);
+		if (archivePathValue != NULL && archive == nil) {
 			return 0;
 		}
 		const char *sourceCharacters = (*env)->GetStringUTFChars(env, sourceValue, NULL);
@@ -4107,10 +4184,31 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateComputePipeline(
 			]);
 			return 0;
 		}
+		MTLComputePipelineDescriptor *descriptor = [[MTLComputePipelineDescriptor alloc] init];
+		descriptor.label = @"MetalCraft compute pipeline";
+		descriptor.computeFunction = function;
+		if (archive != nil) {
+			descriptor.binaryArchives = @[archive];
+		}
+		if (archive != nil && !archiveWarm) {
+			NSError *archiveError = nil;
+			if (![archive addComputePipelineFunctionsWithDescriptor:descriptor error:&archiveError]) {
+				mc_throw_state(env, [NSString stringWithFormat:@"Metal could not add compute pipeline functions to its archive: %@",
+					archiveError.localizedDescription]);
+				return 0;
+			}
+		}
 		NSError *pipelineError = nil;
-		id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithFunction:function error:&pipelineError];
+		id<MTLComputePipelineState> pipeline = [device
+			newComputePipelineStateWithDescriptor:descriptor
+			options:archiveWarm ? MTLPipelineOptionFailOnBinaryArchiveMiss : MTLPipelineOptionNone
+			reflection:nil
+			error:&pipelineError];
 		if (pipeline == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal compute-pipeline creation failed: %@", pipelineError.localizedDescription]);
+			return 0;
+		}
+		if (!archiveWarm && !mc_serialize_binary_archive(env, archive, archiveURL)) {
 			return 0;
 		}
 		return mc_register_object(pipeline, MCObjectTypeComputePipeline, deviceHandle);

@@ -161,6 +161,14 @@ public final class MetalDevice implements AutoCloseable {
 	}
 
 	public synchronized MetalRenderPipeline createRenderPipeline(final MetalRenderPipeline.Descriptor descriptor) {
+		return this.createRenderPipeline(descriptor, null, false);
+	}
+
+	synchronized MetalRenderPipeline createRenderPipeline(
+		final MetalRenderPipeline.Descriptor descriptor,
+		final java.nio.file.Path archivePath,
+		final boolean archiveWarm
+	) {
 		List<MetalRenderPipeline.ColorTarget> colorTargets = descriptor.colorTargets();
 		int[] colorFormats = new int[colorTargets.size()];
 		int[] colorWriteMasks = new int[colorTargets.size()];
@@ -243,7 +251,9 @@ public final class MetalDevice implements AutoCloseable {
 			attributeFormats,
 			layoutBufferIndices,
 			layoutStrides,
-			layoutStepRates
+			layoutStepRates,
+			archivePath == null ? null : archivePath.toString(),
+			archiveWarm
 		);
 		MetalStallProbe.end(MetalStallProbe.Source.PIPELINE_CREATE, startedNs);
 		if (pipelineHandle == 0L) {
@@ -255,8 +265,17 @@ public final class MetalDevice implements AutoCloseable {
 	}
 
 	public synchronized MetalComputePipeline createComputePipeline(final MetalComputePipeline.Descriptor descriptor) {
+		return this.createComputePipeline(descriptor, null, false);
+	}
+
+	synchronized MetalComputePipeline createComputePipeline(
+		final MetalComputePipeline.Descriptor descriptor,
+		final java.nio.file.Path archivePath,
+		final boolean archiveWarm
+	) {
 		long pipelineHandle = MetalNative.nCreateComputePipeline(
-			this.requireOpenHandle(), descriptor.source(), descriptor.functionName()
+			this.requireOpenHandle(), descriptor.source(), descriptor.functionName(),
+			archivePath == null ? null : archivePath.toString(), archiveWarm
 		);
 		if (pipelineHandle == 0L) {
 			throw new IllegalStateException("Metal did not create the requested compute pipeline");

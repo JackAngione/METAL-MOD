@@ -7,5 +7,9 @@
   "metalcraft.options.half_resolution.tooltip": "Halves each framebuffer dimension, reducing the rendered pixel count to one quarter.",
   "metalcraft.options.render_resolution": "Current render resolution: %s x %s",
   "metalcraft.options.unlocked_frame_rate": "Unlocked frame rate",
-  "metalcraft.options.unlocked_frame_rate.tooltip": "Presents without display synchronization and ignores Minecraft's Max Framerate and one-minute AFK limits, so frames are not paced to the display's refresh rate. Iconified, ten-minute idle, and menu throttles still apply."
+  "metalcraft.options.unlocked_frame_rate.tooltip": "Presents without display synchronization and ignores Minecraft's Max Framerate and one-minute AFK limits, so frames are not paced to the display's refresh rate. Iconified, ten-minute idle, and menu throttles still apply.",
+  "metalcraft.options.shader_pack_header": "Integrated Shaders",
+  "metalcraft.options.shader_pack": "Shader pack: %s",
+  "metalcraft.options.shader_pack_failed": "Could not load shader pack: %s",
+  "metalcraft.options.shader_option.tooltip": "Category: %s. Apply mode: %s."
 }

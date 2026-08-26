@@ -14,12 +14,22 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import net.minecraft.resources.Identifier;
+import dev.metalcraft.client.shader.ShaderPack;
+import dev.metalcraft.client.shader.ShaderGraphCompiler;
+import dev.metalcraft.client.shader.ShaderPackLoader;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 public final class MetalShaderTranslationSmoke {
 	private static final int SPIRV_MAGIC = 0x07230203;
@@ -178,6 +188,58 @@ public final class MetalShaderTranslationSmoke {
 
 		fragment float4 readback_fragment(texture2d<float, access::read> source [[texture(0)]]) {
 		    return source.read(uint2(0, 0));
+		}
+		""";
+	private static final String PHASE_ZERO_MSL = """
+		#include <metal_stdlib>
+		using namespace metal;
+
+		struct PhaseZeroVaryings { float4 position [[position]]; };
+		vertex PhaseZeroVaryings phase_zero_vertex(uint vertexId [[vertex_id]]) {
+		    const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
+		    return {float4(corners[vertexId % 3], 0.0, 1.0)};
+		}
+
+		struct PhaseZeroTargets {
+		    float4 albedo [[color(0)]];
+		    float4 normal [[color(1)]];
+		    float4 scene [[color(2)]];
+		    float4 marker [[color(3)]];
+		};
+		fragment PhaseZeroTargets phase_zero_fill() {
+		    return {
+		        float4(0.5, 0.25, 0.0, 1.0),
+		        float4(0.0, 0.5, 0.25, 1.0),
+		        float4(0.0, 0.0, 0.0, 1.0),
+		        float4(1.0, 0.0, 1.0, 1.0)
+		    };
+		}
+		fragment PhaseZeroTargets phase_zero_resolve(PhaseZeroTargets fetched) {
+		    return {fetched.albedo, fetched.normal,
+		        float4(fetched.albedo.rgb + fetched.normal.rgb, 1.0), fetched.marker};
+		}
+		kernel void phase_zero_compute(
+		    texture2d<float, access::read> source [[texture(0)]],
+		    texture2d<float, access::write> output [[texture(1)]],
+		    uint2 pixel [[thread_position_in_grid]]) {
+		    if (pixel.x < output.get_width() && pixel.y < output.get_height()) {
+		        output.write(source.read(pixel), pixel);
+		    }
+		}
+		""";
+	private static final String PHASE_ONE_MSL = """
+		#include <metal_stdlib>
+		using namespace metal;
+		struct FinalVaryings { float4 position [[position]]; };
+		vertex FinalVaryings final_vertex(uint vertexId [[vertex_id]]) {
+		    const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
+		    return {float4(corners[vertexId % 3], 0.0, 1.0)};
+		}
+		fragment float4 final_fragment(
+		    FinalVaryings in [[stage_in]],
+		    texture2d<float, access::read> scene [[texture(0)]],
+		    constant float &exposure [[buffer(0)]]) {
+		    return scene.read(uint2(in.position.xy)) * exposure;
 		}
 		""";
 	private static final String MAPPED_VERTEX_GLSL = """
@@ -348,6 +410,10 @@ public final class MetalShaderTranslationSmoke {
 		if (!MetalNative.load()) {
 			throw new AssertionError("MetalCraft native library did not load", MetalNative.loadFailure().orElse(null));
 		}
+		assertPersistentPipelineCache();
+		assertPhaseZeroExit();
+		assertDeclaredShaderGraph();
+		assertPhaseOneRuntime();
 		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow();
 			 MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
 				 VERTEX_GLSL,
@@ -399,6 +465,354 @@ public final class MetalShaderTranslationSmoke {
 			if (!expected.getMessage().contains("smoke/broken.vert")) {
 				throw new AssertionError("Shader diagnostic omitted its source name", expected);
 			}
+		}
+	}
+
+	private static void assertPersistentPipelineCache() {
+		Path root = Path.of("build", "shader-smoke-cache");
+		deleteTree(root);
+		MetalRenderPipeline.Descriptor renderDescriptor = new MetalRenderPipeline.Descriptor(
+			COMPUTE_MSL, "readback_vertex", COMPUTE_MSL, "readback_fragment",
+			List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM)), null,
+			MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+			MetalRenderPipeline.RasterState.DEFAULT
+		);
+		MetalComputePipeline.Descriptor computeDescriptor = new MetalComputePipeline.Descriptor(COMPUTE_MSL, "fill_tint");
+
+		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow()) {
+			MetalPipelineCache cold = new MetalPipelineCache(device, root);
+			try (MetalRenderPipeline ignoredRender = cold.createRenderPipeline(renderDescriptor);
+				 MetalComputePipeline ignoredCompute = cold.createComputePipeline(computeDescriptor)) {
+				if (cold.compilationCount() != 2) {
+					throw new AssertionError("A cold Metal pipeline cache compiled " + cold.compilationCount() + " pipelines, expected 2");
+				}
+			}
+		}
+
+		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow()) {
+			MetalPipelineCache warm = new MetalPipelineCache(device, root);
+			try (MetalRenderPipeline ignoredRender = warm.createRenderPipeline(renderDescriptor);
+				 MetalComputePipeline ignoredCompute = warm.createComputePipeline(computeDescriptor)) {
+				if (warm.compilationCount() != 0) {
+					throw new AssertionError("A warm Metal pipeline cache recompiled " + warm.compilationCount() + " pipelines");
+				}
+			}
+		}
+
+		try (var archives = Files.walk(root)) {
+			Path archive = archives.filter(Files::isRegularFile).findFirst().orElseThrow();
+			Files.write(archive, new byte[] {0, 1, 2, 3});
+		} catch (IOException error) {
+			throw new AssertionError("Could not corrupt a Metal archive for recovery coverage", error);
+		}
+		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow()) {
+			MetalPipelineCache recovered = new MetalPipelineCache(device, root);
+			try (MetalRenderPipeline ignoredRender = recovered.createRenderPipeline(renderDescriptor);
+				 MetalComputePipeline ignoredCompute = recovered.createComputePipeline(computeDescriptor)) {
+				if (recovered.compilationCount() != 1) {
+					throw new AssertionError("A corrupt Metal archive did not rebuild exactly one pipeline");
+				}
+			}
+		}
+	}
+
+	private static void assertPhaseZeroExit() {
+		Path root = Path.of("build", "phase-zero-pipeline-cache");
+		deleteTree(root);
+		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow()) {
+			MetalPipelineCache cold = new MetalPipelineCache(device, root);
+			runPhaseZeroExit(device, cold, true);
+			if (cold.compilationCount() != 4) {
+				throw new AssertionError("Phase 0 cold launch compiled " + cold.compilationCount() + " pipelines, expected 4");
+			}
+		}
+		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow()) {
+			MetalPipelineCache warm = new MetalPipelineCache(device, root);
+			runPhaseZeroExit(device, warm, false);
+			if (warm.compilationCount() != 0) {
+				throw new AssertionError("Phase 0 warm launch compiled " + warm.compilationCount() + " pipelines");
+			}
+		}
+	}
+
+	private static void assertPhaseOneRuntime() {
+		Path root = Path.of("build", "phase-one-shaderpacks");
+		Path settings = Path.of("build", "phase-one-shader-settings.json");
+		deleteTree(root);
+		try {
+			Files.deleteIfExists(settings);
+			Path external = root.resolve("external-copy");
+			Files.createDirectories(external);
+			Files.writeString(external.resolve("pack.json"), phaseOneManifest("External Copy"), StandardCharsets.UTF_8);
+			Files.writeString(external.resolve("final.metal"), PHASE_ONE_MSL, StandardCharsets.UTF_8);
+		} catch (IOException error) {
+			throw new AssertionError("Could not create the Phase 1 shader-pack fixture", error);
+		}
+
+		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow()) {
+			try (MetalShaderEngine engine = new MetalShaderEngine(device, root, settings)) {
+				if (engine.availablePacks().size() != 2 || !engine.selectedPackId().equals("metalcraft-standard")) {
+					throw new AssertionError("Phase 1 did not discover its built-in and external packs");
+				}
+				if (engine.options().stream().map(ShaderPack.Option::apply).distinct().count() != 3L) {
+					throw new AssertionError("The built-in shader pack does not expose all three apply modes");
+				}
+				engine.resize(32, 24);
+				assertBuiltInPackRenders(device, engine);
+				engine.setOption("exposure", 1.25);
+				engine.setOption("invert", true);
+				engine.setOption("upscale_filter", "nearest");
+				engine.selectPack("external-copy");
+				engine.setOption("quality", 2);
+				engine.selectPack("external-copy");
+				engine.resize(48, 32);
+				engine.reload();
+			}
+
+			try (MetalShaderEngine restored = new MetalShaderEngine(device, root, settings)) {
+				if (!restored.selectedPackId().equals("external-copy")) {
+					throw new AssertionError("The selected shader pack was not persisted");
+				}
+				if (!Integer.valueOf(2).equals(restored.optionValue("quality"))) {
+					throw new AssertionError("A numeric enum shader setting did not retain its manifest type");
+				}
+				restored.selectPack("metalcraft-standard");
+				if (Math.abs(((Number)restored.optionValue("exposure")).doubleValue() - 1.25) > 0.0001) {
+					throw new AssertionError("Per-pack shader settings were not persisted");
+				}
+			}
+		}
+	}
+
+	private static void assertBuiltInPackRenders(final MetalDevice device, final MetalShaderEngine engine) {
+		int size = 4;
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture scene = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, size, size, 1));
+			 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.BGRA8_UNORM, size, size, 1))) {
+			ByteBuffer gray = ByteBuffer.allocateDirect(size * size * 4);
+			for (int pixel = 0; pixel < size * size; pixel++) {
+				gray.put((byte)0x80).put((byte)0x80).put((byte)0x80).put((byte)0xFF);
+			}
+			gray.flip();
+			scene.upload(queue, 0, gray);
+			try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+				engine.encodeForTesting(commands, scene, output);
+				commands.commitAndWait();
+			}
+			assertFirstPixel(output.readback(queue, 0), 0x808080, "Built-in Phase 1 pack");
+		}
+	}
+
+	private static void assertDeclaredShaderGraph() {
+		Path root = Path.of("build", "shader-graph-smoke");
+		deleteTree(root);
+		String manifest = """
+			{
+			  "format": 1,
+			  "name": "Declared Graph",
+			  "targets": {
+			    "g": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "transient"},
+			    "scene": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "frame"}
+			  },
+			  "passes": [
+			    {"id": "resolve", "kind": "fullscreen", "tile_reads": ["g"], "merge_with": "gbuffer", "writes": ["scene"]},
+			    {"id": "final", "kind": "fullscreen", "reads": ["scene"], "writes": ["drawable"]},
+			    {"id": "gbuffer", "kind": "geometry", "geometry": "terrain", "writes": ["g"]}
+			  ],
+			  "options": []
+			}
+			""";
+		try {
+			Files.createDirectories(root);
+			Path zipPath = root.resolve("declared.zip");
+			try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(zipPath))) {
+				writeZipText(zip, "pack.json", manifest);
+				writeZipText(zip, "graph.metal", PHASE_ONE_MSL);
+			}
+			List<ShaderPackLoader.PackRef> discovered = ShaderPackLoader.discover(root);
+			if (discovered.size() != 1 || discovered.getFirst().kind() != ShaderPackLoader.Kind.ZIP) {
+				throw new AssertionError("Shader-pack zip discovery did not return the declared pack");
+			}
+			ShaderGraphCompiler.CompiledGraph graph = ShaderGraphCompiler.compile(ShaderPackLoader.load(discovered.getFirst()));
+			List<String> order = graph.passes().stream().map(pass -> pass.declaration().id()).toList();
+			if (!order.equals(List.of("gbuffer", "resolve", "final")) || !graph.targets().get("g").memoryless()) {
+				throw new AssertionError("Declared shader graph did not derive ordering and memoryless promotion: " + order);
+			}
+			if (graph.passes().getFirst().writes().getFirst().storeAction() != ShaderGraphCompiler.StoreAction.DONT_CARE
+				|| graph.passes().get(1).writes().getFirst().storeAction() != ShaderGraphCompiler.StoreAction.STORE) {
+				throw new AssertionError("Declared shader graph did not derive attachment store actions");
+			}
+
+			Path invalid = root.resolve("invalid");
+			Files.createDirectories(invalid);
+			String invalidManifest = manifest.replace(
+				"\"tile_reads\": [\"g\"], \"merge_with\": \"gbuffer\"", "\"reads\": [\"g\"]"
+			);
+			Files.writeString(invalid.resolve("pack.json"), invalidManifest, StandardCharsets.UTF_8);
+			Files.writeString(invalid.resolve("graph.metal"), PHASE_ONE_MSL, StandardCharsets.UTF_8);
+			try {
+				ShaderGraphCompiler.compile(ShaderPackLoader.load(invalid));
+				throw new AssertionError("A transient target sampled by an unmerged pass was accepted");
+			} catch (ShaderGraphCompiler.CompileException expected) {
+				if (!expected.getMessage().contains("gbuffer") || !expected.getMessage().contains("resolve")) {
+					throw new AssertionError("Transient-read diagnostic omitted the offending passes", expected);
+				}
+			}
+		} catch (IOException error) {
+			throw new AssertionError("Could not build the declared shader graph fixture", error);
+		}
+	}
+
+	private static void writeZipText(final ZipOutputStream zip, final String path, final String text) throws IOException {
+		zip.putNextEntry(new ZipEntry(path));
+		zip.write(text.getBytes(StandardCharsets.UTF_8));
+		zip.closeEntry();
+	}
+
+	private static String phaseOneManifest(final String name) {
+		return """
+			{
+			  "format": 1,
+			  "name": "%s",
+			  "targets": {
+			    "scene": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "frame"}
+			  },
+			  "passes": [
+			    {"id": "final", "kind": "fullscreen", "reads": ["scene"], "writes": ["drawable"]}
+			  ],
+			  "options": [
+			    {"id": "quality", "category": "test", "type": "enum", "values": [1, 2], "default": 1, "apply": "reload"}
+			  ]
+			}
+			""".formatted(name);
+	}
+
+	private static void runPhaseZeroExit(
+		final MetalDevice device,
+		final MetalPipelineCache cache,
+		final boolean render
+	) {
+		List<MetalRenderPipeline.ColorTarget> fillTargets = List.of(
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM)
+		);
+		List<MetalRenderPipeline.ColorTarget> resolveTargets = List.of(
+			new MetalRenderPipeline.ColorTarget(MetalTexture.Format.RGBA8_UNORM, 0, null),
+			new MetalRenderPipeline.ColorTarget(MetalTexture.Format.RGBA8_UNORM, 0, null),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			new MetalRenderPipeline.ColorTarget(MetalTexture.Format.RGBA8_UNORM, 0, null)
+		);
+		MetalRenderPipeline.Descriptor fillDescriptor = new MetalRenderPipeline.Descriptor(
+			PHASE_ZERO_MSL, "phase_zero_vertex", PHASE_ZERO_MSL, "phase_zero_fill", fillTargets, null,
+			MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+			MetalRenderPipeline.RasterState.DEFAULT
+		);
+		MetalRenderPipeline.Descriptor resolveDescriptor = new MetalRenderPipeline.Descriptor(
+			PHASE_ZERO_MSL, "phase_zero_vertex", PHASE_ZERO_MSL, "phase_zero_resolve", resolveTargets, null,
+			MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+			MetalRenderPipeline.RasterState.DEFAULT
+		);
+		MetalRenderPipeline.Descriptor layeredDescriptor = new MetalRenderPipeline.Descriptor(
+			LAYERED_MSL, "layered_vertex", LAYERED_MSL, "layered_fragment",
+			List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM)), null,
+			MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+			new MetalRenderPipeline.RasterState(
+				MetalRenderPipeline.CullMode.NONE, MetalRenderPipeline.FillMode.FILL,
+				MetalRenderPipeline.TopologyClass.TRIANGLE
+			)
+		);
+
+		try (MetalRenderPipeline fill = cache.createRenderPipeline(fillDescriptor);
+			 MetalRenderPipeline resolve = cache.createRenderPipeline(resolveDescriptor);
+			 MetalComputePipeline compute = cache.createComputePipeline(
+				 new MetalComputePipeline.Descriptor(PHASE_ZERO_MSL, "phase_zero_compute"));
+			 MetalRenderPipeline layered = cache.createRenderPipeline(layeredDescriptor)) {
+			if (!render) {
+				return;
+			}
+			renderPhaseZeroExit(device, fill, resolve, compute, layered);
+		}
+	}
+
+	private static void renderPhaseZeroExit(
+		final MetalDevice device,
+		final MetalRenderPipeline fill,
+		final MetalRenderPipeline resolve,
+		final MetalComputePipeline compute,
+		final MetalRenderPipeline layered
+	) {
+		int size = 4;
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture albedo = device.createTexture(MetalTexture.Descriptor.memoryless(MetalTexture.Format.RGBA8_UNORM, size, size));
+			 MetalTexture normal = device.createTexture(MetalTexture.Descriptor.memoryless(MetalTexture.Format.RGBA8_UNORM, size, size));
+			 MetalTexture scene = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, size, size, 1));
+			 MetalTexture marker = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, size, size, 1));
+			 MetalTextureView sceneView = scene.createView();
+			 MetalTexture computed = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.RGBA8_UNORM, size, size, 1,
+				 MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_SHADER_WRITE));
+			 MetalTextureView computedView = computed.createView();
+			 MetalTexture layers = device.createTexture(MetalTexture.Descriptor.array(
+				 MetalTexture.Format.RGBA8_UNORM, size, size, 4,
+				 MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_RENDER_TARGET));
+			 MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			List<MetalRenderPass.ColorAttachment> attachments = List.of(
+				new MetalRenderPass.ColorAttachment(albedo, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE, 0, 0, 0, 1),
+				new MetalRenderPass.ColorAttachment(normal, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE, 0, 0, 0, 1),
+				new MetalRenderPass.ColorAttachment(scene, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0, 0, 0, 1),
+				new MetalRenderPass.ColorAttachment(marker, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0, 0, 0, 1)
+			);
+			try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(attachments, null))) {
+				pass.setPipeline(fill);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				pass.setPipeline(resolve);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+			}
+			try (MetalComputePass pass = commands.beginComputePass()) {
+				pass.setPipeline(compute);
+				pass.setTexture(0, sceneView);
+				pass.setTexture(1, computedView);
+				pass.dispatchCovering(size, size, 8, 8);
+			}
+			try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+				List.of(new MetalRenderPass.ColorAttachment(
+					layers, 0, 0, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0, 0, 0, 1)),
+				null, 4))) {
+				pass.setPipeline(layered);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 4, 0);
+			}
+			commands.commitAndWait();
+
+			assertFirstPixel(computed.readback(queue, 0), 0x80C040, "Phase 0 compute output");
+			assertFirstPixel(marker.readback(queue, 0), 0xFF00FF, "Phase 0 fourth attachment");
+			int[] expectedLayers = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00};
+			for (int layer = 0; layer < expectedLayers.length; layer++) {
+				assertFirstPixel(layers.readback(queue, 0, layer), expectedLayers[layer], "Phase 0 array layer " + layer);
+			}
+		}
+	}
+
+	private static void assertFirstPixel(final ByteBuffer pixels, final int expected, final String description) {
+		int actual = Byte.toUnsignedInt(pixels.get(0)) << 16
+			| Byte.toUnsignedInt(pixels.get(1)) << 8
+			| Byte.toUnsignedInt(pixels.get(2));
+		if (!isNearColor(actual, expected)) {
+			throw new AssertionError(String.format("%s produced %06X, expected %06X", description, actual, expected));
+		}
+	}
+
+	private static void deleteTree(final Path root) {
+		if (Files.notExists(root)) {
+			return;
+		}
+		try (var paths = Files.walk(root)) {
+			for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+				Files.delete(path);
+			}
+		} catch (IOException error) {
+			throw new AssertionError("Could not reset Metal pipeline smoke cache " + root, error);
 		}
 	}
 

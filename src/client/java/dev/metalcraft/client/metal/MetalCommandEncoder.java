@@ -439,6 +439,12 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.commands().present(drawable);
 	}
 
+	void renderShaderPack(final MetalShaderEngine engine, final MetalTexture texture, final MetalDrawable drawable) {
+		MetalCommandBuffer commands = this.commands();
+		engine.encode(commands, texture, drawable);
+		commands.present(drawable);
+	}
+
 	void finishPendingWork() {
 		this.finishSubmission(true);
 	}

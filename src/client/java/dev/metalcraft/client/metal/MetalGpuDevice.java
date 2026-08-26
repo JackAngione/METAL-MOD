@@ -47,6 +47,7 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	private final MetalCommandQueue commandQueue;
 	private final MetalCommandEncoder commandEncoder;
 	private final DeviceInfo deviceInfo;
+	private final MetalShaderEngine shaderEngine;
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> pipelineCache = new IdentityHashMap<>();
 	private final Map<ShaderKey, String> shaderSourceCache = new HashMap<>();
 	// Triangle-fan indices are a pure function of vertex count, and the pattern for a large fan
@@ -64,6 +65,10 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	private MetalRegionClear regionClear;
 
 	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource) {
+		this(metal, defaultShaderSource, false);
+	}
+
+	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource, final boolean enableShaderEngine) {
 		this.metal = metal;
 		this.defaultShaderSource = defaultShaderSource;
 		this.commandQueue = metal.createCommandQueue();
@@ -81,10 +86,15 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			DeviceType.INTEGRATED
 		);
 		this.commandEncoder = new MetalCommandEncoder(this, this.commandQueue);
+		this.shaderEngine = enableShaderEngine ? MetalShaderEngine.createDefault(metal) : null;
 	}
 
 	MetalDevice metal() {
 		return this.metal;
+	}
+
+	MetalShaderEngine shaderEngine() {
+		return this.shaderEngine;
 	}
 
 	MetalRegionClear regionClear() {
@@ -206,6 +216,9 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		this.commandEncoder.finishPendingWork();
 		this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 		this.pipelineCache.clear();
+		if (this.shaderEngine != null) {
+			this.shaderEngine.reload();
+		}
 	}
 
 	@Override
@@ -213,6 +226,9 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		if (!this.closed) {
 			this.closed = true;
 			this.commandEncoder.close();
+			if (this.shaderEngine != null) {
+				this.shaderEngine.close();
+			}
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.pipelineCache.clear();
 			if (this.regionClear != null) {
