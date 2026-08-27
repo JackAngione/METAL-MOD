@@ -656,6 +656,26 @@ public final class MetalShaderEngine implements AutoCloseable {
 		};
 	}
 
+	/**
+	 * The Metal texture behind an allocated pack target, so a test can seed a G-buffer by hand.
+	 *
+	 * <p>What a geometry pass writes and what the passes after it read are two halves of the same
+	 * contract, and only the writing half can be checked by drawing. Handing a test the texture lets
+	 * the reading half be checked against values it chose rather than against whatever a draw
+	 * happened to produce.
+	 */
+	@Nullable MetalTexture targetTextureForTesting(final String id) {
+		Attachment attachment = this.targets.get(id);
+		return attachment == null ? null : attachment.metal();
+	}
+
+	/** See {@link MetalWorldGeometry#supplyWorldDepthForTesting}. */
+	void supplyWorldDepthForTesting(final @Nullable MetalTextureView depth) {
+		if (this.worldGeometry != null) {
+			this.worldGeometry.supplyWorldDepthForTesting(depth);
+		}
+	}
+
 	private @Nullable MetalTextureView worldDepth() {
 		return this.worldGeometry == null ? null : this.worldGeometry.worldDepth();
 	}

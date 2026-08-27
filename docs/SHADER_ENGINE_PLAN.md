@@ -253,7 +253,8 @@ pack switch, survives resize and resource reload, and exposes one option of each
   pipeline names, so a render type added by a mod is classified the way a vanilla one is: alpha
   cutout on world terrain is foliage, an entity program compiled without a lightmap is emissive.
   Water is a declared class that nothing reaches yet, because water is translucent terrain and
-  Phase 4 is where translucency gets a forward pass.
+  Phase 4 is where translucency gets a forward pass. That is the one part of this phase's stated
+  scope left undone, and it is undone by construction rather than by omission.
 
 **The coverage bar, stated rather than discovered.** A draw is routed only when its vertex program is
 one of the three, its colour target does not blend, its vertex format and bind-group layout match
@@ -265,15 +266,30 @@ frames, maps) and its GUI programs are not implemented in this phase, and neithe
 clouds, weather, particles, outlines or text. Every pipeline offered and declined is logged once per
 pack.
 
-Exit, met: `shaderTranslationSmoke` compiles all five substituted world variants on the device
+Exit, met. `shaderTranslationSmoke` compiles all five substituted world variants on the device
 through the real substitution path, refuses a blended one and a variant carrying an unimplemented
-define, and draws one tilted quad through the terrain program to read back all four attachments
-against the values the format specifies. In the client, the same world rendered with and without
-`-PmetalShaderPack=false` is pixel-identical outside the first-person arm, whose animation phase
-differs by the same amount between two runs of the baseline itself. The normal channel reads
-(128, 255, 217) across flat ground - octahedral +Y with solid roughness - the material channel
-separates terrain from entities, and the light channel reads full sky light and no block light in
-open daylight.
+define, and then draws each of them:
+
+- solid terrain, cutout terrain above its threshold, and the same cutout below it, where every
+  attachment has to still hold the value the pass cleared it to - which is what proves the threshold
+  is compiled in rather than merely declared;
+- loose block models, whose colour modulator and model offset are read from their own std140 offsets
+  and are therefore observable in the result rather than merely present;
+- entities and their emissive variant, where the vertex normal is read rather than reconstructed and
+  the cardinal light folds into the scene but deliberately not into the albedo.
+
+The pack's last pass is then run once per debug view over a G-buffer the test wrote by hand, so the
+octahedral decode, the material palette and the depth curve are each checked against a value chosen
+rather than one a draw happened to produce. Every one of those expectations was perturbed and
+checked to fail, because a GPU test that passes vacuously is worse than none.
+
+In the client, the same world rendered with and without `-PmetalShaderPack=false` is pixel-identical
+outside the first-person arm, whose animation phase differs by the same amount between two runs of
+the baseline itself. Rendering each channel into Minecraft's own attachment - the only way to see
+one, since Minecraft's screenshot reads the main render target rather than the drawable - shows the
+normal channel at (128, 255, 217) across flat ground, which is octahedral +Y with solid roughness;
+the material channel separating terrain from entities; and the light channel at full sky light and
+no block light in open daylight.
 
 One thing the runtime does not do yet, and refuses rather than half-runs: the graph compiler already
 schedules merged pass groups and compute passes, because Phase 0 proved both mechanisms against the

@@ -272,6 +272,18 @@ public final class MetalWorldGeometry implements AutoCloseable {
 		return this.substitutionFor(pipeline).map(Substitution::pipeline).orElse(null);
 	}
 
+	/**
+	 * Stands in for the depth attachment a world draw would have recorded this frame.
+	 *
+	 * <p>Package-private for the same reason {@link #standInFor} is. The pack's later passes read a
+	 * depth attachment that exists only once Minecraft has drawn a level into it, so a test with no
+	 * level to draw still needs a way to run them - and running them is the only way to find out
+	 * whether the pack's last pass reads the G-buffer back correctly.
+	 */
+	void supplyWorldDepthForTesting(final @Nullable MetalTextureView depth) {
+		this.worldDepth = depth;
+	}
+
 	/** Called once per presented frame, after which the next G-buffer pass clears rather than loads. */
 	void beginFrame() {
 		this.cleared = false;

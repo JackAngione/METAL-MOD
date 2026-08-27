@@ -21,7 +21,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
@@ -526,7 +528,8 @@ public final class MetalShaderTranslationSmoke {
 					throw new AssertionError("A pipeline with an unimplemented shader define was routed into the G-buffer");
 				}
 
-				assertTerrainGBufferChannels(device, gpuDevice, world);
+				assertWorldProgramChannels(device, gpuDevice, world);
+				assertDebugViews(device, engine);
 			}
 		} finally {
 			gpuDevice.close();
@@ -555,21 +558,107 @@ public final class MetalShaderTranslationSmoke {
 	}
 
 	/**
-	 * Draws one tilted quad through the terrain program and reads every attachment back.
+	 * Draws every world program the pack substitutes, and reads all four attachments back.
 	 *
-	 * <p>The quad is tilted so its reconstructed normal has all three components: a face normal
-	 * taken from screen-space derivatives is exact for a flat surface, and a tilt is what makes a
-	 * wrong sign or a swapped pair of derivatives produce a different number rather than the same
-	 * axis. The uniform blocks are filled the way Minecraft fills them, so a field read from the
-	 * wrong std140 offset moves the geometry and fails the normal rather than passing quietly.
+	 * <p>One tilted quad each, through the real stand-in pipeline, with Minecraft's uniform blocks
+	 * filled the way Minecraft fills them - so a field read from the wrong std140 offset moves the
+	 * geometry or the colour and fails an assertion rather than passing quietly. The tilt is what
+	 * makes a reconstructed normal have all three components: a face normal taken from screen-space
+	 * derivatives is exact for a flat surface, and a tilt is what makes a wrong sign or a swapped
+	 * pair of derivatives produce a different number rather than the same axis.
 	 */
-	private static void assertTerrainGBufferChannels(
+	private static void assertWorldProgramChannels(
 		final MetalDevice device,
 		final MetalGpuDevice gpuDevice,
 		final MetalWorldGeometry world
 	) {
-		RenderPipeline standIn = world.standInFor(terrainPipeline(null));
+		// Solid terrain: the chunk section's own transform, and the surface class everything else is
+		// measured against.
+		GBufferReadback solid = drawWorldProgram(
+			device, gpuDevice, world, terrainPipeline(null), blockQuad(0xFF), chunkSectionBlock(), dynamicTransformsBlock(1.0F)
+		);
+		// Minecraft's own attachment still carries the fully shaded fragment, because nothing lights
+		// the G-buffer yet and the game has to look the same as it did.
+		assertChannel(solid.scene(), new int[] {255, 128, 64, 255}, 2, "solid terrain scene");
+		// Albedo is the surface before the light: texture times vertex tint, no lightmap, no fog.
+		// Alpha is one past the material class, and solid is class zero.
+		assertChannel(solid.albedo(), new int[] {255, 128, 64, 1}, 2, "solid terrain albedo");
+		// The octahedral encoding of the tilted quad's reconstructed face normal, plus solid's roughness.
+		assertChannel(solid.normal(), new int[] {223, 191, 217, 0}, 3, "solid terrain normal");
+		// Block light 240/240, sky light 120/240, not emissive, alpha reserved.
+		assertChannel(solid.light(), new int[] {255, 128, 0, 0}, 2, "solid terrain light");
+
+		// Cutout terrain, above its threshold: the same surface, classified as foliage and rougher
+		// for it. Alpha cutout on world terrain is overwhelmingly leaves, grass and crops.
+		GBufferReadback foliage = drawWorldProgram(
+			device, gpuDevice, world, terrainPipeline("0.1"), blockQuad(0xFF), chunkSectionBlock(), dynamicTransformsBlock(1.0F)
+		);
+		assertChannel(foliage.albedo(), new int[] {255, 128, 64, 2}, 2, "cutout terrain albedo");
+		assertChannel(foliage.normal(), new int[] {223, 191, 230, 0}, 3, "cutout terrain normal");
+
+		// The same program below its threshold, which is what proves the threshold is compiled in
+		// rather than merely declared: every attachment keeps the value the pass cleared it to.
+		GBufferReadback discarded = drawWorldProgram(
+			device, gpuDevice, world, terrainPipeline("0.1"), blockQuad(0x10), chunkSectionBlock(), dynamicTransformsBlock(1.0F)
+		);
+		assertChannel(discarded.scene(), new int[] {0, 0, 0, 0}, 2, "discarded cutout scene");
+		assertChannel(discarded.albedo(), new int[] {0, 0, 0, 0}, 2, "discarded cutout albedo");
+		assertChannel(discarded.normal(), new int[] {128, 128, 0, 0}, 2, "discarded cutout normal");
+		assertChannel(discarded.light(), new int[] {0, 0, 0, 0}, 2, "discarded cutout light");
+
+		// Loose block models: the same geometry reached through DynamicTransforms instead, so the
+		// model offset and the colour modulator are read from their own std140 offsets. Green is
+		// halved by the modulator alone, which is what makes that offset observable.
+		GBufferReadback block = drawWorldProgram(
+			device, gpuDevice, world, blockPipeline(), blockQuad(0xFF), chunkSectionBlock(), dynamicTransformsBlock(0.5F)
+		);
+		assertChannel(block.scene(), new int[] {255, 64, 64, 255}, 2, "block model scene");
+		assertChannel(block.albedo(), new int[] {255, 64, 64, 1}, 2, "block model albedo");
+		assertChannel(block.normal(), new int[] {223, 191, 217, 0}, 3, "block model normal");
+
+		// Entities: the one world format carrying a real normal, so nothing is reconstructed. The
+		// vertex points straight up, and the cardinal light folds to 0.7 for the directions below,
+		// which the scene carries and the albedo deliberately does not.
+		GBufferReadback entity = drawWorldProgram(
+			device, gpuDevice, world, entityPipeline(true), entityQuad(), chunkSectionBlock(), dynamicTransformsBlock(1.0F)
+		);
+		assertChannel(entity.scene(), new int[] {179, 90, 45, 255}, 2, "entity scene");
+		assertChannel(entity.albedo(), new int[] {255, 128, 64, 4}, 2, "entity albedo");
+		assertChannel(entity.normal(), new int[] {128, 255, 179, 0}, 2, "entity normal");
+		assertChannel(entity.light(), new int[] {255, 128, 0, 0}, 2, "entity light");
+
+		// The emissive variant: no lightmap to multiply by, a class of its own, and the light
+		// channel's third component set so a resolve can find it without consulting the material.
+		GBufferReadback emissive = drawWorldProgram(
+			device, gpuDevice, world, entityPipeline(false), entityQuad(), chunkSectionBlock(), dynamicTransformsBlock(1.0F)
+		);
+		assertChannel(emissive.scene(), new int[] {179, 90, 45, 255}, 2, "emissive entity scene");
+		assertChannel(emissive.albedo(), new int[] {255, 128, 64, 5}, 2, "emissive entity albedo");
+		assertChannel(emissive.light(), new int[] {255, 128, 255, 0}, 2, "emissive entity light");
+	}
+
+	/** The four attachments one world draw wrote, already read back. */
+	private record GBufferReadback(ByteBuffer scene, ByteBuffer albedo, ByteBuffer normal, ByteBuffer light) {
+	}
+
+	private static GBufferReadback drawWorldProgram(
+		final MetalDevice device,
+		final MetalGpuDevice gpuDevice,
+		final MetalWorldGeometry world,
+		final RenderPipeline vanilla,
+		final ByteBuffer vertices,
+		final ByteBuffer chunkSection,
+		final ByteBuffer dynamicTransforms
+	) {
+		RenderPipeline standIn = world.standInFor(vanilla);
+		if (standIn == null) {
+			throw new AssertionError("The G-buffer pack declined to stand in for " + vanilla.getLocation());
+		}
 		MetalRenderPipeline pipeline = gpuDevice.getOrCompilePipeline(standIn).metal(true);
+		// Resolved the way the backend resolves a bound name, rather than restated: flattened
+		// uniforms first, then flattened samplers. A slot table written out by hand here would drift
+		// from the one the engine compiled the program against.
+		Map<String, Integer> slots = resourceSlots(vanilla);
 		int size = GBUFFER_SIZE;
 		try (MetalCommandQueue queue = device.createCommandQueue();
 			 MetalTexture scene = device.createTexture(colorTarget(size));
@@ -578,18 +667,22 @@ public final class MetalShaderTranslationSmoke {
 			 MetalTexture light = device.createTexture(colorTarget(size));
 			 MetalTexture depth = device.createTexture(new MetalTexture.Descriptor(
 				 MetalTexture.Format.DEPTH32_FLOAT, size, size, 1, MetalTexture.USAGE_RENDER_TARGET));
-			 MetalTexture atlas = whiteTexture(device, queue);
-			 MetalTexture lightmap = whiteTexture(device, queue);
-			 MetalTextureView atlasView = atlas.createView();
-			 MetalTextureView lightmapView = lightmap.createView();
+			 MetalTexture white = whiteTexture(device, queue);
+			 MetalTextureView whiteView = white.createView();
 			 MetalSampler sampler = device.createSampler(new MetalSampler.Descriptor(
 				 MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE));
-			 MetalBuffer vertices = uploadBuffer(device, terrainQuad());
+			 MetalBuffer vertexBuffer = uploadBuffer(device, vertices);
 			 MetalBuffer projection = uploadBuffer(device, projectionBlock());
 			 MetalBuffer fog = uploadBuffer(device, fogBlock());
 			 MetalBuffer globals = uploadBuffer(device, globalsBlock());
-			 MetalBuffer section = uploadBuffer(device, chunkSectionBlock());
+			 MetalBuffer section = uploadBuffer(device, chunkSection);
+			 MetalBuffer transforms = uploadBuffer(device, dynamicTransforms);
+			 MetalBuffer lighting = uploadBuffer(device, lightingBlock());
 			 MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			Map<String, MetalBuffer> uniforms = Map.of(
+				"Projection", projection, "Fog", fog, "Globals", globals,
+				"ChunkSection", section, "DynamicTransforms", transforms, "Lighting", lighting
+			);
 			try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
 				List.of(
 					MetalRenderPass.ColorAttachment.clear(scene, 0.0, 0.0, 0.0, 0.0),
@@ -601,42 +694,161 @@ public final class MetalShaderTranslationSmoke {
 					depth, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE, 1.0)
 			))) {
 				pass.setPipeline(pipeline);
-				pass.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, vertices, 0L);
-				pass.setUniformBuffer(SLOT_PROJECTION, projection, 0L, MetalRenderPass.STAGE_ALL);
-				pass.setUniformBuffer(SLOT_FOG, fog, 0L, MetalRenderPass.STAGE_ALL);
-				pass.setUniformBuffer(SLOT_GLOBALS, globals, 0L, MetalRenderPass.STAGE_ALL);
-				pass.setUniformBuffer(SLOT_CHUNK_SECTION, section, 0L, MetalRenderPass.STAGE_ALL);
-				pass.setTexture(SLOT_SAMPLER0, atlasView, MetalRenderPass.STAGE_ALL);
-				pass.setSampler(SLOT_SAMPLER0, sampler, MetalRenderPass.STAGE_ALL);
-				pass.setTexture(SLOT_SAMPLER2, lightmapView, MetalRenderPass.STAGE_ALL);
-				pass.setSampler(SLOT_SAMPLER2, sampler, MetalRenderPass.STAGE_ALL);
+				pass.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, vertexBuffer, 0L);
+				for (Map.Entry<String, MetalBuffer> uniform : uniforms.entrySet()) {
+					Integer slot = slots.get(uniform.getKey());
+					if (slot != null) {
+						pass.setUniformBuffer(slot, uniform.getValue(), 0L, MetalRenderPass.STAGE_ALL);
+					}
+				}
+				// One white texture for the atlas, the lightmap and the overlay alike. A white
+				// overlay texel has full alpha, which is Minecraft's own "no overlay here" and
+				// leaves the colour it is mixed into unchanged.
+				for (String texture : List.of("Sampler0", "Sampler1", "Sampler2")) {
+					Integer slot = slots.get(texture);
+					if (slot != null) {
+						pass.setTexture(slot, whiteView, MetalRenderPass.STAGE_ALL);
+						pass.setSampler(slot, sampler, MetalRenderPass.STAGE_ALL);
+					}
+				}
 				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 			}
 			commands.commitAndWait();
-
-			// Minecraft's own attachment still carries the fully shaded fragment, because nothing
-			// lights the G-buffer yet and the game has to look the same as it did.
-			assertChannel(scene.readback(queue, 0), new int[] {255, 128, 64, 255}, 2, "scene");
-			// Albedo is the surface before the light: texture times vertex tint, no lightmap, no fog.
-			// Alpha is one past the material class, and solid terrain is class zero.
-			assertChannel(albedo.readback(queue, 0), new int[] {255, 128, 64, 1}, 2, "gbuffer_albedo");
-			// The octahedral encoding of the tilted quad's face normal, plus solid's roughness.
-			assertChannel(normal.readback(queue, 0), new int[] {223, 191, 217, 0}, 3, "gbuffer_normal");
-			// Block light 240/240, sky light 120/240, not emissive, alpha reserved.
-			assertChannel(light.readback(queue, 0), new int[] {255, 128, 0, 0}, 2, "gbuffer_light");
+			return new GBufferReadback(
+				scene.readback(queue, 0), albedo.readback(queue, 0), normal.readback(queue, 0), light.readback(queue, 0)
+			);
 		}
+	}
+
+	/**
+	 * Runs the pack's last pass once per debug view, over a G-buffer this test wrote by hand.
+	 *
+	 * <p>What a geometry pass writes and what the pass after it reads are two halves of one contract,
+	 * and drawing only checks the writing half. Seeding the channels with chosen values and reading
+	 * the drawable back checks the other half: the octahedral decode, the material palette, the
+	 * depth curve, and that each view reads the channel it claims to.
+	 */
+	private static void assertDebugViews(final MetalDevice device, final MetalShaderEngine engine) {
+		int size = GBUFFER_SIZE;
+		seedTarget(device, engine, "gbuffer_albedo", new int[] {200, 100, 50, 2});
+		seedTarget(device, engine, "gbuffer_normal", new int[] {223, 191, 217, 0});
+		seedTarget(device, engine, "gbuffer_light", new int[] {255, 128, 0, 0});
+
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture depth = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.DEPTH32_FLOAT, size, size, 1,
+				 MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_RENDER_TARGET));
+			 MetalTextureView depthView = depth.createView();
+			 MetalTexture scene = device.createTexture(colorTarget(size));
+			 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.BGRA8_UNORM, size, size, 1))) {
+			uploadUniform(queue, scene, new int[] {64, 192, 32, 255});
+			try (MetalCommandBuffer clear = queue.createCommandBuffer()) {
+				try (MetalRenderPass ignored = clear.beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
+					new MetalRenderPass.DepthAttachment(
+						depth, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.25)
+				))) {
+					// Beginning and ending the pass performs the clear.
+				}
+				clear.commitAndWait();
+			}
+
+			// The scene passes through untouched, which also fixes the byte order everything below
+			// is read in: the drawable is BGRA, so its first byte is blue.
+			assertDebugView(device, engine, queue, scene, output, depthView, "off", new int[] {64, 192, 32});
+			assertDebugView(device, engine, queue, scene, output, depthView, "albedo", new int[] {200, 100, 50});
+			// The octahedral decode of the stored pair, remapped from a direction into a colour.
+			assertDebugView(device, engine, queue, scene, output, depthView, "normal", new int[] {232, 180, 76});
+			// Block light, sky light and emissive, one per channel.
+			assertDebugView(device, engine, queue, scene, output, depthView, "light", new int[] {255, 128, 0});
+			// Stored alpha two is one past foliage, which the palette paints green.
+			assertDebugView(device, engine, queue, scene, output, depthView, "material", new int[] {51, 217, 64});
+			// One minus the fourth root of the cleared depth.
+			assertDebugView(device, engine, queue, scene, output, depthView, "depth", new int[] {75, 75, 75});
+		} finally {
+			engine.setOption("debug_view", "off");
+		}
+	}
+
+	private static void assertDebugView(
+		final MetalDevice device,
+		final MetalShaderEngine engine,
+		final MetalCommandQueue queue,
+		final MetalTexture scene,
+		final MetalTexture output,
+		final MetalTextureView depth,
+		final String view,
+		final int[] expected
+	) {
+		engine.setOption("debug_view", view);
+		// Re-supplied per frame, because the engine forgets the world's depth once it has presented.
+		engine.supplyWorldDepthForTesting(depth);
+		try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			if (!engine.encodeForTesting(commands, scene, output)) {
+				throw new AssertionError("The pack declined to composite the '" + view + "' debug view");
+			}
+			commands.commitAndWait();
+		}
+		ByteBuffer pixels = output.readback(queue, 0);
+		// The drawable is BGRA, so red and blue are the other way round from the G-buffer's own
+		// RGBA channels; reading them by name here is what keeps the expectations readable.
+		int[] rgb = {
+			Byte.toUnsignedInt(pixels.get(2)), Byte.toUnsignedInt(pixels.get(1)), Byte.toUnsignedInt(pixels.get(0))
+		};
+		for (int component = 0; component < 3; component++) {
+			if (Math.abs(rgb[component] - expected[component]) > 3) {
+				throw new AssertionError(String.format(
+					"Debug view '%s' component %d is %d, expected %d (+/-3)", view, component, rgb[component], expected[component]
+				));
+			}
+		}
+	}
+
+	private static void seedTarget(
+		final MetalDevice device,
+		final MetalShaderEngine engine,
+		final String target,
+		final int[] rgba
+	) {
+		MetalTexture texture = engine.targetTextureForTesting(target);
+		if (texture == null) {
+			throw new AssertionError("The built-in pack does not allocate target '" + target + "'");
+		}
+		try (MetalCommandQueue queue = device.createCommandQueue()) {
+			uploadUniform(queue, texture, rgba);
+		}
+	}
+
+	/** Fills every texel of an RGBA8 texture with one colour, so sampling it is size-independent. */
+	private static void uploadUniform(final MetalCommandQueue queue, final MetalTexture texture, final int[] rgba) {
+		int pixels = texture.descriptor().width() * texture.descriptor().height();
+		ByteBuffer contents = ByteBuffer.allocateDirect(pixels * 4);
+		for (int pixel = 0; pixel < pixels; pixel++) {
+			for (int component : rgba) {
+				contents.put((byte)component);
+			}
+		}
+		texture.upload(queue, 0, contents.flip());
 	}
 
 	// ---- Phase 2 fixtures --------------------------------------------------------------------
 
-	/** The resource slots the fixture pipelines' bind-group layout produces, in flattened order. */
-	private static final int SLOT_PROJECTION = 0;
-	private static final int SLOT_FOG = 1;
-	private static final int SLOT_GLOBALS = 2;
-	private static final int SLOT_CHUNK_SECTION = 3;
-	private static final int SLOT_SAMPLER0 = 4;
-	private static final int SLOT_SAMPLER2 = 5;
 	private static final int GBUFFER_SIZE = 8;
+
+	/**
+	 * Name to Metal argument-table slot, resolved the way the backend resolves a bound name: the
+	 * flattened uniforms first, then the flattened samplers after them.
+	 */
+	private static Map<String, Integer> resourceSlots(final RenderPipeline pipeline) {
+		Map<String, Integer> slots = new LinkedHashMap<>();
+		for (BindGroupLayout.UniformDescription uniform : BindGroupLayout.flattenUniforms(pipeline.getBindGroupLayouts())) {
+			slots.put(uniform.name(), slots.size());
+		}
+		for (String sampler : BindGroupLayout.flattenSamplers(pipeline.getBindGroupLayouts())) {
+			slots.put(sampler, slots.size());
+		}
+		return slots;
+	}
 
 	private static VertexFormat blockVertexFormat() {
 		return VertexFormat.builder(0)
@@ -777,22 +989,46 @@ public final class MetalShaderTranslationSmoke {
 	/**
 	 * One tilted triangle covering the viewport, in Minecraft's BLOCK vertex format.
 	 *
-	 * <p>The z of each vertex puts the surface on the plane {@code z = 2x + y}, which after the
-	 * chunk's origin offset becomes {@code z = 2x + y + 2} in camera-relative world space: a plane
-	 * that never passes through the camera, so the reconstructed normal's facing test has one
-	 * answer across the whole quad.
+	 * <p>The z of each vertex puts the surface on the plane {@code z = 2x + y}, which after the two
+	 * or three units the transform adds becomes {@code z = 2x + y + 2} in camera-relative world
+	 * space: a plane that never passes through the camera, so the reconstructed normal's facing test
+	 * has one answer across the whole quad.
+	 *
+	 * @param alpha the vertex colour's alpha, which is what an alpha-cutout variant tests against
 	 */
-	private static ByteBuffer terrainQuad() {
+	private static ByteBuffer blockQuad(final int alpha) {
 		ByteBuffer vertices = ByteBuffer.allocateDirect(3 * 28).order(ByteOrder.nativeOrder());
-		float[][] corners = {{-1.0F, -1.0F}, {3.0F, -1.0F}, {-1.0F, 3.0F}};
-		for (float[] corner : corners) {
+		for (float[] corner : QUAD_CORNERS) {
 			vertices.putFloat(corner[0]).putFloat(corner[1]).putFloat(2.0F * corner[0] + corner[1]);
-			vertices.put((byte)0xFF).put((byte)0x80).put((byte)0x40).put((byte)0xFF);
+			vertices.put((byte)0xFF).put((byte)0x80).put((byte)0x40).put((byte)alpha);
 			vertices.putFloat(0.5F).putFloat(0.5F);
 			vertices.putShort((short)240).putShort((short)120);
 		}
 		return vertices.flip();
 	}
+
+	/**
+	 * The same triangle in Minecraft's ENTITY format, whose vertices carry a real normal.
+	 *
+	 * <p>The normal points straight up and the positions are already camera-relative, so this quad
+	 * exercises the path that reads a normal rather than the one that reconstructs one.
+	 */
+	private static ByteBuffer entityQuad() {
+		ByteBuffer vertices = ByteBuffer.allocateDirect(3 * 36).order(ByteOrder.nativeOrder());
+		for (float[] corner : QUAD_CORNERS) {
+			vertices.putFloat(corner[0]).putFloat(corner[1]).putFloat(2.0F * corner[0] + corner[1] + 2.0F);
+			vertices.put((byte)0xFF).put((byte)0x80).put((byte)0x40).put((byte)0xFF);
+			vertices.putFloat(0.5F).putFloat(0.5F);
+			// UV1 addresses the overlay texture, UV2 the lightmap.
+			vertices.putShort((short)0).putShort((short)10);
+			vertices.putShort((short)240).putShort((short)120);
+			// Straight up, as a signed-normalised byte triple.
+			vertices.put((byte)0).put((byte)127).put((byte)0).put((byte)0);
+		}
+		return vertices.flip();
+	}
+
+	private static final float[][] QUAD_CORNERS = {{-1.0F, -1.0F}, {3.0F, -1.0F}, {-1.0F, 3.0F}};
 
 	/** A projection that keeps x and y and pins z, so the quad's tilt reaches only the G-buffer. */
 	private static ByteBuffer projectionBlock() {
@@ -829,13 +1065,7 @@ public final class MetalShaderTranslationSmoke {
 
 	private static ByteBuffer chunkSectionBlock() {
 		ByteBuffer block = ByteBuffer.allocateDirect(96).order(ByteOrder.nativeOrder());
-		float[] identity = {
-			1.0F, 0.0F, 0.0F, 0.0F,
-			0.0F, 1.0F, 0.0F, 0.0F,
-			0.0F, 0.0F, 1.0F, 0.0F,
-			0.0F, 0.0F, 0.0F, 1.0F
-		};
-		for (float value : identity) {
+		for (float value : IDENTITY_MATRIX) {
 			block.putFloat(value);
 		}
 		block.putFloat(1.0F).putFloat(0.0F);                    // ChunkVisibility, then std140 padding
@@ -843,6 +1073,43 @@ public final class MetalShaderTranslationSmoke {
 		block.putInt(5).putInt(6).putInt(7).putInt(0);          // ChunkPosition, padded to a vec4 slot
 		return block.flip();
 	}
+
+	/**
+	 * Minecraft's per-draw transform block.
+	 *
+	 * @param greenModulator the colour modulator's green component, halved by one caller so that the
+	 *     field's std140 offset is observable in the result rather than merely present
+	 */
+	private static ByteBuffer dynamicTransformsBlock(final float greenModulator) {
+		ByteBuffer block = ByteBuffer.allocateDirect(160).order(ByteOrder.nativeOrder());
+		for (float value : IDENTITY_MATRIX) {
+			block.putFloat(value);
+		}
+		block.putFloat(1.0F).putFloat(greenModulator).putFloat(1.0F).putFloat(1.0F);   // ColorModulator
+		block.putFloat(0.0F).putFloat(0.0F).putFloat(2.0F).putFloat(0.0F);             // ModelOffset, padded
+		for (float value : IDENTITY_MATRIX) {                                          // TextureMat
+			block.putFloat(value);
+		}
+		return block.flip();
+	}
+
+	/**
+	 * The two cardinal light directions, chosen so their fold is neither zero nor saturated: the
+	 * up-facing quad sees 0.5 from the first and nothing from the second, which folds to 0.7.
+	 */
+	private static ByteBuffer lightingBlock() {
+		ByteBuffer block = ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder());
+		block.putFloat(0.0F).putFloat(0.5F).putFloat(0.0F).putFloat(0.0F);
+		block.putFloat(0.0F).putFloat(-1.0F).putFloat(0.0F).putFloat(0.0F);
+		return block.flip();
+	}
+
+	private static final float[] IDENTITY_MATRIX = {
+		1.0F, 0.0F, 0.0F, 0.0F,
+		0.0F, 1.0F, 0.0F, 0.0F,
+		0.0F, 0.0F, 1.0F, 0.0F,
+		0.0F, 0.0F, 0.0F, 1.0F
+	};
 
 	private static void assertChannel(
 		final ByteBuffer pixels,
