@@ -2693,7 +2693,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 		jsize colorCount = (*env)->GetArrayLength(env, colorFormatsValue);
 		jsize attributeCount = (*env)->GetArrayLength(env, attributeLocationsValue);
 		jsize layoutCount = (*env)->GetArrayLength(env, layoutBufferIndicesValue);
-		if (colorCount < 1 || colorCount > 8 || attributeCount > 16 || layoutCount > 16) {
+		if (colorCount > 8 || attributeCount > 16 || layoutCount > 16) {
 			mc_throw_state(env, @"Metal pipeline descriptor counts are out of range");
 			return 0;
 		}

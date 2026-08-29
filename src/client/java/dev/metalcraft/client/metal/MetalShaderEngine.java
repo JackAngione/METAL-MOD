@@ -71,12 +71,16 @@ public final class MetalShaderEngine implements AutoCloseable {
 	private final Map<String, ShaderPackLoader.PackRef> discovered = new LinkedHashMap<>();
 	private final Map<String, Attachment> targets = new LinkedHashMap<>();
 	private final List<PostPass> postPasses = new ArrayList<>();
+	/** The fullscreen draw appended to the geometry encoder before forward translucency begins. */
+	private @Nullable PostPass deferredResolve;
 	private final SettingsData settings;
 	private @Nullable MetalGpuDevice gpuDevice;
 	private ShaderPack pack;
 	private ShaderGraphCompiler.CompiledGraph graph;
 	private ShaderGraphCompiler.@Nullable CompiledPass geometryPass;
+	private ShaderGraphCompiler.@Nullable CompiledPass shadowPass;
 	private @Nullable MetalWorldGeometry worldGeometry;
+	private @Nullable MetalWorldShadow worldShadow;
 	private MetalBuffer uniforms;
 	private MetalSampler filteredSampler;
 	private MetalSampler unfilteredSampler;
@@ -104,6 +108,20 @@ public final class MetalShaderEngine implements AutoCloseable {
 
 	public static MetalShaderEngine active() {
 		return active;
+	}
+
+	/** Used by the CommandEncoder mixin to admit the engine's one layered render attachment. */
+	public static boolean isLayeredShadowAttachment(final GpuTexture texture) {
+		MetalShaderEngine engine = active;
+		return engine != null && engine.worldShadow != null && engine.worldShadow.owns(texture);
+	}
+
+	/** Completes any opaque G-buffer still resident in tile memory. */
+	public static void resolveOpaque() {
+		MetalShaderEngine engine = active;
+		if (engine != null && engine.gpuDevice != null) {
+			engine.gpuDevice.resolveShaderPackOpaque(engine);
+		}
 	}
 
 	public MetalShaderEngine(final MetalDevice device, final Path shaderpacksRoot, final Path settingsPath) {
@@ -373,6 +391,10 @@ public final class MetalShaderEngine implements AutoCloseable {
 			.filter(pass -> pass.declaration().kind() == ShaderPack.PassKind.GEOMETRY)
 			.findFirst()
 			.orElse(null);
+		this.shadowPass = compiled.passes().stream()
+			.filter(pass -> pass.declaration().kind() == ShaderPack.PassKind.SHADOW)
+			.findFirst()
+			.orElse(null);
 		this.settings.packs.computeIfAbsent(id, ignored -> new LinkedHashMap<>());
 		Map<String, Object> values = this.settings.packs.get(id);
 		for (ShaderPack.Option option : loaded.manifest().options()) {
@@ -392,10 +414,11 @@ public final class MetalShaderEngine implements AutoCloseable {
 		this.compilePostPasses();
 		this.rebuildWorldGeometry();
 		this.writeUniforms();
-		LOGGER.info("Loaded MetalCraft shader pack '{}': {} pass(es), {} target(s), {} option(s), geometry pass {}",
+		LOGGER.info("Loaded MetalCraft shader pack '{}': {} pass(es), {} target(s), {} option(s), geometry pass {}, shadow pass {}",
 			loaded.manifest().name(), compiled.passes().size(), compiled.targets().size(),
 			loaded.manifest().options().size(),
-			this.geometryPass == null ? "absent" : this.geometryPass.declaration().id());
+			this.geometryPass == null ? "absent" : this.geometryPass.declaration().id(),
+			this.shadowPass == null ? "absent" : this.shadowPass.declaration().id());
 	}
 
 	private ShaderPack loadById(final String id) throws IOException {
@@ -417,20 +440,53 @@ public final class MetalShaderEngine implements AutoCloseable {
 	 */
 	private void compilePostPasses() {
 		List<PostPass> replacements = new ArrayList<>();
+		PostPass replacementResolve = null;
 		try {
 			for (ShaderGraphCompiler.CompiledPass pass : this.graph.passes()) {
-				if (pass.declaration().kind() == ShaderPack.PassKind.GEOMETRY) {
+				if (pass.declaration().kind() == ShaderPack.PassKind.GEOMETRY
+					|| pass.declaration().kind() == ShaderPack.PassKind.SHADOW) {
 					continue;
 				}
-				replacements.add(new PostPass(pass, this.createPassPipeline(pass)));
+				if (this.geometryPass != null && pass.groupIndex() == this.geometryPass.groupIndex()) {
+					if (replacementResolve != null) {
+						throw new IllegalArgumentException("A geometry group can contain only one deferred resolve");
+					}
+					replacementResolve = new PostPass(pass, this.createMergedPassPipeline(pass));
+				} else {
+					replacements.add(new PostPass(pass, this.createPassPipeline(pass)));
+				}
 			}
 		} catch (RuntimeException error) {
 			replacements.forEach(PostPass::close);
+			if (replacementResolve != null) {
+				replacementResolve.close();
+			}
 			throw error;
 		}
 		this.postPasses.forEach(PostPass::close);
 		this.postPasses.clear();
 		this.postPasses.addAll(replacements);
+		if (this.deferredResolve != null) {
+			this.deferredResolve.close();
+		}
+		this.deferredResolve = replacementResolve;
+	}
+
+	/** Builds a fullscreen pipeline against every attachment kept open by its merged pass group. */
+	private MetalRenderPipeline createMergedPassPipeline(final ShaderGraphCompiler.CompiledPass pass) {
+		List<String> attachments = this.groupColorTargets(pass.groupIndex());
+		List<MetalRenderPipeline.ColorTarget> colorTargets = new ArrayList<>(attachments.size());
+		for (String target : attachments) {
+			int writeMask = pass.declaration().writes().contains(target) ? MetalRenderPipeline.WRITE_ALL : 0;
+			colorTargets.add(new MetalRenderPipeline.ColorTarget(this.writeFormat(target), writeMask, null));
+		}
+		String passId = pass.declaration().id();
+		String source = this.passDefines(pass) + this.configuredSource();
+		return this.pipelineCache.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+			source, passId + "_vertex", source, passId + "_fragment",
+			colorTargets, MetalTexture.Format.DEPTH32_FLOAT, MetalRenderPipeline.VertexDescriptor.EMPTY,
+			MetalRenderPipeline.DepthState.DISABLED, MetalRenderPipeline.RasterState.DEFAULT
+		));
 	}
 
 	private MetalRenderPipeline createPassPipeline(final ShaderGraphCompiler.CompiledPass pass) {
@@ -468,12 +524,54 @@ public final class MetalShaderEngine implements AutoCloseable {
 			defines.append("#define MC_TEX_").append(symbol(target)).append(' ').append(read++).append('\n');
 		}
 		int color = 0;
-		for (ShaderGraphCompiler.WriteDecision write : pass.writes()) {
-			if (!TARGET_DEPTH.equals(write.target())) {
-				defines.append("#define MC_TARGET_").append(symbol(write.target())).append(' ').append(color++).append('\n');
-			}
+		for (String target : this.groupColorTargets(pass.groupIndex())) {
+			defines.append("#define MC_TARGET_").append(symbol(target)).append(' ').append(color++).append('\n');
 		}
 		return defines.toString();
+	}
+
+	/** Attachment order is the first declaration of each target in the merged group. */
+	private List<String> groupColorTargets(final int groupIndex) {
+		List<String> targets = new ArrayList<>();
+		for (ShaderGraphCompiler.CompiledPass member : this.graph.passes()) {
+			if (member.groupIndex() != groupIndex || member.declaration().kind() == ShaderPack.PassKind.COMPUTE) {
+				continue;
+			}
+			for (String target : member.declaration().writes()) {
+				if (!TARGET_DEPTH.equals(target) && !targets.contains(target)) {
+					targets.add(target);
+				}
+			}
+		}
+		return List.copyOf(targets);
+	}
+
+	/** Draws the merged resolve into the encoder that still owns the memoryless G-buffer. */
+	boolean encodeDeferredResolve(final MetalRenderPass render) {
+		PostPass resolve = this.deferredResolve;
+		MetalWorldGeometry geometry = this.worldGeometry;
+		if (resolve == null || geometry == null || !geometry.hasPendingResolve()) {
+			return false;
+		}
+		render.setPipeline(resolve.pipeline());
+		int textureSlot = 0;
+		for (String read : resolve.compiled().declaration().reads()) {
+			MetalTextureView view = this.readView(read);
+			render.setTexture(textureSlot, view, MetalRenderPass.STAGE_FRAGMENT);
+			render.setSampler(
+				textureSlot,
+				view.texture().descriptor().format().hasDepthAspect() ? this.unfilteredSampler : this.filteredSampler,
+				MetalRenderPass.STAGE_FRAGMENT
+			);
+			textureSlot++;
+		}
+		render.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
+		if (this.worldShadow != null) {
+			render.setUniformBuffer(1, this.worldShadow.matricesForTesting(), 0L, MetalRenderPass.STAGE_FRAGMENT);
+		}
+		render.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+		geometry.didResolve();
+		return true;
 	}
 
 	private static String symbol(final String id) {
@@ -491,34 +589,52 @@ public final class MetalShaderEngine implements AutoCloseable {
 			this.worldGeometry.close();
 			this.worldGeometry = null;
 		}
-		if (this.geometryPass == null || this.gpuDevice == null) {
-			MetalWorldGeometry.setActive(null);
+		if (this.worldShadow != null) {
+			this.worldShadow.close();
+			this.worldShadow = null;
+		}
+		MetalWorldGeometry.setActive(null);
+		MetalWorldShadow.setActive(null);
+		if (this.gpuDevice == null) {
 			return;
 		}
-		List<String> writes = this.geometryPass.declaration().writes();
-		List<MetalWorldGeometry.Channel> channels = new ArrayList<>();
-		for (String target : writes) {
-			if (TARGET_SCENE.equals(target) || TARGET_DEPTH.equals(target)) {
-				continue;
+		if (this.geometryPass != null) {
+			List<String> writes = this.geometryPass.declaration().writes();
+			List<MetalWorldGeometry.Channel> channels = new ArrayList<>();
+			for (String target : writes) {
+				if (TARGET_SCENE.equals(target) || TARGET_DEPTH.equals(target)) {
+					continue;
+				}
+				Attachment attachment = this.targets.get(target);
+				if (attachment == null) {
+					throw new IllegalStateException("Geometry pass writes unallocated target '" + target + "'");
+				}
+				channels.add(new MetalWorldGeometry.Channel(target, attachment.view(), MetalWorldGeometry.clearColorFor(target)));
 			}
-			Attachment attachment = this.targets.get(target);
-			if (attachment == null) {
-				throw new IllegalStateException("Geometry pass writes unallocated target '" + target + "'");
-			}
-			channels.add(new MetalWorldGeometry.Channel(target, attachment.view(), MetalWorldGeometry.clearColorFor(target)));
+			MetalWorldGeometry binding = new MetalWorldGeometry(
+				this.gpuDevice,
+				this,
+				this.pipelineCache,
+				this.pack.id(),
+				this.geometryPass.declaration().id(),
+				this.configuredSource(),
+				this.targetDefines(),
+				channels
+			);
+			this.worldGeometry = binding;
+			MetalWorldGeometry.setActive(binding);
 		}
-		MetalWorldGeometry binding = new MetalWorldGeometry(
-			this.gpuDevice,
-			this,
-			this.pipelineCache,
-			this.pack.id(),
-			this.geometryPass.declaration().id(),
-			this.configuredSource(),
-			this.targetDefines(),
-			channels
-		);
-		this.worldGeometry = binding;
-		MetalWorldGeometry.setActive(binding);
+		if (this.shadowPass != null) {
+			String target = this.shadowPass.declaration().writes().getFirst();
+			Attachment attachment = this.requireAttachment(target);
+			this.worldShadow = new MetalWorldShadow(
+				this.gpuDevice, this.pipelineCache, this.pack.id(), this.shadowPass.declaration().id(),
+				this.configuredSource(), attachment.view(),
+				() -> this.numericOption("shadow_distance", 192.0F),
+				() -> this.numericOption("shadow_normal_offset", 0.08F)
+			);
+			MetalWorldShadow.setActive(this.worldShadow);
+		}
 	}
 
 	/**
@@ -529,6 +645,9 @@ public final class MetalShaderEngine implements AutoCloseable {
 	 * channel does not mean renumbering the programs.
 	 */
 	private String targetDefines() {
+		if (this.geometryPass == null) {
+			return "";
+		}
 		StringBuilder defines = new StringBuilder();
 		int index = 0;
 		for (String target : this.geometryPass.declaration().writes()) {
@@ -604,6 +723,13 @@ public final class MetalShaderEngine implements AutoCloseable {
 			targetHeight = Math.max(1, (int)Math.round(this.height * scale.value()));
 		} else {
 			int size = ((ShaderPack.FixedSize)target.extent()).value();
+			if (info.producer().isPresent() && this.shadowPass != null
+				&& info.producer().get().equals(this.shadowPass.declaration().id())) {
+				Object configured = this.reloadOption("shadow_resolution");
+				if (configured instanceof Number number) {
+					size = number.intValue();
+				}
+			}
 			targetWidth = size;
 			targetHeight = size;
 		}
@@ -615,13 +741,18 @@ public final class MetalShaderEngine implements AutoCloseable {
 				: new MetalTexture.Descriptor(format, targetWidth, targetHeight, 1, MetalTexture.USAGE_ALL);
 		MetalTexture metal = this.device.createTexture(descriptor);
 		try {
+			int usage = GpuTexture.USAGE_RENDER_ATTACHMENT
+				| (info.memoryless() ? 0 : GpuTexture.USAGE_TEXTURE_BINDING);
 			MetalGpuTexture texture = new MetalGpuTexture(
-				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT,
+				usage,
 				"metalcraft:" + id,
 				Blaze3DMetalMappings.gpuFormat(format),
 				targetWidth, targetHeight, target.layers(), 1, metal
 			);
-			return new Attachment(texture, new MetalGpuTextureView(texture, 0, 1, metal.createView()));
+			MetalGpuTextureView view = info.memoryless()
+				? MetalGpuTextureView.attachmentOnly(texture)
+				: new MetalGpuTextureView(texture, 0, 1, metal.createView());
+			return new Attachment(texture, view);
 		} catch (RuntimeException error) {
 			metal.close();
 			throw error;
@@ -667,6 +798,18 @@ public final class MetalShaderEngine implements AutoCloseable {
 	@Nullable MetalTexture targetTextureForTesting(final String id) {
 		Attachment attachment = this.targets.get(id);
 		return attachment == null ? null : attachment.metal();
+	}
+
+	@Nullable MetalWorldShadow shadowForTesting() {
+		return this.worldShadow;
+	}
+
+	@Nullable MetalRenderPipeline deferredResolvePipelineForTesting() {
+		return this.deferredResolve == null ? null : this.deferredResolve.pipeline();
+	}
+
+	MetalBuffer optionUniformsForTesting() {
+		return this.uniforms;
 	}
 
 	/** See {@link MetalWorldGeometry#supplyWorldDepthForTesting}. */
@@ -760,6 +903,17 @@ public final class MetalShaderEngine implements AutoCloseable {
 			.orElse(null);
 	}
 
+	private float numericOption(final String id, final float fallback) {
+		return this.pack.manifest().options().stream()
+			.filter(option -> option.id().equals(id))
+			.findFirst()
+			.map(option -> this.packSettings().getOrDefault(id, option.defaultValue()))
+			.filter(Number.class::isInstance)
+			.map(Number.class::cast)
+			.map(Number::floatValue)
+			.orElse(fallback);
+	}
+
 	private Map<String, Object> packSettings() {
 		return this.settings.packs.computeIfAbsent(this.pack.id(), ignored -> new LinkedHashMap<>());
 	}
@@ -800,12 +954,22 @@ public final class MetalShaderEngine implements AutoCloseable {
 			this.worldGeometry.close();
 			this.worldGeometry = null;
 		}
+		if (this.worldShadow != null) {
+			this.worldShadow.close();
+			this.worldShadow = null;
+		}
 		MetalWorldGeometry.setActive(null);
+		MetalWorldShadow.setActive(null);
 		this.postPasses.forEach(PostPass::close);
 		this.postPasses.clear();
+		if (this.deferredResolve != null) {
+			this.deferredResolve.close();
+			this.deferredResolve = null;
+		}
 		this.targets.values().forEach(Attachment::close);
 		this.targets.clear();
 		this.geometryPass = null;
+		this.shadowPass = null;
 		if (this.sceneView != null) {
 			this.sceneView.close();
 			this.sceneView = null;
@@ -862,10 +1026,9 @@ public final class MetalShaderEngine implements AutoCloseable {
 	/**
 	 * Rejects the parts of the declared format the runtime does not execute yet.
 	 *
-	 * <p>The graph compiler validates more than the runtime can run: it already schedules merged
-	 * pass groups and compute passes, because Phase 0 proved both mechanisms against the hardware.
-	 * Loading a pack that uses them would produce a graph nothing executes, so the refusal is here
-	 * and names the pass, rather than leaving a pack to render half of what it declared.
+	 * <p>The graph compiler validates more than the runtime can run. The deferred geometry/resolve
+	 * pair is executable; arbitrary merged groups and compute passes remain future graph shapes, so
+	 * the refusal is here and names the pass rather than leaving a pack to render half its graph.
 	 */
 	private static void validateSupportedGraph(
 		final ShaderPack pack,
@@ -879,11 +1042,28 @@ public final class MetalShaderEngine implements AutoCloseable {
 				"Shader pack '" + pack.id() + "' declares " + geometryPasses + " geometry passes; the engine runs at most one"
 			);
 		}
+		long shadowPasses = graph.passes().stream()
+			.filter(pass -> pass.declaration().kind() == ShaderPack.PassKind.SHADOW)
+			.count();
+		if (shadowPasses > 1) {
+			throw new IllegalArgumentException(
+				"Shader pack '" + pack.id() + "' declares " + shadowPasses + " shadow passes; the engine runs at most one"
+			);
+		}
 		for (ShaderGraphCompiler.PassGroup group : graph.groups()) {
-			if (group.passes().size() > 1) {
+			if (group.passes().size() <= 1) {
+				continue;
+			}
+			List<ShaderGraphCompiler.CompiledPass> members = graph.passes().stream()
+				.filter(pass -> pass.groupIndex() == group.index()).toList();
+			long geometryMembers = members.stream()
+				.filter(pass -> pass.declaration().kind() == ShaderPack.PassKind.GEOMETRY).count();
+			long fullscreenMembers = members.stream()
+				.filter(pass -> pass.declaration().kind() == ShaderPack.PassKind.FULLSCREEN).count();
+			if (members.size() != 2 || geometryMembers != 1 || fullscreenMembers != 1) {
 				throw new IllegalArgumentException(
-					"Shader pack '" + pack.id() + "' merges passes " + group.passes()
-						+ "; merged pass groups are not executed until the deferred resolve exists"
+					"Shader pack '" + pack.id() + "' merges unsupported pass group " + group.passes()
+						+ "; the runtime accepts one geometry pass followed by one fullscreen resolve"
 				);
 			}
 		}
@@ -894,8 +1074,24 @@ public final class MetalShaderEngine implements AutoCloseable {
 						+ "'; compute passes are not executed until the effects phase exists"
 				);
 			}
+			if (pass.declaration().kind() == ShaderPack.PassKind.SHADOW) {
+				List<String> writes = pass.declaration().writes();
+				if (writes.size() != 1) {
+					throw new IllegalArgumentException("Shadow pass '" + pass.declaration().id() + "' must write exactly one target");
+				}
+				ShaderPack.Target target = pack.manifest().targets().get(writes.getFirst());
+				if (target == null || target.format() != ShaderPack.PixelFormat.DEPTH32_FLOAT || target.layers() != 4) {
+					throw new IllegalArgumentException(
+						"Shadow pass '" + pass.declaration().id() + "' requires one depth32_float target with four layers"
+					);
+				}
+				continue;
+			}
 			if (pass.declaration().kind() != ShaderPack.PassKind.GEOMETRY) {
-				if (pass.declaration().writes().contains(TARGET_SCENE)) {
+				boolean mergedResolve = graph.passes().stream().anyMatch(candidate ->
+					candidate.groupIndex() == pass.groupIndex()
+						&& candidate.declaration().kind() == ShaderPack.PassKind.GEOMETRY);
+				if (pass.declaration().writes().contains(TARGET_SCENE) && !mergedResolve) {
 					throw new IllegalArgumentException(
 						"Pass '" + pass.declaration().id() + "' writes 'scene', which only a geometry pass may do:"
 							+ " Minecraft's colour attachment has no declared format for a pipeline to be built against"

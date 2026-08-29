@@ -144,9 +144,19 @@ public final class ShaderGraphCompiler {
 		Map<String, List<String>> producers = producers(manifest.passes());
 		for (Map.Entry<String, List<String>> entry : producers.entrySet()) {
 			if (entry.getValue().size() > 1) {
-				throw new CompileException(
-					"Target '" + entry.getKey() + "' has ambiguous producers " + entry.getValue()
-				);
+				String root = roots.get(entry.getValue().getFirst());
+				for (int index = 1; index < entry.getValue().size(); index++) {
+					String writerId = entry.getValue().get(index);
+					ShaderPack.Pass writer = byId.get(writerId);
+					boolean explicitRewrite = root.equals(roots.get(writerId))
+						&& writer.mergeWith() != null
+						&& (writer.reads().contains(entry.getKey()) || writer.tileReads().contains(entry.getKey()));
+					if (!explicitRewrite) {
+						throw new CompileException(
+							"Target '" + entry.getKey() + "' has ambiguous producers " + entry.getValue()
+						);
+					}
+				}
 			}
 		}
 
@@ -172,13 +182,13 @@ public final class ShaderGraphCompiler {
 			}
 			for (String target : pass.reads()) {
 				usages.get(target).sampled.add(pass.id());
-				validateSampledRead(manifest, pass, target, producers, roots);
-				addProducerDependency(dependencies, edgeLabels, producers, target, pass.id());
+				validateSampledRead(manifest, pass, target, producers, roots, order);
+				addProducerDependency(dependencies, edgeLabels, producers, target, pass.id(), order);
 			}
 			for (String target : pass.tileReads()) {
 				usages.get(target).tiled.add(pass.id());
-				validateTileRead(manifest, pass, target, producers, roots);
-				addProducerDependency(dependencies, edgeLabels, producers, target, pass.id());
+				validateTileRead(manifest, pass, target, producers, roots, order);
+				addProducerDependency(dependencies, edgeLabels, producers, target, pass.id(), order);
 			}
 		}
 
@@ -276,8 +286,9 @@ public final class ShaderGraphCompiler {
 					throw new CompileException("Pass '" + pass.id() + "' cannot merge with compute pass '" + merged.id() + "'");
 				}
 			}
-			if (pass.kind() != ShaderPack.PassKind.GEOMETRY && !pass.geometry().isEmpty()) {
-				throw new CompileException("Only a geometry pass may declare geometry: pass '" + pass.id() + "'");
+			if (pass.kind() != ShaderPack.PassKind.GEOMETRY && pass.kind() != ShaderPack.PassKind.SHADOW
+				&& !pass.geometry().isEmpty()) {
+				throw new CompileException("Only a geometry or shadow pass may declare geometry: pass '" + pass.id() + "'");
 			}
 			if (pass.kind() == ShaderPack.PassKind.COMPUTE && (!pass.tileReads().isEmpty() || pass.mergeWith() != null)) {
 				throw new CompileException("Compute pass '" + pass.id() + "' cannot tile-read or merge");
@@ -360,9 +371,10 @@ public final class ShaderGraphCompiler {
 		final ShaderPack.Pass consumer,
 		final String target,
 		final Map<String, List<String>> producers,
-		final Map<String, String> roots
+		final Map<String, String> roots,
+		final Map<String, Integer> order
 	) {
-		String producer = singleProducer(producers, target);
+		String producer = producerForConsumer(producers, target, consumer.id(), order);
 		ShaderPack.Target declaration = manifest.targets().get(target);
 		if (declaration != null && declaration.lifetime() == ShaderPack.Lifetime.TRANSIENT) {
 			throw new CompileException(producer == null
@@ -387,9 +399,10 @@ public final class ShaderGraphCompiler {
 		final ShaderPack.Pass consumer,
 		final String target,
 		final Map<String, List<String>> producers,
-		final Map<String, String> roots
+		final Map<String, String> roots,
+		final Map<String, Integer> order
 	) {
-		String producer = singleProducer(producers, target);
+		String producer = producerForConsumer(producers, target, consumer.id(), order);
 		if (producer == null) {
 			throw new CompileException("Pass '" + consumer.id() + "' tile-reads target '" + target + "' with no producer");
 		}
@@ -416,12 +429,48 @@ public final class ShaderGraphCompiler {
 		final Map<Edge, Set<String>> edgeLabels,
 		final Map<String, List<String>> producers,
 		final String target,
-		final String consumer
+		final String consumer,
+		final Map<String, Integer> order
 	) {
-		String producer = singleProducer(producers, target);
+		String producer = producerForConsumer(producers, target, consumer, order);
 		if (producer != null && !producer.equals(consumer)) {
 			addDependency(dependencies, edgeLabels, producer, consumer, target);
 		}
+	}
+
+	/**
+	 * Resolves a read to the value visible at that point in the declared sequence.
+	 *
+	 * <p>A target normally has one producer and declarations may be out of order, so that producer
+	 * remains unambiguous. A merged in-place rewrite is different: the later draw reads the value
+	 * the previous draw left in tile memory and writes the same attachment. In that case the nearest
+	 * preceding writer is the producer, while a pass after the group observes the group's last
+	 * writer.
+	 */
+	private static String producerForConsumer(
+		final Map<String, List<String>> producers,
+		final String target,
+		final String consumer,
+		final Map<String, Integer> order
+	) {
+		List<String> targetProducers = producers.get(target);
+		if (targetProducers == null || targetProducers.isEmpty()) {
+			return null;
+		}
+		if (targetProducers.size() == 1) {
+			return targetProducers.getFirst();
+		}
+		int consumerOrder = order.get(consumer);
+		String visible = null;
+		int visibleOrder = Integer.MIN_VALUE;
+		for (String producer : targetProducers) {
+			int producerOrder = order.get(producer);
+			if (producerOrder < consumerOrder && producerOrder > visibleOrder) {
+				visible = producer;
+				visibleOrder = producerOrder;
+			}
+		}
+		return visible;
 	}
 
 	private static String singleProducer(final Map<String, List<String>> producers, final String target) {

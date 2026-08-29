@@ -7,9 +7,9 @@
 // hard-coded to a slot: the numbers come from the pipeline being stood in for, so a bind by name in
 // Minecraft's own code lands where this program expects it.
 //
-// Colour zero is Minecraft's own attachment and this program still writes it exactly as the vanilla
-// program would, because nothing lights the G-buffer yet and the game has to stay playable. The
-// three channels after it are the G-buffer proper.
+// Colour zero is Minecraft's own attachment and receives the vanilla-shaded seed. The merged
+// resolve replaces routed opaque pixels with deferred lighting and preserves the seed wherever no
+// G-buffer material was written. The three channels after it are the memoryless G-buffer proper.
 
 #include <metal_stdlib>
 using namespace metal;
@@ -76,10 +76,8 @@ struct GBufferTargets {
 
 struct GBufferVaryings {
     float4 position [[position]];
-    /// Camera-relative world space: the space Minecraft's own fog math already treats as world
-    /// relative, with the camera at the origin. Every program here agrees to write its normal in
-    /// this space, so a terrain normal reconstructed from derivatives and an entity normal read
-    /// from the vertex mean the same thing to whatever reads them back.
+	/// Camera-view space. Keeping positions and normals in the same space lets the resolve rebuild
+	/// a shadow lookup from screen position plus the packed linear depth.
     float3 worldPos;
     float3 normal;
     float4 tint;
@@ -164,19 +162,20 @@ static inline float mc_material_roughness(int material) {
 }
 
 /// Fills the three G-buffer channels from one shaded fragment.
-static inline void mc_write_gbuffer(thread GBufferTargets &out, float3 albedo, float3 normal, float2 lightLevels) {
+static inline void mc_write_gbuffer(
+    thread GBufferTargets &out, float3 albedo, float3 normal, float2 lightLevels, float viewDepth
+) {
     // One past the material class, so a zero alpha means "nothing drew here" rather than the first
     // class. The G-buffer is cleared to zero and the sky never writes it, so the distinction is the
     // difference between reading the sky as solid and reading it as absent.
     out.albedo = float4(albedo, float(MC_MATERIAL + 1) / 255.0);
     out.normal = float4(mc_encode_normal(normal), mc_material_roughness(MC_MATERIAL), 0.0);
+    uint packedDepth = uint(round(saturate(viewDepth / 1024.0) * 65535.0));
     out.light = float4(
         lightLevels.x,
         lightLevels.y,
-        MC_MATERIAL == MC_MATERIAL_EMISSIVE ? 1.0 : 0.0,
-        // Reserved. Ambient occlusion is baked into the vertex colour alongside the biome tint and
-        // cannot be separated from it without extending the terrain vertex format.
-        0.0
+        float((packedDepth >> 8) & 255u) / 255.0,
+        float(packedDepth & 255u) / 255.0
     );
 }
 
@@ -201,7 +200,7 @@ static inline float3 mc_reconstruct_normal(float3 worldPos) {
 // Terrain
 // ================================================================================================
 
-#ifdef MC_PROGRAM_TERRAIN
+#if defined(MC_PASS_GBUFFER) && defined(MC_PROGRAM_TERRAIN)
 
 struct TerrainVertex {
     float3 Position [[attribute(0)]];
@@ -218,19 +217,20 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     texture2d<float> lightMap [[texture(MC_SLOT_SAMPLER2)]],
     sampler lightSampler [[sampler(MC_SLOT_SAMPLER2)]]
 ) {
-    float3 worldPos = in.Position + float3(section.ChunkPosition - globals.CameraBlockPos) + globals.CameraOffset;
+    float3 relative = in.Position + float3(section.ChunkPosition - globals.CameraBlockPos) + globals.CameraOffset;
+    float3 viewPos = (section.ModelViewMat * float4(relative, 1.0)).xyz;
     float2 uv2 = float2(in.UV2);
 
     GBufferVaryings out;
-    out.position = mc_clip_position(projection.ProjMat * section.ModelViewMat * float4(worldPos, 1.0));
-    out.worldPos = worldPos;
+    out.position = mc_clip_position(projection.ProjMat * float4(viewPos, 1.0));
+    out.worldPos = viewPos;
     out.normal = float3(0.0);
     out.tint = in.Color;
     out.lightMapColor = mc_sample_lightmap(lightMap, lightSampler, uv2);
     out.uv = in.UV0;
     out.lightLevels = saturate(uv2 / 240.0);
-    out.sphericalDistance = mc_fog_spherical_distance(worldPos);
-    out.cylindricalDistance = mc_fog_cylindrical_distance(worldPos);
+    out.sphericalDistance = mc_fog_spherical_distance(relative);
+    out.cylindricalDistance = mc_fog_cylindrical_distance(relative);
     return out;
 }
 
@@ -303,7 +303,9 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     GBufferTargets out;
     out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
     // Albedo is the surface before the light hits it, so the lightmap and the fog stay out of it.
-    mc_write_gbuffer(out, (texel * in.tint).rgb, mc_reconstruct_normal(in.worldPos), in.lightLevels);
+    mc_write_gbuffer(
+        out, (texel * in.tint).rgb, mc_reconstruct_normal(in.worldPos), in.lightLevels, max(0.0, -in.worldPos.z)
+    );
     return out;
 }
 
@@ -313,7 +315,7 @@ fragment GBufferTargets gbuffer_terrain_fragment(
 // Loose block models
 // ================================================================================================
 
-#ifdef MC_PROGRAM_BLOCK
+#if defined(MC_PASS_GBUFFER) && defined(MC_PROGRAM_BLOCK)
 
 struct BlockVertex {
     float3 Position [[attribute(0)]];
@@ -329,19 +331,20 @@ vertex GBufferVaryings gbuffer_block_vertex(
     texture2d<float> lightMap [[texture(MC_SLOT_SAMPLER2)]],
     sampler lightSampler [[sampler(MC_SLOT_SAMPLER2)]]
 ) {
-    float3 worldPos = in.Position + transforms.ModelOffset;
+    float3 modelPos = in.Position + transforms.ModelOffset;
+    float3 viewPos = (transforms.ModelViewMat * float4(modelPos, 1.0)).xyz;
     float2 uv2 = float2(in.UV2);
 
     GBufferVaryings out;
-    out.position = mc_clip_position(projection.ProjMat * transforms.ModelViewMat * float4(worldPos, 1.0));
-    out.worldPos = worldPos;
+    out.position = mc_clip_position(projection.ProjMat * float4(viewPos, 1.0));
+    out.worldPos = viewPos;
     out.normal = float3(0.0);
     out.tint = in.Color;
     out.lightMapColor = mc_sample_lightmap(lightMap, lightSampler, uv2);
     out.uv = in.UV0;
     out.lightLevels = saturate(uv2 / 240.0);
-    out.sphericalDistance = mc_fog_spherical_distance(worldPos);
-    out.cylindricalDistance = mc_fog_cylindrical_distance(worldPos);
+    out.sphericalDistance = mc_fog_spherical_distance(modelPos);
+    out.cylindricalDistance = mc_fog_cylindrical_distance(modelPos);
     return out;
 }
 
@@ -364,7 +367,7 @@ fragment GBufferTargets gbuffer_block_fragment(
     out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
     mc_write_gbuffer(
         out, (texel * in.tint * transforms.ColorModulator).rgb,
-        mc_reconstruct_normal(in.worldPos), in.lightLevels
+        mc_reconstruct_normal(in.worldPos), in.lightLevels, max(0.0, -in.worldPos.z)
     );
     return out;
 }
@@ -375,7 +378,7 @@ fragment GBufferTargets gbuffer_block_fragment(
 // Entities and block entities
 // ================================================================================================
 
-#ifdef MC_PROGRAM_ENTITY
+#if defined(MC_PASS_GBUFFER) && defined(MC_PROGRAM_ENTITY)
 
 // The variant switches Minecraft compiles this program with. The engine refuses to substitute a
 // pipeline carrying any switch not listed here, so every branch below has a counterpart in vanilla's
@@ -437,10 +440,16 @@ vertex EntityVaryings gbuffer_entity_vertex(
     float2 uv2 = float2(in.UV2);
 
     EntityVaryings out;
-    out.position = mc_clip_position(projection.ProjMat * transforms.ModelViewMat * float4(in.Position, 1.0));
-    out.worldPos = in.Position;
+    float3 viewPos = (transforms.ModelViewMat * float4(in.Position, 1.0)).xyz;
+    out.position = mc_clip_position(projection.ProjMat * float4(viewPos, 1.0));
+    out.worldPos = viewPos;
     // The one world format that carries a real normal, so nothing has to be reconstructed here.
-    out.normal = in.Normal.xyz;
+    float3x3 normalMatrix = float3x3(
+        transforms.ModelViewMat[0].xyz,
+        transforms.ModelViewMat[1].xyz,
+        transforms.ModelViewMat[2].xyz
+    );
+    out.normal = normalize(normalMatrix * in.Normal.xyz);
     out.baseTint = in.Color;
     out.lightLevels = saturate(uv2 / 240.0);
     out.sphericalDistance = mc_fog_spherical_distance(in.Position);
@@ -518,7 +527,7 @@ fragment GBufferTargets gbuffer_entity_fragment(
     GBufferTargets out;
     out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
     float3 normal = length(in.normal) < 1e-8 ? mc_reconstruct_normal(in.worldPos) : normalize(in.normal);
-    mc_write_gbuffer(out, albedo.rgb, normal, in.lightLevels);
+    mc_write_gbuffer(out, albedo.rgb, normal, in.lightLevels, max(0.0, -in.worldPos.z));
     return out;
 }
 

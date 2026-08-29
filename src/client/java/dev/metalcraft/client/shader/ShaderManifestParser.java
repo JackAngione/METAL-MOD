@@ -102,8 +102,8 @@ final class ShaderManifestParser {
 			if (writes.isEmpty()) {
 				throw new IllegalArgumentException("Pass '" + id + "' must write at least one target");
 			}
-			if (kind != ShaderPack.PassKind.GEOMETRY && !geometry.isEmpty()) {
-				throw new IllegalArgumentException("Only a geometry pass may declare geometry: pass '" + id + "'");
+			if (kind != ShaderPack.PassKind.GEOMETRY && kind != ShaderPack.PassKind.SHADOW && !geometry.isEmpty()) {
+				throw new IllegalArgumentException("Only a geometry or shadow pass may declare geometry: pass '" + id + "'");
 			}
 			if (kind == ShaderPack.PassKind.COMPUTE && (!tileReads.isEmpty() || mergeWith != null)) {
 				throw new IllegalArgumentException("Compute pass '" + id + "' cannot tile-read or merge");

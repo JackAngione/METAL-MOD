@@ -6,6 +6,7 @@ import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import dev.metalcraft.client.metal.MetalWorldGeometry;
+import dev.metalcraft.client.metal.MetalWorldShadow;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -21,6 +22,8 @@ import org.joml.Vector4fc;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Routes opaque chunk terrain into the shader pack's G-buffer.
@@ -36,6 +39,15 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  */
 @Mixin(ChunkSectionsToRender.class)
 abstract class ChunkSectionsToRenderMixin {
+	@Inject(method = "renderGroup", at = @At("HEAD"))
+	private void metalcraft$renderShadowsBeforeMain(
+		final ChunkSectionLayerGroup group,
+		final GpuSampler sampler,
+		final CallbackInfo callback
+	) {
+		MetalWorldShadow.renderBeforeMain(group, sampler);
+	}
+
 	@Redirect(
 		method = "renderGroup",
 		at = @At(

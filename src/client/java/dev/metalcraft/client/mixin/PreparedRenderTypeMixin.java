@@ -5,6 +5,7 @@ import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import dev.metalcraft.client.metal.MetalWorldGeometry;
+import dev.metalcraft.client.metal.MetalWorldShadow;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -14,6 +15,8 @@ import org.joml.Vector4fc;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Routes entities, block entities, and every other feature draw into the shader pack's G-buffer.
@@ -28,6 +31,25 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  */
 @Mixin(PreparedRenderType.class)
 abstract class PreparedRenderTypeMixin {
+	@Inject(
+		method = "drawFromBuffer(Lcom/mojang/blaze3d/buffers/GpuBuffer;Lcom/mojang/blaze3d/buffers/GpuBuffer;Lcom/mojang/blaze3d/IndexType;III)V",
+		at = @At("HEAD"),
+		cancellable = true
+	)
+	private void metalcraft$skipUnsupportedShadowFeature(
+		final com.mojang.blaze3d.buffers.GpuBuffer vertexBuffer,
+		final com.mojang.blaze3d.buffers.GpuBuffer indexBuffer,
+		final com.mojang.blaze3d.IndexType indexType,
+		final int baseVertex,
+		final int firstIndex,
+		final int indexCount,
+		final CallbackInfo callback
+	) {
+		if (MetalWorldShadow.shouldSkip(((PreparedRenderType)(Object)this).pipeline())) {
+			callback.cancel();
+		}
+	}
+
 	@Redirect(
 		method = "drawFromBuffer(Lcom/mojang/blaze3d/buffers/GpuBuffer;Lcom/mojang/blaze3d/buffers/GpuBuffer;Lcom/mojang/blaze3d/IndexType;III)V",
 		at = @At(

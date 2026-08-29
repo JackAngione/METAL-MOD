@@ -5,20 +5,32 @@
     "gbuffer_albedo": {
       "format": "rgba8_unorm",
       "scale": 1.0,
-      "lifetime": "frame"
+      "lifetime": "transient"
     },
     "gbuffer_normal": {
       "format": "rgba8_unorm",
       "scale": 1.0,
-      "lifetime": "frame"
+      "lifetime": "transient"
     },
     "gbuffer_light": {
       "format": "rgba8_unorm",
       "scale": 1.0,
+      "lifetime": "transient"
+    },
+    "shadow": {
+      "format": "depth32_float",
+      "size": 2048,
+      "layers": 4,
       "lifetime": "frame"
     }
   },
   "passes": [
+    {
+      "id": "shadow",
+      "kind": "shadow",
+      "geometry": "terrain,entities,blockentities",
+      "writes": ["shadow"]
+    },
     {
       "id": "gbuffer",
       "kind": "geometry",
@@ -26,9 +38,17 @@
       "writes": ["scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light", "depth"]
     },
     {
+      "id": "resolve",
+      "kind": "fullscreen",
+      "merge_with": "gbuffer",
+      "reads": ["shadow"],
+      "tile_reads": ["scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light"],
+      "writes": ["scene"]
+    },
+    {
       "id": "final",
       "kind": "fullscreen",
-      "reads": ["scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light", "depth"],
+      "reads": ["scene"],
       "writes": ["drawable"]
     }
   ],
@@ -37,7 +57,7 @@
       "id": "debug_view",
       "category": "debug",
       "type": "enum",
-      "values": ["off", "albedo", "normal", "light", "material", "depth"],
+      "values": ["off", "albedo", "normal", "light", "material", "depth", "shadow0", "shadow1", "shadow2", "shadow3"],
       "default": "off",
       "apply": "uniform"
     },
@@ -65,6 +85,34 @@
       "values": ["nearest", "linear"],
       "default": "linear",
       "apply": "reload"
+    },
+    {
+      "id": "shadow_resolution",
+      "category": "shadows",
+      "type": "enum",
+      "values": [1024, 2048, 4096],
+      "default": 2048,
+      "apply": "reload"
+    },
+    {
+      "id": "shadow_distance",
+      "category": "shadows",
+      "type": "int",
+      "min": 64,
+      "max": 512,
+      "step": 32,
+      "default": 192,
+      "apply": "uniform"
+    },
+    {
+      "id": "shadow_normal_offset",
+      "category": "shadows",
+      "type": "float",
+      "min": 0.0,
+      "max": 0.5,
+      "step": 0.01,
+      "default": 0.08,
+      "apply": "uniform"
     }
   ]
 }

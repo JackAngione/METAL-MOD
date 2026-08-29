@@ -109,6 +109,10 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		return this.shaderEngine;
 	}
 
+	void resolveShaderPackOpaque(final MetalShaderEngine engine) {
+		this.commandEncoder.resolveShaderPackOpaque(engine);
+	}
+
 	MetalRegionClear regionClear() {
 		if (this.regionClear == null) this.regionClear = new MetalRegionClear(this.metal);
 		return this.regionClear;
@@ -132,6 +136,15 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			throw new NullPointerException("A native Metal pipeline needs both a Blaze3D pipeline and a program");
 		}
 		this.nativePipelines.put(pipeline, program);
+	}
+
+	/** Releases one pack stand-in without disturbing the other active world bindings. */
+	void forgetNativePipeline(final RenderPipeline pipeline) {
+		this.nativePipelines.remove(pipeline);
+		MetalCompiledRenderPipeline compiled = this.pipelineCache.remove(pipeline);
+		if (compiled != null) {
+			compiled.close();
+		}
 	}
 
 	/** Drops registered stand-ins and their compiled state, so a pack switch cannot reuse either. */
@@ -422,6 +435,13 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			MetalRenderPipeline.Descriptor descriptor = Blaze3DMetalMappings.pipelineDescriptor(
 				pipeline, program.source(), program.vertexFunction(), program.source(), program.fragmentFunction()
 			);
+			// A layered shadow pipeline is deliberately depth-only. Metal has no useful depthless
+			// variant for it, but Blaze3D's compiled-pipeline wrapper expects both handles to be valid;
+			// sharing the depth handle is safe because such a pipeline can only match a depth pass.
+			if (descriptor.colorTargets().isEmpty()) {
+				MetalRenderPipeline withDepth = program.cache().createRenderPipeline(descriptor);
+				return new MetalCompiledRenderPipeline(pipeline, withDepth, withDepth, null);
+			}
 			withoutDepth = program.cache().createRenderPipeline(new MetalRenderPipeline.Descriptor(
 				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
 				descriptor.colorTargets(), null, descriptor.vertexDescriptor(), MetalRenderPipeline.DepthState.DISABLED,

@@ -67,11 +67,10 @@ import org.slf4j.Logger;
  * to the G-buffer: the sky, clouds, weather, particles, block outlines, text, entity outlines, and
  * any modded render type, along with two whole programs this phase does not implement - Minecraft's
  * item program ({@code core/item}), which draws held items, dropped items, item frames and maps,
- * and its GUI programs. Water is translucent terrain and is therefore also outside this phase; the
- * material class exists and the programs write it, but nothing reaches it until a later phase
- * routes translucent geometry through a forward pass. The set of pipelines that were offered and
- * declined is logged once per pack, so the unhandled tail is stated rather than found in a
- * screenshot.
+ * and its GUI programs. Water, glass and stained glass are translucent terrain and deliberately
+ * remain in Minecraft's ordered forward path after the deferred resolve. The set of pipelines that
+ * were offered and declined is logged once per pack, so the unhandled tail is stated rather than
+ * found in a screenshot.
  */
 public final class MetalWorldGeometry implements AutoCloseable {
 	private static final Logger LOGGER = LogUtils.getLogger();
@@ -220,12 +219,21 @@ public final class MetalWorldGeometry implements AutoCloseable {
 		final OptionalDouble clearDepth,
 		final List<RenderPipeline> pipelines
 	) {
+		RenderPass shadow = MetalWorldShadow.beginPass(encoder, label, pipelines);
+		if (shadow != null) {
+			return shadow;
+		}
 		MetalWorldGeometry binding = active();
 		if (binding == null || depth == null || pipelines.isEmpty()) {
 			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 		}
 		for (RenderPipeline pipeline : pipelines) {
 			if (binding.substitutionFor(pipeline).isEmpty()) {
+				// A different attachment layout would end the encoder and discard a memoryless
+				// G-buffer. Resolve it while it is still resident, then let this draw use
+				// Minecraft's ordinary forward path. Blended water, glass and stained glass all
+				// arrive here after the opaque boundary and therefore composite over the lit scene.
+				binding.engine.resolveOpaque();
 				return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 			}
 		}
@@ -234,6 +242,7 @@ public final class MetalWorldGeometry implements AutoCloseable {
 		// the two disagree, resize to what the world actually is and let the next frame carry the
 		// G-buffer; declining costs one frame of it and cannot produce a rejected descriptor.
 		if (!binding.matchesWorldSize(color)) {
+			binding.engine.resolveOpaque();
 			binding.engine.resizeToWorld(color.getWidth(0), color.getHeight(0));
 			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 		}
@@ -254,6 +263,10 @@ public final class MetalWorldGeometry implements AutoCloseable {
 	 * attachments and this pipeline has one, and the vanilla pipeline in every other case.
 	 */
 	public static RenderPipeline substitute(final RenderPass pass, final RenderPipeline pipeline) {
+		RenderPipeline shadow = MetalWorldShadow.substitute(pass, pipeline);
+		if (shadow != pipeline) {
+			return shadow;
+		}
 		MetalWorldGeometry binding = active();
 		if (binding == null || binding.gbufferPass != pass) {
 			return pipeline;
@@ -289,6 +302,17 @@ public final class MetalWorldGeometry implements AutoCloseable {
 		this.cleared = false;
 		this.gbufferPass = null;
 		this.worldDepth = null;
+	}
+
+	/** Whether an opaque draw has populated tile attachments not yet consumed by the resolve. */
+	boolean hasPendingResolve() {
+		return this.cleared;
+	}
+
+	/** Starts a fresh memoryless lifetime after the current tile contents have been consumed. */
+	void didResolve() {
+		this.cleared = false;
+		this.gbufferPass = null;
 	}
 
 	List<Channel> channels() {
@@ -332,11 +356,14 @@ public final class MetalWorldGeometry implements AutoCloseable {
 		descriptor = descriptor.withRenderArea(
 			new RenderPass.RenderArea(0, 0, color.getWidth(0), color.getHeight(0))
 		);
-		this.cleared = true;
 		if (depth instanceof MetalGpuTextureView metalDepth) {
 			this.worldDepth = metalDepth.metal();
 		}
 		RenderPass pass = encoder.createRenderPass(descriptor);
+		// Mark the tile contents pending only after the backend has opened this pass. Doing it
+		// before createRenderPass would make an unrelated deferred encoder (notably the shadow pass)
+		// look like the G-buffer that the backend is about to replace.
+		this.cleared = true;
 		this.gbufferPass = pass;
 		return pass;
 	}
@@ -513,15 +540,17 @@ public final class MetalWorldGeometry implements AutoCloseable {
 		}
 		this.closed = true;
 		this.logDeclinedPipelines();
+		for (Optional<Substitution> substitution : this.substitutions.values()) {
+			substitution.ifPresent(value -> this.device.forgetNativePipeline(value.pipeline()));
+		}
 		this.substitutions.clear();
 		this.gbufferPass = null;
-		this.device.forgetNativePipelines();
 		if (active == this) {
 			active = null;
 		}
 	}
 
-	private static @Nullable Program programFor(final RenderPipeline pipeline) {
+	static @Nullable Program programFor(final RenderPipeline pipeline) {
 		String vertexShader = String.valueOf(pipeline.getVertexShader());
 		for (Program program : Program.values()) {
 			if (program.vertexShader.equals(vertexShader)) {
@@ -549,18 +578,18 @@ public final class MetalWorldGeometry implements AutoCloseable {
 	}
 
 	/** Every define the vanilla pipeline compiles with, whether it carries a value or not. */
-	private static Set<String> declaredDefines(final RenderPipeline pipeline) {
+	static Set<String> declaredDefines(final RenderPipeline pipeline) {
 		Set<String> declared = new LinkedHashSet<>(pipeline.getShaderDefines().flags());
 		declared.addAll(pipeline.getShaderDefines().values().keySet());
 		return declared;
 	}
 
-	private static boolean isBlended(final RenderPipeline pipeline) {
+	static boolean isBlended(final RenderPipeline pipeline) {
 		ColorTargetState state = pipeline.getColorTargetState();
 		return state == null || state.blendFunction().isPresent();
 	}
 
-	private static boolean hasVertexElements(final RenderPipeline pipeline, final Program program) {
+	static boolean hasVertexElements(final RenderPipeline pipeline, final Program program) {
 		List<String> present = new ArrayList<>();
 		for (VertexFormat binding : pipeline.getVertexFormatBindings()) {
 			if (binding != null) {

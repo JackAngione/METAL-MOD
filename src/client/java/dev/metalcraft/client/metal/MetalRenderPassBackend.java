@@ -223,14 +223,16 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	public void drawIndexed(final int indexCount, final int instanceCount, final int firstIndex, final int vertexOffset, final int firstInstance) {
 		this.bindResources();
 		this.requireIndexBuffer();
-		this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instanceCount, vertexOffset, firstInstance);
+		int instances = this.isShadowPipeline() ? Math.multiplyExact(instanceCount, 4) : instanceCount;
+		this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instances, vertexOffset, firstInstance);
 	}
 
 	@Override
 	public void multiDrawIndexed(final IntBuffer drawParameters, final int instanceCount, final int firstInstance, final int drawCount) {
 		this.bindResources();
 		this.requireIndexBuffer();
-		this.pass().multiDrawIndexed(this.primitive(), this.indexBuffer.metal(), this.indexType, drawParameters, instanceCount, firstInstance, drawCount);
+		int instances = this.isShadowPipeline() ? Math.multiplyExact(instanceCount, 4) : instanceCount;
+		this.pass().multiDrawIndexed(this.primitive(), this.indexBuffer.metal(), this.indexType, drawParameters, instances, firstInstance, drawCount);
 	}
 
 	@Override
@@ -240,7 +242,8 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		for (int draw = 0; draw < drawCount; draw++) {
 			int count = indexCounts.get(indexCounts.position() + draw);
 			int baseVertex = vertexOffsets.get(vertexOffsets.position() + draw);
-			this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), firstIndexOffsets.get(firstIndexOffsets.position() + draw), this.indexType, count, 1, baseVertex, 0);
+			this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), firstIndexOffsets.get(firstIndexOffsets.position() + draw), this.indexType, count,
+				this.isShadowPipeline() ? 4 : 1, baseVertex, 0);
 		}
 	}
 
@@ -441,6 +444,10 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	private boolean isTriangleFan() {
 		return this.pipeline != null && this.pipeline.info().getPrimitiveTopology() == PrimitiveTopology.TRIANGLE_FAN;
+	}
+
+	private boolean isShadowPipeline() {
+		return this.pipeline != null && MetalWorldShadow.isShadowPipeline(this.pipeline.info());
 	}
 
 	private void drawTriangleFan(final int vertexCount, final int instanceCount, final int firstVertex, final int firstInstance) {

@@ -86,7 +86,10 @@ public final class Blaze3DMetalMappings {
 				switch (pipeline.getPolygonMode()) {
 					case FILL -> MetalRenderPipeline.FillMode.FILL;
 					case WIREFRAME -> MetalRenderPipeline.FillMode.LINES;
-				}
+				},
+				MetalWorldShadow.isShadowPipeline(pipeline)
+					? MetalRenderPipeline.TopologyClass.TRIANGLE
+					: MetalRenderPipeline.TopologyClass.UNSPECIFIED
 			)
 		);
 	}
@@ -377,8 +380,8 @@ public final class Blaze3DMetalMappings {
 	}
 
 	private static List<MetalRenderPipeline.ColorTarget> colorTargets(final ColorTargetState[] states) {
-		if (states == null || states.length == 0) {
-			throw new IllegalArgumentException("Blaze3D pipeline has no color target states");
+		if (states == null) {
+			throw new IllegalArgumentException("Blaze3D pipeline has null color target states");
 		}
 		List<MetalRenderPipeline.ColorTarget> targets = new ArrayList<>(states.length);
 		for (ColorTargetState state : states) {

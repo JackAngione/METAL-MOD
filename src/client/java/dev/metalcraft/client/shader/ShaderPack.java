@@ -123,6 +123,8 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 
 	public enum PassKind {
 		GEOMETRY,
+		/** A second geometry traversal into a layered depth target. */
+		SHADOW,
 		FULLSCREEN,
 		COMPUTE
 	}

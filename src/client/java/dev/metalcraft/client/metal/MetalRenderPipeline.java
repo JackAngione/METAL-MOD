@@ -302,8 +302,11 @@ public final class MetalRenderPipeline implements AutoCloseable {
 				throw new IllegalArgumentException("A Metal render pipeline requires a fragment function name");
 			}
 			colorTargets = List.copyOf(colorTargets);
-			if (colorTargets.isEmpty() || colorTargets.size() > 8) {
-				throw new IllegalArgumentException("A Metal render pipeline requires between one and eight color target slots");
+			if (colorTargets.size() > 8) {
+				throw new IllegalArgumentException("A Metal render pipeline accepts at most eight color target slots");
+			}
+			if (colorTargets.isEmpty() && depthStencilFormat == null) {
+				throw new IllegalArgumentException("A Metal render pipeline requires a color or depth-stencil target");
 			}
 			if (depthStencilFormat != null && !depthStencilFormat.hasDepthAspect() && !depthStencilFormat.hasStencilAspect()) {
 				throw new IllegalArgumentException("The Metal depth-stencil format has no depth or stencil aspect");
@@ -317,7 +320,7 @@ public final class MetalRenderPipeline implements AutoCloseable {
 		}
 
 		public MetalTexture.@Nullable Format colorFormat() {
-			return this.colorTargets.getFirst().format();
+			return this.colorTargets.isEmpty() ? null : this.colorTargets.getFirst().format();
 		}
 
 		public MetalTexture.@Nullable Format depthFormat() {
