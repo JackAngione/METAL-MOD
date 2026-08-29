@@ -84,6 +84,22 @@ Shader sources can come from a normal resource pack (`assets/<namespace>/shaders
 
 The API intentionally ends at pipeline ownership. A shader add-on will separately choose an appropriate Fabric rendering hook, create buffers/textures through Blaze3D, bind its registered pipeline, and issue draw calls. That keeps post-processing, world shading, and UI effects composable instead of forcing one monolithic shader system.
 
+## Local-light provider lifecycle
+
+Add-ons may also register a `MetalCraftLightProvider` through `MetalCraftLights.registry()` or the
+`lights()` member of their shader context. A provider emits immutable world-space
+`MetalCraftLocalLight` values on the render thread; its numeric stable IDs are scoped to its own
+registered identifier. One provider's exception, null output, or duplicate stable ID discards only
+that provider's contribution for the frame.
+
+`MetalWorldLighting` is the render-side module at this seam. Once per extracted world frame it
+collects registered providers, converts positions from doubles to camera-relative floats, rejects
+light spheres outside the camera frustum, ranks the remainder by estimated visible impact with
+stable-ID tie breaks, and publishes an immutable snapshot of at most 256 lights. Registered lights
+are visual sources and will bypass the vanilla block-light reach envelope when the GPU resolve path
+consumes this snapshot. Static and entity emitter adapters, tile lists, and GPU resources remain
+inside this same module rather than expanding the provider interface.
+
 ## Compatibility contract
 
 - Target: Minecraft Java Edition 26.2 only (`~26.2`).

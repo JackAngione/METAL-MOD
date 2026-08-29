@@ -29,6 +29,7 @@ Minecraft / Blaze3D → MetalCraft Metal backend → Apple Metal
 - Explicit OpenGL/Vulkan selections, Minecraft's crash recovery, and the `--graphicsBackend` launcher override remain authoritative.
 - Adds a dedicated **Video Settings → MetalCraft Settings** screen. Its half-resolution option renders at macOS logical resolution while keeping the Metal drawable at native Retina size, reducing the rendered pixel count by 75% before presentation upscaling.
 - Provides the `metalcraft-shaders` Fabric entrypoint and reload-aware pipeline precompilation API for shader add-ons.
+- Provides a validated local-light provider registry with bounded, deterministic per-frame snapshots.
 
 No performance number is promised yet. The Metal path removes reliance on Apple's deprecated OpenGL implementation, but “optimal” needs repeatable frame-time measurements. The benchmark scenario now renders ordinary generated terrain from a ground-level camera at the display's native resolution and 32 chunks, and validates that it is drawing a real world before reporting; see [docs/APPLE_SILICON_PERFORMANCE.md](docs/APPLE_SILICON_PERFORMANCE.md) for the methodology and current numbers, and [ROADMAP.md](ROADMAP.md) for tracked work.
 
@@ -106,10 +107,17 @@ public final class MyShaderExtension implements MetalCraftShaderExtension {
             .withFragmentShader(Identifier.fromNamespaceAndPath("my_addon", "example"))
             .build();
         context.registry().register(pipeline);
+        context.lights().register(
+            Identifier.fromNamespaceAndPath("my_addon", "dynamic_lights"),
+            output -> output.accept(new MetalCraftLocalLight(
+                1L, new Vec3(0.5, 65.0, 0.5),
+                1.0F, 0.35F, 0.08F, 4.0F, 12.0F, true
+            ))
+        );
     }
 }
 ```
 
-Place sources at `assets/my_addon/shaders/example.vsh` and `assets/my_addon/shaders/example.fsh`. MetalCraft precompiles registered pipelines after startup and after shader-resource reloads. Registration alone does not draw geometry; a later shader module can retrieve the pipeline from `MetalCraftShaders.registry()` and use Fabric/Blaze3D render hooks to submit it.
+Place sources at `assets/my_addon/shaders/example.vsh` and `assets/my_addon/shaders/example.fsh`. MetalCraft precompiles registered pipelines after startup and after shader-resource reloads. Registration alone does not draw geometry; a later shader module can retrieve the pipeline from `MetalCraftShaders.registry()` and use Fabric/Blaze3D render hooks to submit it. Light providers run once per extracted world frame on the render thread; each provider must keep its numeric light IDs stable between frames.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design boundaries and [ROADMAP.md](ROADMAP.md) for tracked work.

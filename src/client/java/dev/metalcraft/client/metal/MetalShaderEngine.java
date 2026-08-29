@@ -8,6 +8,7 @@ import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.shader.ShaderGraphCompiler;
 import dev.metalcraft.client.shader.ShaderPack;
 import dev.metalcraft.client.shader.ShaderPackLoader;
+import dev.metalcraft.api.MetalCraftLights;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -22,6 +23,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -106,6 +108,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 	private ShaderGraphCompiler.@Nullable CompiledPass shadowPass;
 	private @Nullable MetalWorldGeometry worldGeometry;
 	private @Nullable MetalWorldShadow worldShadow;
+	private final MetalWorldLighting worldLighting = new MetalWorldLighting(MetalCraftLights.registry());
 	private MetalBuffer uniforms;
 	private MetalSampler filteredSampler;
 	private MetalSampler unfilteredSampler;
@@ -148,6 +151,14 @@ public final class MetalShaderEngine implements AutoCloseable {
 		MetalShaderEngine engine = active;
 		if (engine != null && engine.gpuDevice != null) {
 			engine.gpuDevice.resolveShaderPackOpaque(engine);
+		}
+	}
+
+	/** Publishes registered local lights once during extraction for the frame being rendered. */
+	public static void publishLocalLights(final CameraRenderState camera) {
+		MetalShaderEngine engine = active;
+		if (engine != null) {
+			engine.worldLighting.publish(camera);
 		}
 	}
 
@@ -937,6 +948,10 @@ public final class MetalShaderEngine implements AutoCloseable {
 
 	@Nullable MetalWorldShadow shadowForTesting() {
 		return this.worldShadow;
+	}
+
+	MetalWorldLighting lightingForTesting() {
+		return this.worldLighting;
 	}
 
 	@Nullable MetalRenderPipeline deferredResolvePipelineForTesting() {

@@ -11,6 +11,7 @@ import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.state.level.LevelRenderState;
 import dev.metalcraft.client.metal.MetalWorldShadow;
+import dev.metalcraft.client.metal.MetalShaderEngine;
 import org.joml.Matrix4fc;
 import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Final;
@@ -19,7 +20,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-/** Prepares a second terrain list from the cascades' union frustum and retains feature buffers. */
+/** Publishes frame lighting, prepares the cascades' terrain list, and retains feature buffers. */
 @Mixin(LevelRenderer.class)
 abstract class LevelRendererShadowMixin {
 	@Shadow @Final private ObjectArrayList<SectionRenderDispatcher.RenderSection> visibleSections;
@@ -54,6 +55,7 @@ abstract class LevelRendererShadowMixin {
 		final LevelRenderer renderer,
 		final Matrix4fc modelView
 	) {
+		MetalShaderEngine.publishLocalLights(this.levelRenderState.cameraRenderState);
 		if (!MetalWorldShadow.isAvailable() || this.viewArea == null) {
 			return renderer.prepareChunkRenders(modelView);
 		}

@@ -2,7 +2,11 @@ package dev.metalcraft.api;
 
 import com.mojang.blaze3d.systems.DeviceInfo;
 
-public record MetalCraftShaderContext(DeviceInfo deviceInfo, MetalCraftShaderRegistry registry) {
+public record MetalCraftShaderContext(
+	DeviceInfo deviceInfo,
+	MetalCraftShaderRegistry registry,
+	MetalCraftLightRegistry lights
+) {
 	public boolean isMetal() {
 		return "Metal".equalsIgnoreCase(this.deviceInfo.backendName());
 	}

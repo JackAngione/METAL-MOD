@@ -28,6 +28,8 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.shaders.UniformType;
+import dev.metalcraft.api.MetalCraftLightRegistry;
+import dev.metalcraft.api.MetalCraftLocalLight;
 import net.minecraft.resources.Identifier;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.state.level.SkyRenderState;
@@ -413,6 +415,7 @@ public final class MetalShaderTranslationSmoke {
 	public static void main(final String[] arguments) {
 		assertTransientArenaSuballocation();
 		assertCelestialLightingMatchesSkyTransform();
+		assertLocalLightSnapshots();
 		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
 			VERTEX_GLSL,
 			"smoke/fullscreen.vert",
@@ -569,6 +572,94 @@ public final class MetalShaderTranslationSmoke {
 		if (MetalCelestialLighting.derive(sky, camera).active()) {
 			throw new AssertionError("Fully obscured weather retained active celestial lighting");
 		}
+	}
+
+	/** The world-lighting seam owns provider isolation, visibility, ranking, and immutable publication. */
+	private static void assertLocalLightSnapshots() {
+		MetalCraftLightRegistry registry = new MetalCraftLightRegistry();
+		float[] intensityOffset = {0.0F};
+		registry.register(Identifier.parse("metalcraft:failing"), output -> {
+			output.accept(localLight(900L, 1.0F));
+			throw new IllegalStateException("fixture failure");
+		});
+		registry.register(Identifier.parse("metalcraft:duplicates"), output -> {
+			output.accept(localLight(901L, 1.0F));
+			output.accept(localLight(901L, 2.0F));
+		});
+		registry.register(Identifier.parse("metalcraft:ranked"), output -> {
+			for (int index = 0; index < 300; index++) {
+				output.accept(localLight(index, index + 1.0F + intensityOffset[0]));
+			}
+		});
+		try {
+			registry.register(Identifier.parse("metalcraft:ranked"), output -> {
+			});
+			throw new AssertionError("Duplicate light-provider registration was accepted");
+		} catch (IllegalArgumentException expected) {
+			// The registration seam owns provider IDs globally.
+		}
+
+		CameraRenderState camera = new CameraRenderState();
+		camera.projectionMatrix.setPerspective((float)Math.toRadians(70.0), 16.0F / 9.0F, 0.05F, 512.0F, true);
+		camera.viewRotationMatrix.identity();
+		camera.pos = new Vec3(20_000_000.25, 70.0, 20_000_000.25);
+		MetalWorldLighting lighting = new MetalWorldLighting(registry);
+		MetalWorldLighting.Snapshot snapshot = lighting.publish(camera);
+		if (snapshot.lights().size() != MetalWorldLighting.MAX_LIGHTS || snapshot.overflowCount() != 44) {
+			throw new AssertionError("The deterministic local-light cap was not enforced: " + snapshot);
+		}
+		if (snapshot.lights().getFirst().id().stableId() != 299L
+			|| snapshot.lights().getLast().id().stableId() != 44L) {
+			throw new AssertionError("Local lights were not retained strongest-first");
+		}
+		MetalWorldLighting.FrameLight relative = snapshot.lights().getFirst();
+		if (Math.abs(relative.cameraX() - 1.5F) > 1.0E-5F
+			|| Math.abs(relative.cameraY() - 2.0F) > 1.0E-5F
+			|| Math.abs(relative.cameraZ() + 10.0F) > 1.0E-5F) {
+			throw new AssertionError("Large-world camera-relative conversion lost precision: " + relative);
+		}
+		if (lighting.snapshot() != snapshot) {
+			throw new AssertionError("The published local-light snapshot was not made current atomically");
+		}
+		try {
+			snapshot.lights().add(relative);
+			throw new AssertionError("The published local-light snapshot remained mutable");
+		} catch (UnsupportedOperationException expected) {
+			// Render consumers may safely retain this frame value.
+		}
+		if (relative.usesBlockLightEnvelope()) {
+			throw new AssertionError("A registered visual light unexpectedly uses vanilla's block-light envelope");
+		}
+		intensityOffset[0] = 100.0F;
+		MetalWorldLighting.Snapshot nextFrame = lighting.publish(camera);
+		if (nextFrame == snapshot || nextFrame.lights().getFirst().intensity() != 400.0F
+			|| snapshot.lights().getFirst().intensity() != 300.0F || lighting.snapshot() != nextFrame) {
+			throw new AssertionError("Dynamic publication mutated or failed to replace the prior frame snapshot");
+		}
+
+		MetalCraftLightRegistry ties = new MetalCraftLightRegistry();
+		ties.register(Identifier.parse("metalcraft:z_provider"), output -> output.accept(localLight(4L, 1.0F)));
+		ties.register(Identifier.parse("metalcraft:a_provider"), output -> output.accept(localLight(7L, 1.0F)));
+		MetalWorldLighting.Snapshot tied = new MetalWorldLighting(ties).publish(camera);
+		if (!tied.lights().getFirst().id().providerId().equals(Identifier.parse("metalcraft:a_provider"))) {
+			throw new AssertionError("Equal-impact lights depended on provider registration order: " + tied);
+		}
+
+		try {
+			new MetalCraftLocalLight(1L, Vec3.ZERO, 1.0F, 1.0F, 1.0F, Float.NaN, 8.0F, false);
+			throw new AssertionError("An invalid local-light intensity was accepted");
+		} catch (IllegalArgumentException expected) {
+			// Provider construction errors are caught and isolated by the registry during collection.
+		}
+	}
+
+	private static MetalCraftLocalLight localLight(final long stableId, final float intensity) {
+		return new MetalCraftLocalLight(
+			stableId,
+			new Vec3(20_000_001.75, 72.0, 19_999_990.25),
+			1.0F, 0.6F, 0.2F,
+			intensity, 16.0F, stableId % 2L == 0L
+		);
 	}
 
 	private static SkyRenderState overworldSky(
