@@ -58,7 +58,7 @@ tasks.register('compileMetalNative', Exec) {
 		'-arch', 'arm64', '-mmacosx-version-min=13.0',
 		"-I${System.getProperty('java.home')}/include",
 		"-I${System.getProperty('java.home')}/include/darwin",
-		'-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-framework', 'AppKit',
+		'-framework', 'Foundation', '-framework', 'Metal', '-framework', 'MetalFX', '-framework', 'QuartzCore', '-framework', 'AppKit',
 		'src/native/metalcraft.m', '-o', metalNativeOutput.get().asFile.absolutePath
 }
 

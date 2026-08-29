@@ -292,10 +292,9 @@ normal channel at (128, 255, 217) across flat ground, which is octahedral +Y wit
 the material channel separating terrain from entities; and the light channel at full sky light and
 no block light in open daylight.
 
-One thing the runtime does not do yet, and refuses rather than half-runs: the graph compiler already
-schedules merged pass groups and compute passes, because Phase 0 proved both mechanisms against the
-hardware, but nothing executes them. A pack that declares either is rejected at load with a message
-naming the pass, so a pack cannot render half of what it declared.
+At this phase boundary the runtime still refused compute passes rather than half-running them. Phase
+5 now executes them in graph order; arbitrary merged render groups remain outside the one
+geometry/resolve shape the world router can keep open.
 
 ### Phase 3 — shadows
 
@@ -346,8 +345,38 @@ resources, captures a non-empty lit frame, and shuts down cleanly with this path
 
 ### Phase 5 — effects
 
-SSAO, bloom, volumetrics, tonemapping and colour grading, MetalFX spatial upscaling. Each one lands
-with its options in the menu and a measurement of its cost.
+- [x] **Graph execution for compute effects.** A compute pass compiles `<pass-id>_kernel`, binds its
+  declared reads followed by writable images, dispatches over its first output, and is ordered by
+  the compiled graph. `enabled_by` names a boolean pack option and removes the whole dispatch when
+  it is off, so an effect's disabled measurement is not a shader branch that still pays for the
+  work. Compute and fullscreen effects both publish encoder-boundary GPU occupancy under
+  `MetalCraft shader: <pass-id>`.
+- [x] **Half-resolution SSAO** with an eight-sample depth ring, view-space normal reconstruction,
+  depth-discontinuity rejection, and a full-resolution bilateral sample in the grade pass.
+- [x] **Compute bloom resolution chain:** half-resolution threshold/downsample, quarter-resolution
+  downsample, then a filtered half-resolution upsample/combine.
+- [x] **Half-resolution volumetric light shafts:** twelve view-ray samples transformed through the
+  four shadow cascades, with sun/moon tint and a live strength option.
+- [x] **Tonemapping and colour grading:** exposure, optional ACES curve, saturation, contrast and
+  colour temperature, composed with AO, bloom and shafts into a sixteen-bit scene before output.
+- [x] **MetalFX spatial upscaling.** The native bridge owns a reusable `MTLFXSpatialScaler`; when the
+  drawable is larger than the graded scene, the graph's final draw is replaced by MetalFX. Equal
+  sizes, unsupported devices, and the nearest/linear choices use the final fullscreen fallback.
+  The settings screen is scrollable now that the built-in pack exposes seventeen options.
+
+Exit, met. `shaderTranslationSmoke` renders the effect graph with all three optional effects enabled
+and disabled and requires distinct non-empty output, checks a solid HDR image through MetalFX at 2x,
+and proves compute encoders report positive GPU time. The lifecycle test then loads a world, resizes,
+reloads resources, presents through both the linear and MetalFX paths, captures a non-empty frame,
+and shuts down cleanly.
+
+The short 2026-08-29 lifecycle capture at a 1280x720 world resolution measured these mean
+encoder-boundary spans per frame on the M4 Max: SSAO 0.014 ms, bloom down-half 0.014 ms,
+down-quarter 0.006 ms, bloom up 0.018 ms, volumetrics 0.026 ms, and grade/composite 0.068 ms. The
+linear final draw measured 0.089 ms in the adjacent run. These are diagnostic occupancy spans, not
+an additive partition or a repeated performance claim. MetalFX correctly replaced the final draw in
+its run; its internal encoders cannot be labelled by `MetalPassCensus`, so its comparative cost stays
+in Phase 6's repeated whole-frame measurement rather than being inferred from two lifecycle runs.
 
 ### Phase 6 — measurement
 

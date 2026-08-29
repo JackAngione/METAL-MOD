@@ -485,11 +485,13 @@ public final class MetalShaderTranslationSmoke {
 			assertMemorylessTileResolve(device);
 			assertLayeredArrayRendering(device);
 			assertComputeDispatch(device);
+			assertSpatialScaling(device);
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
 			assertBatchedResourceBindings(device);
 			assertQueriesAndLifetime(device, pipeline);
 			assertPassGpuTiming(device, pipeline);
+			assertComputePassGpuTiming(device);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(
 				mappedDescriptor.vertexSource(), mappedDescriptor.vertexFunction(), mappedDescriptor.fragmentSource(), mappedDescriptor.fragmentFunction(),
 				mappedDescriptor.colorTargets(), null, mappedDescriptor.vertexDescriptor(), MetalRenderPipeline.DepthState.DISABLED,
@@ -570,10 +572,72 @@ public final class MetalShaderTranslationSmoke {
 
 				assertWorldProgramChannels(device, gpuDevice, world);
 				assertPhaseFourDeferredResolve(device, engine);
+				assertPhaseFiveEffects(device, engine);
 			}
 		} finally {
 			gpuDevice.close();
 		}
+	}
+
+	/** The built-in graph dispatches every Phase 5 effect and its toggles remove observable work. */
+	private static void assertPhaseFiveEffects(final MetalDevice device, final MetalShaderEngine engine) {
+		int size = GBUFFER_SIZE;
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture scene = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.RGBA8_UNORM, size, size, 1, MetalTexture.USAGE_ALL));
+			 MetalTexture depth = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.DEPTH32_FLOAT, size, size, 1, MetalTexture.USAGE_ALL));
+			 MetalTextureView depthView = depth.createView();
+			 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.BGRA8_UNORM, size, size, 1, MetalTexture.USAGE_ALL))) {
+			ByteBuffer pixels = ByteBuffer.allocateDirect(size * size * 4);
+			for (int index = 0; index < size * size; index++) {
+				pixels.put((byte)0xE0).put((byte)0xC0).put((byte)0x80).put((byte)0xFF);
+			}
+			pixels.flip();
+			scene.upload(queue, 0, pixels);
+			try (MetalCommandBuffer clear = queue.createCommandBuffer();
+				 MetalRenderPass ignored = clear.beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
+					 new MetalRenderPass.DepthAttachment(
+						 depth, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.6)))) {
+				ignored.close();
+				clear.commitAndWait();
+			}
+			engine.supplyWorldDepthForTesting(depthView);
+			int enabled = encodeEffects(queue, engine, scene, output);
+			engine.setOption("ssao", false);
+			engine.setOption("bloom", false);
+			engine.setOption("volumetrics", false);
+			engine.supplyWorldDepthForTesting(depthView);
+			int disabled = encodeEffects(queue, engine, scene, output);
+			if (enabled == 0 || disabled == 0 || enabled == disabled) {
+				throw new AssertionError("Phase 5 effects did not produce a distinct non-empty result: enabled="
+					+ Integer.toHexString(enabled) + ", disabled=" + Integer.toHexString(disabled));
+			}
+		} finally {
+			engine.supplyWorldDepthForTesting(null);
+			engine.setOption("ssao", true);
+			engine.setOption("bloom", true);
+			engine.setOption("volumetrics", true);
+		}
+	}
+
+	private static int encodeEffects(
+		final MetalCommandQueue queue,
+		final MetalShaderEngine engine,
+		final MetalTexture scene,
+		final MetalTexture output
+	) {
+		try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			if (!engine.encodeForTesting(commands, scene, output)) {
+				throw new AssertionError("The Phase 5 graph declined a supplied world scene");
+			}
+			commands.commitAndWait();
+		}
+		ByteBuffer result = output.readback(queue, 0);
+		return Byte.toUnsignedInt(result.get(0))
+			| Byte.toUnsignedInt(result.get(1)) << 8
+			| Byte.toUnsignedInt(result.get(2)) << 16;
 	}
 
 	/** Phase 3's pack programs compile as depth-only layered pipelines for every routed world format. */
@@ -2026,6 +2090,47 @@ public final class MetalShaderTranslationSmoke {
 	 * it. Reading the color back through a second encoder is the point; reading the compute output
 	 * directly would pass even if the ordering were wrong.
 	 */
+	/** MetalFX consumes an HDR render target and writes a larger private output texture. */
+	private static void assertSpatialScaling(final MetalDevice device) {
+		if (!device.supportsSpatialScaling()) {
+			throw new AssertionError("The Apple-silicon smoke-test device does not support MetalFX spatial scaling");
+		}
+		int inputSize = 4;
+		int outputSize = 8;
+		MetalSpatialScaler.Descriptor descriptor = new MetalSpatialScaler.Descriptor(
+			MetalTexture.Format.RGBA16_FLOAT, inputSize, inputSize,
+			MetalTexture.Format.BGRA8_UNORM, outputSize, outputSize
+		);
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture input = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.RGBA16_FLOAT, inputSize, inputSize, 1, MetalTexture.USAGE_ALL));
+			 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.BGRA8_UNORM, outputSize, outputSize, 1, MetalTexture.USAGE_ALL));
+			 MetalSpatialScaler scaler = device.createSpatialScaler(descriptor)) {
+			ByteBuffer red = ByteBuffer.allocateDirect(inputSize * inputSize * 8).order(ByteOrder.nativeOrder());
+			for (int index = 0; index < inputSize * inputSize; index++) {
+				red.putShort(Float.floatToFloat16(1.0F));
+				red.putShort(Float.floatToFloat16(0.0F));
+				red.putShort(Float.floatToFloat16(0.0F));
+				red.putShort(Float.floatToFloat16(1.0F));
+			}
+			red.flip();
+			input.upload(queue, 0, red);
+			try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+				scaler.encode(commands, input, output);
+				commands.commitAndWait();
+			}
+			ByteBuffer result = output.readback(queue, 0);
+			int blue = Byte.toUnsignedInt(result.get(0));
+			int green = Byte.toUnsignedInt(result.get(1));
+			int redChannel = Byte.toUnsignedInt(result.get(2));
+			if (redChannel < 200 || green > 30 || blue > 30) {
+				throw new AssertionError("MetalFX spatial scaling changed a solid red image: "
+					+ redChannel + "," + green + "," + blue);
+			}
+		}
+	}
+
 	private static void assertComputeDispatch(final MetalDevice device) {
 		int size = 4;
 		try (MetalComputePipeline kernel = device.createComputePipeline(
@@ -2421,6 +2526,46 @@ public final class MetalShaderTranslationSmoke {
 		if (timed.totalMs() > commandBufferMs) {
 			throw new AssertionError("Metal pass GPU time of " + timed.totalMs()
 				+ " ms exceeded its command buffer's " + commandBufferMs + " ms");
+		}
+	}
+
+	/** Compute effects use the same encoder-boundary census as render passes. */
+	private static void assertComputePassGpuTiming(final MetalDevice device) {
+		List<MetalPassCensus.PassKind> passes;
+		MetalStallProbe.setEnabled(true);
+		try {
+			MetalPassCensus.reset();
+			int kind = MetalPassCensus.kindFor("smoke compute");
+			try (MetalComputePipeline pipeline = device.createComputePipeline(
+					 new MetalComputePipeline.Descriptor(COMPUTE_MSL, "fill_tint"));
+				 MetalCommandQueue queue = device.createCommandQueue();
+				 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(
+					 MetalTexture.Format.RGBA8_UNORM, 256, 256, 1, MetalTexture.USAGE_ALL));
+				 MetalTextureView outputView = output.createView();
+				 MetalBuffer tint = device.createBuffer(16L, MetalBuffer.StorageMode.SHARED);
+				 MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalComputePass compute = commands.beginComputePass(kind)) {
+				try (MetalBuffer.Mapping mapping = tint.map()) {
+					mapping.bytes().order(ByteOrder.nativeOrder()).asFloatBuffer()
+						.put(new float[]{0.25F, 0.5F, 0.75F, 1.0F});
+				}
+				compute.setPipeline(pipeline);
+				compute.setTexture(0, outputView);
+				compute.setBuffer(0, tint, 0L);
+				compute.dispatchCovering(256, 256, 8, 8);
+				compute.close();
+				commands.commitAndWait();
+			}
+			passes = MetalPassCensus.take();
+		} finally {
+			MetalStallProbe.setEnabled(false);
+		}
+		MetalPassCensus.PassKind timed = passes.stream()
+			.filter(pass -> pass.name().equals("smoke compute"))
+			.findFirst()
+			.orElseThrow(() -> new AssertionError("Metal pass census did not report the timed compute pass"));
+		if (timed.count() != 1L || !(timed.totalMs() > 0.0)) {
+			throw new AssertionError("Metal pass census reported an invalid compute sample: " + timed);
 		}
 	}
 

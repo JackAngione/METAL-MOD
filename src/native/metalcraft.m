@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <MetalFX/MetalFX.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <jni.h>
 #import <objc/runtime.h>
@@ -96,7 +97,8 @@ typedef NS_ENUM(NSUInteger, MCObjectType) {
 	MCObjectTypeRenderPass = 13,
 	MCObjectTypeTimestampQueryPool = 14,
 	MCObjectTypeComputePipeline = 15,
-	MCObjectTypeComputePass = 16
+	MCObjectTypeComputePass = 16,
+	MCObjectTypeSpatialScaler = 17
 };
 
 /**
@@ -180,7 +182,9 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 		_layer = [CAMetalLayer layer];
 		_layer.device = device;
 		_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-		_layer.framebufferOnly = YES;
+		// MetalFX writes through a compute pipeline when spatial upscaling is selected. Drawable
+		// textures therefore have to be shader-writable as well as render targets.
+		_layer.framebufferOnly = NO;
 		_layer.opaque = YES;
 		_layer.presentsWithTransaction = NO;
 		_layer.allowsNextDrawableTimeout = YES;
@@ -945,6 +949,8 @@ static NSString *mc_type_name(MCObjectType type) {
 			return @"Metal compute pipeline";
 		case MCObjectTypeComputePass:
 			return @"Metal compute pass";
+		case MCObjectTypeSpatialScaler:
+			return @"MetalFX spatial scaler";
 	}
 	return @"Metal object";
 }
@@ -4239,17 +4245,33 @@ Java_dev_metalcraft_client_metal_MetalNative_nReleaseComputePipeline(JNIEnv *env
 }
 
 MC_EXPORT JNIEXPORT jlong JNICALL
-Java_dev_metalcraft_client_metal_MetalNative_nBeginComputePass(JNIEnv *env, jclass type, jlong commandBufferHandle) {
+Java_dev_metalcraft_client_metal_MetalNative_nBeginComputePass(
+	JNIEnv *env, jclass type, jlong commandBufferHandle, jint gpuTimingKind
+) {
 	@autoreleasepool {
 		MCMetalCommandBuffer *commandBuffer = (MCMetalCommandBuffer *)mc_get_object(env, commandBufferHandle, MCObjectTypeCommandBuffer);
 		if (commandBuffer == nil) {
 			return 0;
 		}
 		[commandBuffer endBlitEncoding];
+		MTLComputePassDescriptor *descriptor = [MTLComputePassDescriptor computePassDescriptor];
 		// Concurrent dispatch would make each dispatch responsible for its own barriers. Serial
 		// ordering is what lets one pass's write be the next dispatch's input without one.
+		descriptor.dispatchType = MTLDispatchTypeSerial;
+		if (gpuTimingKind >= 0 && gpuTimingKind < MC_GPU_PASS_KINDS) {
+			id<MTLCounterSampleBuffer> samples = mc_gpu_pass_sample_buffer(commandBuffer.commandBuffer.device);
+			if (samples != nil) {
+				uint64_t sequence = atomic_fetch_add_explicit(&mc_gpu_pass_next_slot, 1, memory_order_relaxed);
+				NSUInteger slot = (NSUInteger)(sequence % MC_GPU_PASS_SLOTS);
+				MTLComputePassSampleBufferAttachmentDescriptor *samplePoints = descriptor.sampleBufferAttachments[0];
+				samplePoints.sampleBuffer = samples;
+				samplePoints.startOfEncoderSampleIndex = slot * 2;
+				samplePoints.endOfEncoderSampleIndex = slot * 2 + 1;
+				[commandBuffer addTimedPassKind:(uint32_t)gpuTimingKind sequence:sequence sampleBuffer:samples];
+			}
+		}
 		id<MTLComputeCommandEncoder> encoder = [commandBuffer.commandBuffer
-			computeCommandEncoderWithDispatchType:MTLDispatchTypeSerial];
+			computeCommandEncoderWithDescriptor:descriptor];
 		if (encoder == nil) {
 			mc_throw_state(env, @"Metal did not create a compute command encoder");
 			return 0;
@@ -4366,6 +4388,120 @@ MC_EXPORT JNIEXPORT void JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nEndComputePass(JNIEnv *env, jclass type, jlong handle) {
 	@autoreleasepool {
 		mc_release_object(env, handle, MCObjectTypeComputePass);
+	}
+}
+
+MC_EXPORT JNIEXPORT jboolean JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nSupportsSpatialScaler(JNIEnv *env, jclass type, jlong deviceHandle) {
+	@autoreleasepool {
+		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, deviceHandle, MCObjectTypeDevice);
+		return device != nil && [MTLFXSpatialScalerDescriptor supportsDevice:device] ? JNI_TRUE : JNI_FALSE;
+	}
+}
+
+MC_EXPORT JNIEXPORT jlong JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nCreateSpatialScaler(
+	JNIEnv *env,
+	jclass type,
+	jlong deviceHandle,
+	jint inputFormat,
+	jint inputWidth,
+	jint inputHeight,
+	jint outputFormat,
+	jint outputWidth,
+	jint outputHeight
+) {
+	@autoreleasepool {
+		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, deviceHandle, MCObjectTypeDevice);
+		if (device == nil) return 0;
+		if (inputWidth <= 0 || inputHeight <= 0 || outputWidth < inputWidth || outputHeight < inputHeight) {
+			mc_throw_state(env, @"MetalFX spatial scaling requires positive output dimensions no smaller than its input");
+			return 0;
+		}
+		if (![MTLFXSpatialScalerDescriptor supportsDevice:device]) {
+			mc_throw_state(env, @"The selected Metal device does not support MetalFX spatial scaling");
+			return 0;
+		}
+		MTLFXSpatialScalerDescriptor *descriptor = [[MTLFXSpatialScalerDescriptor alloc] init];
+		descriptor.colorTextureFormat = mc_pixel_format(env, inputFormat);
+		descriptor.outputTextureFormat = mc_pixel_format(env, outputFormat);
+		descriptor.inputWidth = (NSUInteger)inputWidth;
+		descriptor.inputHeight = (NSUInteger)inputHeight;
+		descriptor.outputWidth = (NSUInteger)outputWidth;
+		descriptor.outputHeight = (NSUInteger)outputHeight;
+		descriptor.colorProcessingMode = MTLFXSpatialScalerColorProcessingModeHDR;
+		id<MTLFXSpatialScaler> scaler = [descriptor newSpatialScalerWithDevice:device];
+		if (scaler == nil) {
+			mc_throw_state(env, @"MetalFX did not create the requested spatial scaler");
+			return 0;
+		}
+		return mc_register_object(scaler, MCObjectTypeSpatialScaler, deviceHandle);
+	}
+}
+
+static void mc_encode_spatial_scale(
+	JNIEnv *env,
+	jlong scalerHandle,
+	jlong commandBufferHandle,
+	jlong inputHandle,
+	jlong outputHandle,
+	BOOL outputIsDrawable
+) {
+	jlong handles[] = {scalerHandle, commandBufferHandle, inputHandle, outputHandle};
+	MCObjectType types[] = {
+		MCObjectTypeSpatialScaler, MCObjectTypeCommandBuffer, MCObjectTypeTexture,
+		outputIsDrawable ? MCObjectTypeDrawable : MCObjectTypeTexture
+	};
+	id objects[4];
+	if (!mc_get_objects_same_device(env, handles, types, objects, 4)) return;
+	id<MTLFXSpatialScaler> scaler = objects[0];
+	MCMetalCommandBuffer *commandBuffer = objects[1];
+	id<MTLTexture> input = objects[2];
+	id outputObject = objects[3];
+	id<MTLTexture> output = outputIsDrawable ? ((id<CAMetalDrawable>)outputObject).texture : outputObject;
+	if (input.width != scaler.inputWidth || input.height != scaler.inputHeight
+		|| input.pixelFormat != scaler.colorTextureFormat
+		|| output.width != scaler.outputWidth || output.height != scaler.outputHeight
+		|| output.pixelFormat != scaler.outputTextureFormat) {
+		mc_throw_state(env, @"MetalFX input or output texture does not match its spatial scaler descriptor");
+		return;
+	}
+	[commandBuffer endBlitEncoding];
+	[commandBuffer pin:scaler];
+	[commandBuffer pin:input];
+	[commandBuffer pin:outputObject];
+	scaler.inputContentWidth = input.width;
+	scaler.inputContentHeight = input.height;
+	scaler.colorTexture = input;
+	scaler.outputTexture = output;
+	[scaler encodeToCommandBuffer:commandBuffer.commandBuffer];
+	// Do not let a reusable scaler retain the frame's drawable after encoding it.
+	scaler.colorTexture = nil;
+	scaler.outputTexture = nil;
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nEncodeSpatialScaleToTexture(
+	JNIEnv *env, jclass type, jlong scalerHandle, jlong commandBufferHandle, jlong inputHandle, jlong outputHandle
+) {
+	@autoreleasepool {
+		mc_encode_spatial_scale(env, scalerHandle, commandBufferHandle, inputHandle, outputHandle, NO);
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nEncodeSpatialScaleToDrawable(
+	JNIEnv *env, jclass type, jlong scalerHandle, jlong commandBufferHandle, jlong inputHandle, jlong outputHandle
+) {
+	@autoreleasepool {
+		mc_encode_spatial_scale(env, scalerHandle, commandBufferHandle, inputHandle, outputHandle, YES);
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nReleaseSpatialScaler(JNIEnv *env, jclass type, jlong handle) {
+	@autoreleasepool {
+		mc_release_object(env, handle, MCObjectTypeSpatialScaler);
 	}
 }
 

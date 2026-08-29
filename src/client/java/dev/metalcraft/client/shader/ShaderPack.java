@@ -136,7 +136,8 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 		List<String> reads,
 		List<String> writes,
 		List<String> tileReads,
-		String mergeWith
+		String mergeWith,
+		String enabledBy
 	) {
 		public Pass {
 			requireId(id, "pass");
@@ -150,6 +151,9 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 				if (mergeWith.equals(id)) {
 					throw new IllegalArgumentException("Pass '" + id + "' cannot merge with itself");
 				}
+			}
+			if (enabledBy != null) {
+				requireId(enabledBy, "enabled_by option");
 			}
 			Set<String> duplicateReads = new HashSet<>(reads);
 			duplicateReads.retainAll(tileReads);

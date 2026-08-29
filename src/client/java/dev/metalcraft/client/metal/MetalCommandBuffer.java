@@ -184,16 +184,41 @@ public final class MetalCommandBuffer implements AutoCloseable {
 	}
 
 	public synchronized MetalComputePass beginComputePass() {
+		return this.beginComputePass(MetalPassCensus.UNTIMED_KIND);
+	}
+
+	/** Begins a compute encoder whose GPU occupancy is charged to one pass-census label. */
+	public synchronized MetalComputePass beginComputePass(final int gpuTimingKind) {
 		if (this.activeRenderPass != null || this.activeComputePass != null) {
 			throw new IllegalStateException("A Metal pass is already active on this command buffer");
 		}
-		long passHandle = MetalNative.nBeginComputePass(this.requireEncodingHandle());
+		long passHandle = MetalNative.nBeginComputePass(this.requireEncodingHandle(), gpuTimingKind);
 		if (passHandle == 0L) {
 			throw new IllegalStateException("Metal did not create a compute command encoder");
 		}
 		MetalComputePass pass = new MetalComputePass(this, passHandle);
 		this.activeComputePass = pass;
 		return pass;
+	}
+
+	void encodeSpatialScale(
+		final MetalSpatialScaler scaler,
+		final MetalTexture input,
+		final MetalTexture output
+	) {
+		MetalNative.nEncodeSpatialScaleToTexture(
+			scaler.requireOpenHandle(), this.requireEncodingHandle(), input.requireOpenHandle(), output.requireOpenHandle()
+		);
+	}
+
+	void encodeSpatialScale(
+		final MetalSpatialScaler scaler,
+		final MetalTexture input,
+		final MetalDrawable output
+	) {
+		MetalNative.nEncodeSpatialScaleToDrawable(
+			scaler.requireOpenHandle(), this.requireEncodingHandle(), input.requireOpenHandle(), output.requireOpenHandle()
+		);
 	}
 
 	public synchronized MetalRenderPass beginRenderPass(final MetalRenderPass.Descriptor descriptor) {
@@ -353,8 +378,8 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		if (this.committed) {
 			throw new IllegalStateException("Cannot encode commands after committing a Metal command buffer");
 		}
-		if (this.activeRenderPass != null) {
-			throw new IllegalStateException("End the active Metal render pass before encoding another command");
+		if (this.activeRenderPass != null || this.activeComputePass != null) {
+			throw new IllegalStateException("End the active Metal pass before encoding another command");
 		}
 		return this.requireOpenHandle();
 	}

@@ -23,6 +23,7 @@ public final class MetalDevice implements AutoCloseable {
 	private final Set<MetalTimestampQueryPool> timestampQueryPools = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final Set<MetalRenderPipeline> renderPipelines = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final Set<MetalComputePipeline> computePipelines = Collections.newSetFromMap(new IdentityHashMap<>());
+	private final Set<MetalSpatialScaler> spatialScalers = Collections.newSetFromMap(new IdentityHashMap<>());
 	private long handle;
 	private boolean closing;
 
@@ -268,6 +269,24 @@ public final class MetalDevice implements AutoCloseable {
 		return this.createComputePipeline(descriptor, null, false);
 	}
 
+	public synchronized boolean supportsSpatialScaling() {
+		return MetalNative.nSupportsSpatialScaler(this.requireOpenHandle());
+	}
+
+	public synchronized MetalSpatialScaler createSpatialScaler(final MetalSpatialScaler.Descriptor descriptor) {
+		long handle = MetalNative.nCreateSpatialScaler(
+			this.requireOpenHandle(),
+			descriptor.inputFormat().nativeCode(), descriptor.inputWidth(), descriptor.inputHeight(),
+			descriptor.outputFormat().nativeCode(), descriptor.outputWidth(), descriptor.outputHeight()
+		);
+		if (handle == 0L) {
+			throw new IllegalStateException("MetalFX did not create the requested spatial scaler");
+		}
+		MetalSpatialScaler scaler = new MetalSpatialScaler(this, handle, descriptor);
+		this.spatialScalers.add(scaler);
+		return scaler;
+	}
+
 	synchronized MetalComputePipeline createComputePipeline(
 		final MetalComputePipeline.Descriptor descriptor,
 		final java.nio.file.Path archivePath,
@@ -317,6 +336,7 @@ public final class MetalDevice implements AutoCloseable {
 		List<MetalTimestampQueryPool> ownedTimestampQueryPools;
 		List<MetalRenderPipeline> ownedRenderPipelines;
 		List<MetalComputePipeline> ownedComputePipelines;
+		List<MetalSpatialScaler> ownedSpatialScalers;
 		synchronized (this) {
 			if (this.handle == 0L || this.closing) {
 				return;
@@ -331,6 +351,7 @@ public final class MetalDevice implements AutoCloseable {
 			ownedTimestampQueryPools = new ArrayList<>(this.timestampQueryPools);
 			ownedRenderPipelines = new ArrayList<>(this.renderPipelines);
 			ownedComputePipelines = new ArrayList<>(this.computePipelines);
+			ownedSpatialScalers = new ArrayList<>(this.spatialScalers);
 		}
 
 		for (MetalCommandQueue commandQueue : ownedQueues) {
@@ -360,6 +381,9 @@ public final class MetalDevice implements AutoCloseable {
 		for (MetalComputePipeline computePipeline : ownedComputePipelines) {
 			computePipeline.close();
 		}
+		for (MetalSpatialScaler spatialScaler : ownedSpatialScalers) {
+			spatialScaler.close();
+		}
 
 		synchronized (this) {
 			MetalNative.nReleaseDevice(this.handle);
@@ -373,6 +397,7 @@ public final class MetalDevice implements AutoCloseable {
 			this.timestampQueryPools.clear();
 			this.renderPipelines.clear();
 			this.computePipelines.clear();
+			this.spatialScalers.clear();
 			this.closing = false;
 		}
 	}
@@ -407,6 +432,10 @@ public final class MetalDevice implements AutoCloseable {
 
 	synchronized void forget(final MetalComputePipeline computePipeline) {
 		this.computePipelines.remove(computePipeline);
+	}
+
+	synchronized void forget(final MetalSpatialScaler spatialScaler) {
+		this.spatialScalers.remove(spatialScaler);
 	}
 
 	synchronized void forget(final MetalRenderPipeline renderPipeline) {

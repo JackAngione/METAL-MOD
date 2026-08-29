@@ -272,7 +272,7 @@ public final class MetalNative {
 
 	static native void nReleaseComputePipeline(long pipelineHandle);
 
-	static native long nBeginComputePass(long commandBufferHandle);
+	static native long nBeginComputePass(long commandBufferHandle, int gpuTimingKind);
 
 	static native void nSetComputePipeline(long passHandle, long pipelineHandle);
 
@@ -293,6 +293,28 @@ public final class MetalNative {
 	);
 
 	static native void nEndComputePass(long passHandle);
+
+	static native boolean nSupportsSpatialScaler(long deviceHandle);
+
+	static native long nCreateSpatialScaler(
+		long deviceHandle,
+		int inputFormat,
+		int inputWidth,
+		int inputHeight,
+		int outputFormat,
+		int outputWidth,
+		int outputHeight
+	);
+
+	static native void nEncodeSpatialScaleToTexture(
+		long scalerHandle, long commandBufferHandle, long inputHandle, long outputHandle
+	);
+
+	static native void nEncodeSpatialScaleToDrawable(
+		long scalerHandle, long commandBufferHandle, long inputHandle, long outputHandle
+	);
+
+	static native void nReleaseSpatialScaler(long scalerHandle);
 
 	static native void nSetRenderPipeline(long renderPassHandle, long pipelineHandle);
 

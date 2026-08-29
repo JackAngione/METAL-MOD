@@ -22,6 +22,36 @@
       "size": 2048,
       "layers": 4,
       "lifetime": "frame"
+    },
+    "ssao": {
+      "format": "r8_unorm",
+      "scale": 0.5,
+      "lifetime": "frame"
+    },
+    "bloom_half": {
+      "format": "rgba16_float",
+      "scale": 0.5,
+      "lifetime": "frame"
+    },
+    "bloom_quarter": {
+      "format": "rgba16_float",
+      "scale": 0.25,
+      "lifetime": "frame"
+    },
+    "bloom": {
+      "format": "rgba16_float",
+      "scale": 0.5,
+      "lifetime": "frame"
+    },
+    "volumetric": {
+      "format": "rgba16_float",
+      "scale": 0.5,
+      "lifetime": "frame"
+    },
+    "post_color": {
+      "format": "rgba16_float",
+      "scale": 1.0,
+      "lifetime": "frame"
     }
   },
   "passes": [
@@ -46,9 +76,50 @@
       "writes": ["scene"]
     },
     {
+      "id": "ssao",
+      "kind": "compute",
+      "enabled_by": "ssao",
+      "reads": ["depth"],
+      "writes": ["ssao"]
+    },
+    {
+      "id": "bloom_down_half",
+      "kind": "compute",
+      "enabled_by": "bloom",
+      "reads": ["scene"],
+      "writes": ["bloom_half"]
+    },
+    {
+      "id": "bloom_down_quarter",
+      "kind": "compute",
+      "enabled_by": "bloom",
+      "reads": ["bloom_half"],
+      "writes": ["bloom_quarter"]
+    },
+    {
+      "id": "bloom_up",
+      "kind": "compute",
+      "enabled_by": "bloom",
+      "reads": ["bloom_half", "bloom_quarter"],
+      "writes": ["bloom"]
+    },
+    {
+      "id": "volumetrics",
+      "kind": "compute",
+      "enabled_by": "volumetrics",
+      "reads": ["depth", "shadow"],
+      "writes": ["volumetric"]
+    },
+    {
+      "id": "grade",
+      "kind": "fullscreen",
+      "reads": ["scene", "ssao", "bloom", "volumetric"],
+      "writes": ["post_color"]
+    },
+    {
       "id": "final",
       "kind": "fullscreen",
-      "reads": ["scene"],
+      "reads": ["post_color"],
       "writes": ["drawable"]
     }
   ],
@@ -82,8 +153,8 @@
       "id": "upscale_filter",
       "category": "quality",
       "type": "enum",
-      "values": ["nearest", "linear"],
-      "default": "linear",
+      "values": ["nearest", "linear", "metalfx"],
+      "default": "metalfx",
       "apply": "reload"
     },
     {
@@ -112,6 +183,95 @@
       "max": 0.5,
       "step": 0.01,
       "default": 0.08,
+      "apply": "uniform"
+    },
+    {
+      "id": "ssao",
+      "category": "lighting",
+      "type": "bool",
+      "default": true,
+      "apply": "uniform"
+    },
+    {
+      "id": "ssao_strength",
+      "category": "lighting",
+      "type": "float",
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.1,
+      "default": 0.8,
+      "apply": "uniform"
+    },
+    {
+      "id": "bloom",
+      "category": "lighting",
+      "type": "bool",
+      "default": true,
+      "apply": "uniform"
+    },
+    {
+      "id": "bloom_strength",
+      "category": "lighting",
+      "type": "float",
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.05,
+      "default": 0.25,
+      "apply": "uniform"
+    },
+    {
+      "id": "volumetrics",
+      "category": "lighting",
+      "type": "bool",
+      "default": true,
+      "apply": "uniform"
+    },
+    {
+      "id": "volumetric_strength",
+      "category": "lighting",
+      "type": "float",
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.05,
+      "default": 0.35,
+      "apply": "uniform"
+    },
+    {
+      "id": "tonemap",
+      "category": "tonemap",
+      "type": "enum",
+      "values": ["none", "aces"],
+      "default": "aces",
+      "apply": "uniform"
+    },
+    {
+      "id": "saturation",
+      "category": "tonemap",
+      "type": "float",
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.05,
+      "default": 1.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "contrast",
+      "category": "tonemap",
+      "type": "float",
+      "min": 0.5,
+      "max": 1.5,
+      "step": 0.05,
+      "default": 1.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "temperature",
+      "category": "tonemap",
+      "type": "float",
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 0.0,
       "apply": "uniform"
     }
   ]

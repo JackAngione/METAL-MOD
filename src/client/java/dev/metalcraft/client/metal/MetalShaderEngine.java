@@ -56,11 +56,36 @@ public final class MetalShaderEngine implements AutoCloseable {
 		}
 	}
 
-	/** A fullscreen pass and the pipeline compiled for it, in execution order. */
-	private record PostPass(ShaderGraphCompiler.CompiledPass compiled, MetalRenderPipeline pipeline) implements AutoCloseable {
+	/** A fullscreen draw or compute dispatch and its pipeline, in graph execution order. */
+	private record PostPass(
+		ShaderGraphCompiler.CompiledPass compiled,
+		@Nullable MetalRenderPipeline renderPipeline,
+		@Nullable MetalComputePipeline computePipeline
+	) implements AutoCloseable {
+		static PostPass render(final ShaderGraphCompiler.CompiledPass compiled, final MetalRenderPipeline pipeline) {
+			return new PostPass(compiled, pipeline, null);
+		}
+
+		static PostPass compute(final ShaderGraphCompiler.CompiledPass compiled, final MetalComputePipeline pipeline) {
+			return new PostPass(compiled, null, pipeline);
+		}
+
+		MetalRenderPipeline requireRenderPipeline() {
+			return Objects.requireNonNull(this.renderPipeline, "render pipeline");
+		}
+
+		MetalComputePipeline requireComputePipeline() {
+			return Objects.requireNonNull(this.computePipeline, "compute pipeline");
+		}
+
 		@Override
 		public void close() {
-			this.pipeline.close();
+			if (this.renderPipeline != null) {
+				this.renderPipeline.close();
+			}
+			if (this.computePipeline != null) {
+				this.computePipeline.close();
+			}
 		}
 	}
 
@@ -84,6 +109,8 @@ public final class MetalShaderEngine implements AutoCloseable {
 	private MetalBuffer uniforms;
 	private MetalSampler filteredSampler;
 	private MetalSampler unfilteredSampler;
+	private @Nullable MetalSpatialScaler spatialScaler;
+	private boolean spatialScalerUnavailableLogged;
 	/**
 	 * A view of Minecraft's colour attachment, remade only when that attachment changes.
 	 *
@@ -321,7 +348,18 @@ public final class MetalShaderEngine implements AutoCloseable {
 			}
 			this.bindSceneTexture(scene);
 			for (PostPass pass : this.postPasses) {
-				this.encodePass(commands, pass, output);
+				if (!this.passEnabled(pass.compiled().declaration())) {
+					continue;
+				}
+				if (pass.compiled().declaration().kind() == ShaderPack.PassKind.COMPUTE) {
+					this.encodeComputePass(commands, pass);
+				} else if (output instanceof MetalDrawable drawable
+					&& pass.compiled().declaration().writes().contains(TARGET_DRAWABLE)
+					&& this.encodeSpatialUpscale(commands, pass, drawable)) {
+					continue;
+				} else {
+					this.encodeRenderPass(commands, pass, output);
+				}
 			}
 			return true;
 		} finally {
@@ -331,7 +369,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 		}
 	}
 
-	private void encodePass(
+	private void encodeRenderPass(
 		final MetalCommandBuffer commands,
 		final PostPass pass,
 		final MetalRenderPass.ColorTarget output
@@ -350,8 +388,11 @@ public final class MetalShaderEngine implements AutoCloseable {
 				0.0, 0.0, 0.0, 1.0
 			));
 		}
-		try (MetalRenderPass render = commands.beginRenderPass(new MetalRenderPass.Descriptor(colors, depth))) {
-			render.setPipeline(pass.pipeline());
+		try (MetalRenderPass render = commands.beginRenderPass(
+			new MetalRenderPass.Descriptor(colors, depth),
+			MetalPassCensus.kindFor("MetalCraft shader: " + pass.compiled().declaration().id())
+		)) {
+			render.setPipeline(pass.requireRenderPipeline());
 			int slot = 0;
 			for (String read : pass.compiled().declaration().reads()) {
 				MetalTextureView view = this.readView(read);
@@ -366,6 +407,77 @@ public final class MetalShaderEngine implements AutoCloseable {
 			render.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
 			render.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 		}
+	}
+
+	private void encodeComputePass(final MetalCommandBuffer commands, final PostPass pass) {
+		ShaderPack.Pass declaration = pass.compiled().declaration();
+		try (MetalComputePass compute = commands.beginComputePass(
+			MetalPassCensus.kindFor("MetalCraft shader: " + declaration.id())
+		)) {
+			compute.setPipeline(pass.requireComputePipeline());
+			int slot = 0;
+			for (String read : declaration.reads()) {
+				MetalTextureView view = this.readView(read);
+				compute.setTexture(slot, view);
+				compute.setSampler(
+					slot, view.texture().descriptor().format().hasDepthAspect() ? this.unfilteredSampler : this.filteredSampler
+				);
+				slot++;
+			}
+			for (String write : declaration.writes()) {
+				compute.setTexture(slot++, this.requireAttachment(write).view().metal());
+			}
+			compute.setBuffer(0, this.uniforms, 0L);
+			if (this.worldShadow != null) {
+				compute.setBuffer(1, this.worldShadow.matricesForTesting(), 0L);
+			}
+			MetalTexture.Descriptor extent = this.requireAttachment(declaration.writes().getFirst()).metal().descriptor();
+			compute.dispatchCovering(extent.width(), extent.height(), 8, 8);
+		}
+	}
+
+	private boolean encodeSpatialUpscale(
+		final MetalCommandBuffer commands,
+		final PostPass pass,
+		final MetalDrawable output
+	) {
+		if (!"metalfx".equals(this.reloadOption("upscale_filter"))) {
+			return false;
+		}
+		ShaderPack.Pass declaration = pass.compiled().declaration();
+		if (declaration.reads().size() != 1 || TARGET_SCENE.equals(declaration.reads().getFirst())
+			|| TARGET_DEPTH.equals(declaration.reads().getFirst())) {
+			return false;
+		}
+		MetalTexture input = this.requireAttachment(declaration.reads().getFirst()).metal();
+		int outputWidth = output.surface().width();
+		int outputHeight = output.surface().height();
+		int inputWidth = input.descriptor().width();
+		int inputHeight = input.descriptor().height();
+		if (outputWidth < inputWidth || outputHeight < inputHeight
+			|| outputWidth == inputWidth && outputHeight == inputHeight) {
+			return false;
+		}
+		if (!this.device.supportsSpatialScaling()) {
+			if (!this.spatialScalerUnavailableLogged) {
+				LOGGER.warn("MetalFX spatial scaling is unavailable on {}; falling back to the pack's linear final pass",
+					this.device.name());
+				this.spatialScalerUnavailableLogged = true;
+			}
+			return false;
+		}
+		MetalSpatialScaler.Descriptor wanted = new MetalSpatialScaler.Descriptor(
+			input.descriptor().format(), input.descriptor().width(), input.descriptor().height(),
+			MetalTexture.Format.BGRA8_UNORM, outputWidth, outputHeight
+		);
+		if (this.spatialScaler == null || !this.spatialScaler.descriptor().equals(wanted)) {
+			if (this.spatialScaler != null) {
+				this.spatialScaler.close();
+			}
+			this.spatialScaler = this.device.createSpatialScaler(wanted);
+		}
+		this.spatialScaler.encode(commands, input, output);
+		return true;
 	}
 
 	@Override
@@ -451,9 +563,11 @@ public final class MetalShaderEngine implements AutoCloseable {
 					if (replacementResolve != null) {
 						throw new IllegalArgumentException("A geometry group can contain only one deferred resolve");
 					}
-					replacementResolve = new PostPass(pass, this.createMergedPassPipeline(pass));
+					replacementResolve = PostPass.render(pass, this.createMergedPassPipeline(pass));
+				} else if (pass.declaration().kind() == ShaderPack.PassKind.COMPUTE) {
+					replacements.add(PostPass.compute(pass, this.createComputePassPipeline(pass)));
 				} else {
-					replacements.add(new PostPass(pass, this.createPassPipeline(pass)));
+					replacements.add(PostPass.render(pass, this.createPassPipeline(pass)));
 				}
 			}
 		} catch (RuntimeException error) {
@@ -508,6 +622,14 @@ public final class MetalShaderEngine implements AutoCloseable {
 		));
 	}
 
+	private MetalComputePipeline createComputePassPipeline(final ShaderGraphCompiler.CompiledPass pass) {
+		String passId = pass.declaration().id();
+		String source = this.passDefines(pass) + this.configuredSource();
+		return this.pipelineCache.createComputePipeline(
+			new MetalComputePipeline.Descriptor(source, passId + "_kernel")
+		);
+	}
+
 	/**
 	 * What a fullscreen pass cannot know about itself: which pass is being compiled, and which
 	 * texture and colour index each of its declared reads and writes occupies.
@@ -522,6 +644,11 @@ public final class MetalShaderEngine implements AutoCloseable {
 		int read = 0;
 		for (String target : pass.declaration().reads()) {
 			defines.append("#define MC_TEX_").append(symbol(target)).append(' ').append(read++).append('\n');
+		}
+		if (pass.declaration().kind() == ShaderPack.PassKind.COMPUTE) {
+			for (String target : pass.declaration().writes()) {
+				defines.append("#define MC_IMAGE_").append(symbol(target)).append(' ').append(read++).append('\n');
+			}
 		}
 		int color = 0;
 		for (String target : this.groupColorTargets(pass.groupIndex())) {
@@ -553,7 +680,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 		if (resolve == null || geometry == null || !geometry.hasPendingResolve()) {
 			return false;
 		}
-		render.setPipeline(resolve.pipeline());
+		render.setPipeline(resolve.requireRenderPipeline());
 		int textureSlot = 0;
 		for (String read : resolve.compiled().declaration().reads()) {
 			MetalTextureView view = this.readView(read);
@@ -576,6 +703,10 @@ public final class MetalShaderEngine implements AutoCloseable {
 
 	private static String symbol(final String id) {
 		return id.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_');
+	}
+
+	private boolean passEnabled(final ShaderPack.Pass pass) {
+		return pass.enabledBy() == null || Boolean.TRUE.equals(this.optionValue(pass.enabledBy()));
 	}
 
 	/**
@@ -667,6 +798,10 @@ public final class MetalShaderEngine implements AutoCloseable {
 	 * them. Everything else is allocated here and reallocated on resize and on a reload-mode option.
 	 */
 	private void allocateTargets() {
+		if (this.spatialScaler != null) {
+			this.spatialScaler.close();
+			this.spatialScaler = null;
+		}
 		Map<String, Attachment> replacements = new LinkedHashMap<>();
 		MetalSampler filtered = null;
 		MetalSampler unfiltered = null;
@@ -805,7 +940,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 	}
 
 	@Nullable MetalRenderPipeline deferredResolvePipelineForTesting() {
-		return this.deferredResolve == null ? null : this.deferredResolve.pipeline();
+		return this.deferredResolve == null ? null : this.deferredResolve.requireRenderPipeline();
 	}
 
 	MetalBuffer optionUniformsForTesting() {
@@ -966,6 +1101,10 @@ public final class MetalShaderEngine implements AutoCloseable {
 			this.deferredResolve.close();
 			this.deferredResolve = null;
 		}
+		if (this.spatialScaler != null) {
+			this.spatialScaler.close();
+			this.spatialScaler = null;
+		}
 		this.targets.values().forEach(Attachment::close);
 		this.targets.clear();
 		this.geometryPass = null;
@@ -1024,11 +1163,10 @@ public final class MetalShaderEngine implements AutoCloseable {
 	}
 
 	/**
-	 * Rejects the parts of the declared format the runtime does not execute yet.
+	 * Rejects graph shapes that still require world-routing support beyond the format runtime.
 	 *
-	 * <p>The graph compiler validates more than the runtime can run. The deferred geometry/resolve
-	 * pair is executable; arbitrary merged groups and compute passes remain future graph shapes, so
-	 * the refusal is here and names the pass rather than leaving a pack to render half its graph.
+	 * <p>Fullscreen and compute groups execute in graph order. The only merged group the world router
+	 * can currently keep open is the deferred geometry/resolve pair.
 	 */
 	private static void validateSupportedGraph(
 		final ShaderPack pack,
@@ -1068,12 +1206,6 @@ public final class MetalShaderEngine implements AutoCloseable {
 			}
 		}
 		for (ShaderGraphCompiler.CompiledPass pass : graph.passes()) {
-			if (pass.declaration().kind() == ShaderPack.PassKind.COMPUTE) {
-				throw new IllegalArgumentException(
-					"Shader pack '" + pack.id() + "' declares compute pass '" + pass.declaration().id()
-						+ "'; compute passes are not executed until the effects phase exists"
-				);
-			}
 			if (pass.declaration().kind() == ShaderPack.PassKind.SHADOW) {
 				List<String> writes = pass.declaration().writes();
 				if (writes.size() != 1) {

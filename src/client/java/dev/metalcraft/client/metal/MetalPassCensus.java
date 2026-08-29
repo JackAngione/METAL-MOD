@@ -44,7 +44,7 @@ import java.util.Map;
 public final class MetalPassCensus {
 	/** A pass that is not being measured, and which therefore carries no counter samples. */
 	public static final int UNTIMED_KIND = -1;
-	private static final int REPORTED_KINDS = 12;
+	private static final int REPORTED_KINDS = 20;
 
 	/** Interned on the render thread while capturing, and read on the same thread when reporting. */
 	private static final Map<String, Integer> KINDS = new HashMap<>();

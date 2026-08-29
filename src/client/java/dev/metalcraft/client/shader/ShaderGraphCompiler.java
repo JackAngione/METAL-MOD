@@ -277,6 +277,19 @@ public final class ShaderGraphCompiler {
 		final Map<String, ShaderPack.Pass> passes
 	) {
 		for (ShaderPack.Pass pass : manifest.passes()) {
+			if (pass.enabledBy() != null) {
+				ShaderPack.Option option = manifest.options().stream()
+					.filter(candidate -> candidate.id().equals(pass.enabledBy()))
+					.findFirst()
+					.orElseThrow(() -> new CompileException(
+						"Pass '" + pass.id() + "' is enabled by unknown option '" + pass.enabledBy() + "'"
+					));
+				if (option.type() != ShaderPack.OptionType.BOOL) {
+					throw new CompileException(
+						"Pass '" + pass.id() + "' enabled_by option '" + pass.enabledBy() + "' must be boolean"
+					);
+				}
+			}
 			if (pass.mergeWith() != null) {
 				ShaderPack.Pass merged = passes.get(pass.mergeWith());
 				if (merged == null) {
