@@ -37,6 +37,7 @@ struct ShadowUniforms {
     float4 splits;
     float4 lightDirectionAndNormalOffset;
     float4 mapSize;
+    float4 celestial;
 };
 
 struct ShadowVaryings {

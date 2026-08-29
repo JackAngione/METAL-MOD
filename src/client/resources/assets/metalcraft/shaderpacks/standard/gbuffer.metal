@@ -169,8 +169,14 @@ static inline void mc_write_gbuffer(
     // class. The G-buffer is cleared to zero and the sky never writes it, so the distinction is the
     // difference between reading the sky as solid and reading it as absent.
     out.albedo = float4(albedo, float(MC_MATERIAL + 1) / 255.0);
-    out.normal = float4(mc_encode_normal(normal), mc_material_roughness(MC_MATERIAL), 0.0);
-    uint packedDepth = uint(round(saturate(viewDepth / 1024.0) * 65535.0));
+    // Preserve camera-relative position accurately enough that a moving camera does not make a
+    // stationary receiver crawl across shadow texels. The normal target's alpha byte was unused,
+    // so depth can use 24 bits without another attachment or more tile memory.
+    uint packedDepth = uint(round(saturate(viewDepth / 1024.0) * 16777215.0));
+    out.normal = float4(
+        mc_encode_normal(normal), mc_material_roughness(MC_MATERIAL),
+        float((packedDepth >> 16) & 255u) / 255.0
+    );
     out.light = float4(
         lightLevels.x,
         lightLevels.y,

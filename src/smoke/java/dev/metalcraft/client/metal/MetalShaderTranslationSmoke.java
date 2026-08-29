@@ -30,6 +30,8 @@ import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.shaders.UniformType;
 import net.minecraft.resources.Identifier;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.client.renderer.state.level.SkyRenderState;
+import net.minecraft.world.level.dimension.DimensionType.Skybox;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -161,9 +163,9 @@ public final class MetalShaderTranslationSmoke {
 		    Targets out;
 		    out.scene = float4(0.10, 0.10, 0.10, 1.0);
 		    out.albedo = float4(0.80, 0.60, 0.40, 1.0 / 255.0);
+		    // Full sky light, no block light, and 24-bit view depth 0.5 encoded as 0x002000.
 		    out.normal = float4(0.50, 0.50, 0.85, 0.0);
-		    // Full sky light, no block light, and view depth 0.5 encoded as 0x0020.
-		    out.light = float4(0.0, 1.0, 0.0, 32.0 / 255.0);
+		    out.light = float4(0.0, 1.0, 32.0 / 255.0, 0.0);
 		    return out;
 		}
 
@@ -410,6 +412,7 @@ public final class MetalShaderTranslationSmoke {
 
 	public static void main(final String[] arguments) {
 		assertTransientArenaSuballocation();
+		assertCelestialLightingMatchesSkyTransform();
 		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
 			VERTEX_GLSL,
 			"smoke/fullscreen.vert",
@@ -515,6 +518,76 @@ public final class MetalShaderTranslationSmoke {
 		}
 	}
 
+	/** Production celestial vectors must match the transform used to draw Minecraft's sky discs. */
+	private static void assertCelestialLightingMatchesSkyTransform() {
+		for (float angle : new float[]{
+			0.0F,
+			(float)(Math.PI / 2.0),
+			(float)(Math.PI * 3.0 / 2.0),
+			(float)Math.PI
+		}) {
+			Vector3f expected = new Matrix4f()
+				.rotateY((float)(-Math.PI / 2.0))
+				.rotateX(angle)
+				.transformDirection(new Vector3f(0.0F, 1.0F, 0.0F));
+			Vector3f actual = MetalCelestialLighting.directionFromSkyTransform(angle);
+			assertDirection(actual, expected, "sky angle " + angle);
+		}
+
+		// At sunrise the old (0, cos(angle), sin(angle)) derivation is orthogonal to the disc.
+		float sunrise = (float)(Math.PI / 2.0);
+		Vector3f sunriseDirection = MetalCelestialLighting.directionFromSkyTransform(sunrise);
+		Vector3f omittedSkyRotation = new Vector3f(0.0F, (float)Math.cos(sunrise), (float)Math.sin(sunrise));
+		if (Math.abs(sunriseDirection.dot(omittedSkyRotation)) > 1.0E-5F) {
+			throw new AssertionError("The sunrise regression fixture no longer distinguishes the omitted sky rotation");
+		}
+
+		CameraRenderState camera = new CameraRenderState();
+		camera.viewRotationMatrix.rotationY(0.63F).rotateX(-0.27F);
+		SkyRenderState sky = overworldSky((float)Math.PI, 0.0F, 0.42F);
+		MetalCelestialLighting.State moon = MetalCelestialLighting.derive(sky, camera);
+		if (moon.source() != MetalCelestialLighting.Source.MOON || Math.abs(moon.intensity() - 0.42F) > 1.0E-6F) {
+			throw new AssertionError("Independent moon selection or weather intensity was lost: " + moon);
+		}
+		Vector3f expectedView = camera.viewRotationMatrix
+			.transformDirection(moon.worldDirection(), new Vector3f())
+			.normalize();
+		assertDirection(moon.viewDirection(), expectedView, "camera-rotated moon");
+
+		sky.sunAngle = 0.35F;
+		sky.moonAngle = 1.2F;
+		MetalCelestialLighting.State highest = MetalCelestialLighting.derive(sky, camera);
+		if (highest.source() != MetalCelestialLighting.Source.SUN) {
+			throw new AssertionError("The highest independent celestial source was not selected: " + highest);
+		}
+
+		sky.skybox = Skybox.END;
+		if (MetalCelestialLighting.derive(sky, camera).active()) {
+			throw new AssertionError("Celestial lighting remained active outside the Overworld skybox");
+		}
+		sky = overworldSky(0.0F, (float)Math.PI, 0.0F);
+		if (MetalCelestialLighting.derive(sky, camera).active()) {
+			throw new AssertionError("Fully obscured weather retained active celestial lighting");
+		}
+	}
+
+	private static SkyRenderState overworldSky(
+		final float sunAngle, final float moonAngle, final float rainBrightness
+	) {
+		SkyRenderState sky = new SkyRenderState();
+		sky.skybox = Skybox.OVERWORLD;
+		sky.sunAngle = sunAngle;
+		sky.moonAngle = moonAngle;
+		sky.rainBrightness = rainBrightness;
+		return sky;
+	}
+
+	private static void assertDirection(final Vector3f actual, final Vector3f expected, final String label) {
+		if (actual.distance(expected) > 1.0E-5F) {
+			throw new AssertionError(label + " direction differs: expected=" + expected + ", actual=" + actual);
+		}
+	}
+
 	/**
 	 * Phase 2's exit: every world program the pack substitutes compiles on the device, a blended
 	 * draw is refused, and one terrain draw fills all four attachments with the values the format
@@ -614,11 +687,50 @@ public final class MetalShaderTranslationSmoke {
 				throw new AssertionError("Phase 5 effects did not produce a distinct non-empty result: enabled="
 					+ Integer.toHexString(enabled) + ", disabled=" + Integer.toHexString(disabled));
 			}
+			assertPhaseFiveOrientation(queue, engine, scene, output, depthView, size);
 		} finally {
 			engine.supplyWorldDepthForTesting(null);
 			engine.setOption("ssao", true);
 			engine.setOption("bloom", true);
 			engine.setOption("volumetrics", true);
+		}
+	}
+
+	/** The post chain must perform the scene-to-drawable row conversion exactly once. */
+	private static void assertPhaseFiveOrientation(
+		final MetalCommandQueue queue,
+		final MetalShaderEngine engine,
+		final MetalTexture scene,
+		final MetalTexture output,
+		final MetalTextureView depth,
+		final int size
+	) {
+		ByteBuffer pixels = ByteBuffer.allocateDirect(size * size * 4);
+		for (int y = 0; y < size; y++) {
+			for (int x = 0; x < size; x++) {
+				boolean top = y < size / 2;
+				pixels.put((byte)(top ? 0xFF : 0x00));
+				pixels.put((byte)0x00);
+				pixels.put((byte)(top ? 0x00 : 0xFF));
+				pixels.put((byte)0xFF);
+			}
+		}
+		scene.upload(queue, 0, pixels.flip());
+		engine.supplyWorldDepthForTesting(depth);
+		try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			if (!engine.encodeForTesting(commands, scene, output)) {
+				throw new AssertionError("The Phase 5 graph declined the orientation fixture");
+			}
+			commands.commitAndWait();
+		}
+		ByteBuffer result = output.readback(queue, 0);
+		int topBlue = Byte.toUnsignedInt(result.get((size / 4 * size + size / 2) * 4));
+		int topRed = Byte.toUnsignedInt(result.get((size / 4 * size + size / 2) * 4 + 2));
+		int bottomBlue = Byte.toUnsignedInt(result.get((size * 3 / 4 * size + size / 2) * 4));
+		int bottomRed = Byte.toUnsignedInt(result.get((size * 3 / 4 * size + size / 2) * 4 + 2));
+		if (topBlue < 180 || topRed > 30 || bottomRed < 180 || bottomBlue > 30) {
+			throw new AssertionError("Phase 5 inverted the drawable row conversion: top BGRA="
+				+ topBlue + ",0," + topRed + ", bottom BGRA=" + bottomBlue + ",0," + bottomRed);
 		}
 	}
 
@@ -690,13 +802,35 @@ public final class MetalShaderTranslationSmoke {
 		camera.viewRotationMatrix.identity();
 		camera.pos = new Vec3(100.25, 70.0, 200.25);
 		Vector3f worldPoint = new Vector3f(100.0F, 69.0F, 190.0F);
-		shadow.prepareForTesting(camera, 0.75F);
+		SkyRenderState sky = overworldSky(0.75F, 0.75F + (float)Math.PI, 1.0F);
+		shadow.prepareForTesting(camera, sky);
 		Vector3f before = shadow.projectWorldPointForTesting(0, worldPoint);
 		camera.pos = new Vec3(100.251, 70.0, 200.251);
-		shadow.prepareForTesting(camera, 0.75F);
+		shadow.prepareForTesting(camera, sky);
 		Vector3f after = shadow.projectWorldPointForTesting(0, worldPoint);
 		if (Math.abs(before.x - after.x) > 1.0E-5F || Math.abs(before.y - after.y) > 1.0E-5F) {
 			throw new AssertionError("A sub-texel camera move shifted the first shadow cascade: "
+				+ before + " -> " + after);
+		}
+
+		// World geometry reaches the shader camera-relative even near Minecraft's world border. The
+		// cascade construction must retain the camera's double-precision translation long enough to
+		// keep that same geometry anchored to its shadow texels there too.
+		double worldX = 20_000_000.0;
+		double cameraX = worldX + 0.25;
+		camera.pos = new Vec3(cameraX, 70.0, worldX + 0.25);
+		shadow.prepareForTesting(camera, sky);
+		before = shadow.projectCameraRelativePointForTesting(0, new Vector3f(
+			(float)(worldX - cameraX), -1.0F, (float)(worldX - 10.0 - camera.pos.z)
+		));
+		cameraX += 0.001;
+		camera.pos = new Vec3(cameraX, 70.0, worldX + 0.251);
+		shadow.prepareForTesting(camera, sky);
+		after = shadow.projectCameraRelativePointForTesting(0, new Vector3f(
+			(float)(worldX - cameraX), -1.0F, (float)(worldX - 10.0 - camera.pos.z)
+		));
+		if (Math.abs(before.x - after.x) > 1.0E-5F || Math.abs(before.y - after.y) > 1.0E-5F) {
+			throw new AssertionError("A sub-texel camera move shifted a large-world shadow cascade: "
 				+ before + " -> " + after);
 		}
 	}
@@ -807,10 +941,10 @@ public final class MetalShaderTranslationSmoke {
 		// Albedo is the surface before the light: texture times vertex tint, no lightmap, no fog.
 		// Alpha is one past the material class, and solid is class zero.
 		assertChannel(solid.albedo(), new int[] {255, 128, 64, 1}, 2, "solid terrain albedo");
-		// The octahedral encoding of the tilted quad's reconstructed face normal, plus solid's roughness.
+		// The octahedral normal, solid roughness, and high byte of 24-bit linear view depth.
 		assertChannel(solid.normal(), new int[] {223, 191, 217, 0}, 3, "solid terrain normal");
-		// Block light and sky light keep one byte each; B/A carry sixteen-bit linear view depth.
-		assertChannel(solid.light(), new int[] {255, 128, 0, 40}, 2, "solid terrain light");
+		// Block and sky light keep one byte each; B/A carry the middle and low depth bytes.
+		assertChannel(solid.light(), new int[] {255, 128, 40, 0}, 2, "solid terrain light");
 
 		// Cutout terrain, above its threshold: the same surface, classified as foliage and rougher
 		// for it. Alpha cutout on world terrain is overwhelmingly leaves, grass and crops.
@@ -849,16 +983,16 @@ public final class MetalShaderTranslationSmoke {
 		assertChannel(entity.scene(), new int[] {179, 90, 45, 255}, 2, "entity scene");
 		assertChannel(entity.albedo(), new int[] {255, 128, 64, 4}, 2, "entity albedo");
 		assertChannel(entity.normal(), new int[] {128, 255, 179, 0}, 2, "entity normal");
-		assertChannel(entity.light(), new int[] {255, 128, 0, 40}, 2, "entity light");
+		assertChannel(entity.light(), new int[] {255, 128, 40, 0}, 2, "entity light");
 
 		// The emissive variant: no lightmap to multiply by and a class of its own. The resolve finds
-		// emissive from the material byte, leaving both depth bytes available at full precision.
+		// emissive from the material byte, leaving all three depth bytes available at full precision.
 		GBufferReadback emissive = drawWorldProgram(
 			device, gpuDevice, world, entityPipeline(false), entityQuad(), chunkSectionBlock(), dynamicTransformsBlock(1.0F)
 		);
 		assertChannel(emissive.scene(), new int[] {179, 90, 45, 255}, 2, "emissive entity scene");
 		assertChannel(emissive.albedo(), new int[] {255, 128, 64, 5}, 2, "emissive entity albedo");
-		assertChannel(emissive.light(), new int[] {255, 128, 0, 40}, 2, "emissive entity light");
+		assertChannel(emissive.light(), new int[] {255, 128, 40, 0}, 2, "emissive entity light");
 	}
 
 	/** The four attachments one world draw wrote, already read back. */

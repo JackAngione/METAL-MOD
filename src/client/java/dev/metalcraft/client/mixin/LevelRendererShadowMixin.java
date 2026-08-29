@@ -57,9 +57,11 @@ abstract class LevelRendererShadowMixin {
 		if (!MetalWorldShadow.isAvailable() || this.viewArea == null) {
 			return renderer.prepareChunkRenders(modelView);
 		}
-		MetalWorldShadow.prepareCascades(
-			this.levelRenderState.cameraRenderState, this.levelRenderState.skyRenderState.sunAngle
-		);
+		if (!MetalWorldShadow.prepareCascades(
+			this.levelRenderState.cameraRenderState, this.levelRenderState.skyRenderState
+		)) {
+			return renderer.prepareChunkRenders(modelView);
+		}
 		List<SectionRenderDispatcher.RenderSection> cameraVisible = new ArrayList<>(this.visibleSections);
 		this.visibleSections.clear();
 		((ViewAreaAccessor)this.viewArea).metalcraft$sections().forEach(section -> {

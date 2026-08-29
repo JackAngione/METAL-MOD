@@ -32,6 +32,7 @@ import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.client.renderer.state.level.SkyRenderState;
 import net.minecraft.resources.Identifier;
 import net.minecraft.client.renderer.ShaderDefines;
 import org.joml.FrustumIntersection;
@@ -88,6 +89,7 @@ public final class MetalWorldShadow implements AutoCloseable {
 	private double cameraY;
 	private double cameraZ;
 	private boolean rendering;
+	private boolean celestialActive;
 	private boolean cleared;
 	private boolean closed;
 
@@ -168,12 +170,16 @@ public final class MetalWorldShadow implements AutoCloseable {
 			bytes.putFloat(288, this.shadowView.getWidth(0));
 			bytes.putFloat(292, 1.0F);
 			bytes.putFloat(296, 1.0F);
-			bytes.putFloat(300, 1.0F);
+			bytes.putFloat(300, 0.0F);
+			bytes.putFloat(304, 1.0F);
+			bytes.putFloat(308, 1.0F);
+			bytes.putFloat(312, MetalCelestialLighting.Source.SUN.shaderValue());
+			bytes.putFloat(316, 0.0F);
 		}
 	}
 
-	void prepareForTesting(final CameraRenderState camera, final float sunAngle) {
-		this.prepare(camera, sunAngle);
+	boolean prepareForTesting(final CameraRenderState camera, final SkyRenderState sky) {
+		return this.prepare(camera, sky);
 	}
 
 	Vector3f projectWorldPointForTesting(final int cascade, final Vector3f worldPoint) {
@@ -184,6 +190,11 @@ public final class MetalWorldShadow implements AutoCloseable {
 		);
 		this.cameraViewForTesting.transformPosition(relative);
 		return this.cascadeMatrices[cascade].transformProject(relative);
+	}
+
+	Vector3f projectCameraRelativePointForTesting(final int cascade, final Vector3f cameraRelativePoint) {
+		Vector3f viewPoint = this.cameraViewForTesting.transformPosition(cameraRelativePoint, new Vector3f());
+		return this.cascadeMatrices[cascade].transformProject(viewPoint);
 	}
 
 	/** True only while the prepared geometry is being replayed into the shadow map. */
@@ -227,11 +238,12 @@ public final class MetalWorldShadow implements AutoCloseable {
 	 * to shadow texels. The latter keeps a stationary surface on the same texels during sub-texel
 	 * camera motion, which removes the characteristic crawling edge.
 	 */
-	public static void prepareCascades(final CameraRenderState camera, final float sunAngle) {
+	public static boolean prepareCascades(final CameraRenderState camera, final SkyRenderState sky) {
 		MetalWorldShadow current = active();
 		if (current != null) {
-			current.prepare(camera, sunAngle);
+			return current.prepare(camera, sky);
 		}
+		return false;
 	}
 
 	/** Tests a chunk against the union of the four light frusta, independent of camera visibility. */
@@ -258,7 +270,7 @@ public final class MetalWorldShadow implements AutoCloseable {
 	/** Runs once immediately before the main opaque terrain group. */
 	public static void renderBeforeMain(final ChunkSectionLayerGroup group, final GpuSampler sampler) {
 		MetalWorldShadow current = active();
-		if (current == null || current.rendering || group != ChunkSectionLayerGroup.OPAQUE
+		if (current == null || !current.celestialActive || current.rendering || group != ChunkSectionLayerGroup.OPAQUE
 			|| SharedConstants.DEBUG_HOTKEYS && Minecraft.getInstance().wireframe) {
 			return;
 		}
@@ -412,10 +424,16 @@ public final class MetalWorldShadow implements AutoCloseable {
 		return slots;
 	}
 
-	private void prepare(final CameraRenderState camera, final float sunAngle) {
+	private boolean prepare(final CameraRenderState camera, final SkyRenderState sky) {
 		this.cameraX = camera.pos.x;
 		this.cameraY = camera.pos.y;
 		this.cameraZ = camera.pos.z;
+		MetalCelestialLighting.State celestial = MetalCelestialLighting.derive(sky, camera);
+		this.celestialActive = celestial.active();
+		this.preparedTerrain = null;
+		for (int index = 0; index < CASCADES; index++) {
+			this.cascadeFrusta[index] = null;
+		}
 		float near = 0.05F;
 		float far = Math.max(16.0F, (float)this.distance.getAsDouble());
 		float tanHalfX = 1.0F / Math.abs(camera.projectionMatrix.m00());
@@ -428,25 +446,20 @@ public final class MetalWorldShadow implements AutoCloseable {
 			splits[index] = logarithmic * 0.65F + linear * 0.35F;
 		}
 
-		float solarElevation = (float)Math.cos(sunAngle);
-		Vector3f lightWorld = new Vector3f(0.0F, solarElevation, (float)Math.sin(sunAngle)).normalize();
-		// Below the horizon the moon supplies the opposing directional light and shadow view.
-		if (solarElevation < 0.0F) {
-			lightWorld.negate();
-		}
-		Vector3f lightViewDirection = camera.viewRotationMatrix.transformDirection(lightWorld, new Vector3f()).normalize();
+		Vector3f lightWorld = celestial.worldDirection();
+		Vector3f lightViewDirection = celestial.viewDirection();
 		Matrix4f cameraView = new Matrix4f(camera.viewRotationMatrix);
 		this.cameraViewForTesting.set(cameraView);
 		Matrix4f inverseCameraView = cameraView.invert(new Matrix4f());
-		Matrix4f viewToWorld = new Matrix4f().translation(
-			(float)this.cameraX, (float)this.cameraY, (float)this.cameraZ
-		).mul(inverseCameraView);
 		Matrix4f[] matricesToWrite = new Matrix4f[CASCADES];
 		float cascadeNear = near;
-		for (int index = 0; index < CASCADES; index++) {
+		for (int index = 0; index < CASCADES && this.celestialActive; index++) {
 			float cascadeFar = splits[index];
 			List<Vector3f> corners = frustumCorners(cascadeNear, cascadeFar, tanHalfX, tanHalfY);
-			for (Vector3f corner : corners) viewToWorld.transformPosition(corner);
+			// Keep the light view camera-relative. Minecraft feeds world geometry to the GPU in this
+			// space already, and converting through an absolute float position loses player motion far
+			// from the origin before the translation can be cancelled back out.
+			for (Vector3f corner : corners) inverseCameraView.transformPosition(corner);
 			Vector3f center = new Vector3f();
 			for (Vector3f corner : corners) center.add(corner);
 			center.div(corners.size());
@@ -459,24 +472,32 @@ public final class MetalWorldShadow implements AutoCloseable {
 			Vector3f right = new Vector3f(lightWorld).cross(up).normalize();
 			Vector3f lightUp = new Vector3f(right).cross(lightWorld).normalize();
 			float texel = 2.0F * radius / this.shadowView.getWidth(0);
-			float rightCoordinate = center.dot(right);
-			float upCoordinate = center.dot(lightUp);
-			center.fma(Math.round(rightCoordinate / texel) * texel - rightCoordinate, right);
-			center.fma(Math.round(upCoordinate / texel) * texel - upCoordinate, lightUp);
+			// The grid itself is world-anchored, so include the absolute camera position only in these
+			// scalar dot products. Double precision preserves sub-texel motion near the world border.
+			double rightCoordinate = this.cameraX * right.x + this.cameraY * right.y + this.cameraZ * right.z
+				+ center.dot(right);
+			double upCoordinate = this.cameraX * lightUp.x + this.cameraY * lightUp.y + this.cameraZ * lightUp.z
+				+ center.dot(lightUp);
+			center.fma((float)(Math.rint(rightCoordinate / texel) * texel - rightCoordinate), right);
+			center.fma((float)(Math.rint(upCoordinate / texel) * texel - upCoordinate), lightUp);
 
 			Vector3f eye = new Vector3f(center).fma(2.0F * radius, lightWorld);
 			Matrix4f lightView = new Matrix4f().setLookAt(eye, center, lightUp);
 			Matrix4f lightProjection = new Matrix4f().setOrtho(
 				-radius, radius, -radius, radius, 0.0F, 4.0F * radius, true
 			);
-			Matrix4f shadowFromWorld = lightProjection.mul(lightView, new Matrix4f());
-			Matrix4f shadowFromView = shadowFromWorld.mul(viewToWorld, new Matrix4f());
+			Matrix4f shadowFromRelativeWorld = lightProjection.mul(lightView, new Matrix4f());
+			Matrix4f shadowFromView = shadowFromRelativeWorld.mul(inverseCameraView, new Matrix4f());
 			matricesToWrite[index] = shadowFromView;
 			this.cascadeMatrices[index] = new Matrix4f(shadowFromView);
-			this.cascadeFrusta[index] = new FrustumIntersection(
-				shadowFromView.mul(cameraView, new Matrix4f()), true
-			);
+			this.cascadeFrusta[index] = new FrustumIntersection(shadowFromRelativeWorld, true);
 			cascadeNear = cascadeFar;
+		}
+		if (!this.celestialActive) {
+			for (int index = 0; index < CASCADES; index++) {
+				matricesToWrite[index] = new Matrix4f();
+				splits[index] = 0.0F;
+			}
 		}
 
 		try (var mapping = this.matrices.map(0L, UNIFORM_BYTES, false, true)) {
@@ -495,8 +516,13 @@ public final class MetalWorldShadow implements AutoCloseable {
 			bytes.putFloat(288, this.shadowView.getWidth(0));
 			bytes.putFloat(292, tanHalfX);
 			bytes.putFloat(296, tanHalfY);
-			bytes.putFloat(300, solarElevation);
+			bytes.putFloat(300, 0.0F);
+			bytes.putFloat(304, celestial.elevation());
+			bytes.putFloat(308, celestial.intensity());
+			bytes.putFloat(312, celestial.source().shaderValue());
+			bytes.putFloat(316, 0.0F);
 		}
+		return this.celestialActive;
 	}
 
 	private static List<Vector3f> frustumCorners(

@@ -26,6 +26,7 @@ struct EffectShadowUniforms {
     float4 splits;
     float4 lightDirectionAndNormalOffset;
     float4 mapSize;
+    float4 celestial;
 };
 
 static inline float2 mc_clamped_uv(uint2 gid, uint2 size) {
@@ -198,8 +199,10 @@ kernel void volumetrics_kernel(
         }
     }
     float sunFacing = pow(saturate(-shadow.lightDirectionAndNormalOffset.z), 2.0);
-    float shaft = scattering / float(steps) * options.volumetricStrength * (0.25 + sunFacing);
-    float3 tint = shadow.mapSize.w >= 0.0 ? float3(1.0, 0.82, 0.58) : float3(0.32, 0.42, 0.72);
+    float shaft = scattering / float(steps) * options.volumetricStrength * (0.25 + sunFacing)
+        * saturate(shadow.celestial.y);
+    float3 tint = shadow.celestial.z < 1.5
+        ? float3(1.0, 0.82, 0.58) : float3(0.32, 0.42, 0.72);
     output.write(float4(tint * shaft, 1.0), gid);
 }
 
@@ -215,7 +218,11 @@ struct GradeVaryings {
 vertex GradeVaryings grade_vertex(uint vertexId [[vertex_id]]) {
     const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
     float2 position = corners[vertexId % 3];
-    return {float4(position, 0.0, 1.0), position * 0.5 + 0.5};
+    float2 uv = position * 0.5 + 0.5;
+    // An intermediate fullscreen render must preserve texture row order. The final pass performs
+    // the one scene-to-drawable conversion; letting this pass do it as well flips the game twice.
+    uv.y = 1.0 - uv.y;
+    return {float4(position, 0.0, 1.0), uv};
 }
 
 static inline float3 mc_aces(float3 color) {
