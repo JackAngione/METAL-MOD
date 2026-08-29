@@ -113,7 +113,8 @@ Metal may still recreate an `MTLLibrary` from source before resolving its functi
 Deferred, with the G-buffer sized to stay inside tile memory so the resolve can merge.
 
 - **G-buffer, three targets plus depth.** Albedo RGB with a material flag in alpha; octahedral normal
-  and roughness; block-light and sky-light with emissive. Twelve bytes of colour plus four of depth
+  and roughness; block-light and sky-light plus sixteen-bit linear view depth (emissive is a material
+  class). Twelve bytes of colour plus four of depth
   per pixel, which leaves headroom in the tile budget for the resolve's own imageblock use.
 - **Deferred resolve merged into the G-buffer encoder,** reading all three targets through
   programmable blending rather than as sampled textures. The three G-buffer targets are memoryless
@@ -298,25 +299,50 @@ naming the pass, so a pack cannot render half of what it declared.
 
 ### Phase 3 — shadows
 
-- Second world render from the light's direction, four cascades in one layered pass, with cascade
+- [x] Second world render from the light's direction, four cascades in one layered pass, with cascade
   selection, stabilisation against camera motion, and a configurable distance and resolution.
-- Depth bias and normal offsetting against acne and peter-panning, using the reconstructed normal.
-- Cutout foliage and entity handling in the shadow program.
+- [x] Depth bias and normal offsetting against acne and peter-panning, using the reconstructed normal.
+- [x] Cutout foliage and entity handling in the shadow program.
 
-Exit: shadows are stable under camera motion and free of acne at every cascade boundary at the
-default settings.
+Exit, met. The prepared terrain draw list is rebuilt against the union of four light frusta rather
+than reused from camera visibility, while the already-prepared solid entity and block-entity buffers
+are replayed once before the main world pass. One four-instance draw routes primitives to all four
+layers through `render_target_array_index`; every later shadow draw loads the same layered depth
+attachment, so terrain, cutouts, loose block models and entities share one encoder. Practical split
+distances cover the configured range, each light-space centre is snapped to a shadow texel, and the
+resolution rebuilds the target without recompiling unrelated pack state.
+
+The depth pipeline combines slope-scaled bias with a fragment depth derived from the reconstructed
+terrain normal (or the entity vertex normal) after a configurable world-space normal offset. The
+smoke test compiles every routed shadow variant on the device, refuses blended geometry, draws an
+alpha-tested triangle into all four array layers, and checks that sub-texel camera motion leaves a
+fixed world point at the same shadow coordinate. The pack exposes each cascade as a debug view;
+lighting consumes the map in Phase 4.
 
 ### Phase 4 — deferred resolve
 
-- The lighting model: sun and moon directional light with the shadow term, block and sky light from
+- [x] The lighting model: sun and moon directional light with the shadow term, block and sky light from
   the G-buffer, ambient, and emissive.
-- Merge the resolve into the G-buffer encoder, read the G-buffer through tile memory, and confirm the
+- [x] Merge the resolve into the G-buffer encoder, read the G-buffer through tile memory, and confirm the
   three G-buffer targets allocate no backing store.
-- A forward pass for translucent geometry — water, glass, stained glass — after the resolve, because
+- [x] A forward pass for translucent geometry — water, glass, stained glass — after the resolve, because
   deferred cannot order translucency.
 
-Exit: the world is lit and shadowed, translucency composites correctly, and a capture confirms the
-G-buffer never reaches DRAM.
+Exit, met. The resolve is the final draw in each opaque encoder lifetime. It framebuffer-fetches
+scene, albedo, normal and light, reconstructs camera-view position from a sixteen-bit linear depth,
+selects and PCF-samples the four shadow cascades, and combines sun/moon directional light, block and
+sky light, ambient and emissive into Minecraft's scene attachment. A command that would break the
+encoder first consumes any pending tile data, so unsupported opaque draws remain correct without
+silently discarding the G-buffer.
+
+All three G-buffer targets now use `MTLStorageModeMemoryless`, report a zero-byte device footprint,
+cannot be viewed, uploaded, sampled or read back, and use `DontCare` stores. The GPU smoke test runs
+the built-in resolve against those real memoryless allocations, checks that the shadow term darkens
+an occluded surface, then blends a translucent forward draw over the result. Minecraft's ordered
+translucent terrain and feature pipelines remain forward and begin only after the opaque resolve;
+that covers water, glass, stained glass and translucent entities without putting non-orderable data
+in the G-buffer. The automated Metal lifecycle test loads a singleplayer world, resizes, reloads
+resources, captures a non-empty lit frame, and shuts down cleanly with this path active.
 
 ### Phase 5 — effects
 

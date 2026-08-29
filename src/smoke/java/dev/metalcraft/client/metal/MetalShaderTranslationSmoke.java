@@ -29,6 +29,10 @@ import java.util.OptionalLong;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.shaders.UniformType;
 import net.minecraft.resources.Identifier;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
+import org.joml.Vector3f;
 import dev.metalcraft.client.shader.ShaderPack;
 import dev.metalcraft.client.shader.ShaderGraphCompiler;
 import dev.metalcraft.client.shader.ShaderPackLoader;
@@ -131,6 +135,40 @@ public final class MetalShaderTranslationSmoke {
 		    out.normal = fetched.normal;
 		    out.scene = float4(fetched.albedo.rgb + fetched.normal.rgb, 1.0);
 		    return out;
+		}
+		""";
+	private static final String PHASE_FOUR_MSL = """
+		#include <metal_stdlib>
+		using namespace metal;
+
+		struct Varyings {
+		    float4 position [[position]];
+		};
+
+		vertex Varyings phase_four_vertex(uint vertexId [[vertex_id]]) {
+		    const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
+		    return {float4(corners[vertexId % 3], 0.0, 1.0)};
+		}
+
+		struct Targets {
+		    float4 scene [[color(0)]];
+		    float4 albedo [[color(1)]];
+		    float4 normal [[color(2)]];
+		    float4 light [[color(3)]];
+		};
+
+		fragment Targets phase_four_fill() {
+		    Targets out;
+		    out.scene = float4(0.10, 0.10, 0.10, 1.0);
+		    out.albedo = float4(0.80, 0.60, 0.40, 1.0 / 255.0);
+		    out.normal = float4(0.50, 0.50, 0.85, 0.0);
+		    // Full sky light, no block light, and view depth 0.5 encoded as 0x0020.
+		    out.light = float4(0.0, 1.0, 0.0, 32.0 / 255.0);
+		    return out;
+		}
+
+		fragment float4 phase_four_forward() {
+		    return float4(1.0, 0.0, 0.0, 0.5);
 		}
 		""";
 	/** One instance per layer, each routed to its own slice by the vertex stage. */
@@ -503,6 +541,7 @@ public final class MetalShaderTranslationSmoke {
 			try (MetalShaderEngine engine = new MetalShaderEngine(device, root, settings)) {
 				engine.attachDevice(gpuDevice);
 				engine.resize(GBUFFER_SIZE, GBUFFER_SIZE);
+				engine.setOption("shadow_resolution", 1024);
 				MetalWorldGeometry world = MetalWorldGeometry.active();
 				if (world == null) {
 					throw new AssertionError("The built-in pack declares no geometry pass");
@@ -516,6 +555,7 @@ public final class MetalShaderTranslationSmoke {
 				assertStandInCompiles(gpuDevice, world, blockPipeline(), "loose block models");
 				assertStandInCompiles(gpuDevice, world, entityPipeline(true), "entities");
 				assertStandInCompiles(gpuDevice, world, entityPipeline(false), "emissive entities");
+				assertPhaseThreeShadowPipelines(device, gpuDevice, engine);
 
 				// A blended draw is refused on its own terms rather than by name, which is what keeps
 				// translucent terrain, translucent entities and the glint layer out of the G-buffer.
@@ -529,10 +569,130 @@ public final class MetalShaderTranslationSmoke {
 				}
 
 				assertWorldProgramChannels(device, gpuDevice, world);
-				assertDebugViews(device, engine);
+				assertPhaseFourDeferredResolve(device, engine);
 			}
 		} finally {
 			gpuDevice.close();
+		}
+	}
+
+	/** Phase 3's pack programs compile as depth-only layered pipelines for every routed world format. */
+	private static void assertPhaseThreeShadowPipelines(
+		final MetalDevice device,
+		final MetalGpuDevice gpuDevice,
+		final MetalShaderEngine engine
+	) {
+		MetalWorldShadow shadow = engine.shadowForTesting();
+		if (shadow == null) {
+			throw new AssertionError("The built-in pack declares no shadow pass");
+		}
+		MetalTexture target = engine.targetTextureForTesting("shadow");
+		if (target == null || target.descriptor().format() != MetalTexture.Format.DEPTH32_FLOAT
+			|| target.descriptor().sliceCount() != 4 || target.descriptor().width() != 1024) {
+			throw new AssertionError("The shadow target is not a configurable four-layer depth array");
+		}
+		for (Map.Entry<RenderPipeline, String> fixture : Map.of(
+			terrainPipeline(null), "solid terrain",
+			terrainPipeline("0.1"), "cutout terrain",
+			blockPipeline(), "loose block models",
+			entityPipeline(true), "entities",
+			entityPipeline(false), "emissive entities"
+		).entrySet()) {
+			RenderPipeline standIn = shadow.standInForTesting(fixture.getKey());
+			if (standIn == null) {
+				throw new AssertionError("The shadow pass declined " + fixture.getValue());
+			}
+			if (standIn.getColorTargetStates().length != 0 || standIn.getDepthStencilState() == null
+				|| standIn.getDepthStencilState().depthBiasScaleFactor() <= 0.0F) {
+				throw new AssertionError("The shadow stand-in for " + fixture.getValue()
+					+ " is not depth-only with slope bias (colors=" + standIn.getColorTargetStates().length
+					+ ", depth=" + standIn.getDepthStencilState() + ")");
+			}
+			if (!gpuDevice.getOrCompilePipeline(standIn).isValid()) {
+				throw new AssertionError("The shadow program for " + fixture.getValue() + " did not compile on this device");
+			}
+		}
+		if (shadow.standInForTesting(translucentTerrainPipeline()) != null) {
+			throw new AssertionError("A blended surface was routed into the shadow pass");
+		}
+		assertLayeredShadowDraw(device, gpuDevice, engine, shadow);
+		assertStableShadowCascades(shadow);
+	}
+
+	/** A sub-texel camera translation keeps a fixed world point on the same shadow texel. */
+	private static void assertStableShadowCascades(final MetalWorldShadow shadow) {
+		CameraRenderState camera = new CameraRenderState();
+		camera.projectionMatrix.setPerspective((float)Math.toRadians(70.0), 16.0F / 9.0F, 0.05F, 512.0F, true);
+		camera.viewRotationMatrix.identity();
+		camera.pos = new Vec3(100.25, 70.0, 200.25);
+		Vector3f worldPoint = new Vector3f(100.0F, 69.0F, 190.0F);
+		shadow.prepareForTesting(camera, 0.75F);
+		Vector3f before = shadow.projectWorldPointForTesting(0, worldPoint);
+		camera.pos = new Vec3(100.251, 70.0, 200.251);
+		shadow.prepareForTesting(camera, 0.75F);
+		Vector3f after = shadow.projectWorldPointForTesting(0, worldPoint);
+		if (Math.abs(before.x - after.x) > 1.0E-5F || Math.abs(before.y - after.y) > 1.0E-5F) {
+			throw new AssertionError("A sub-texel camera move shifted the first shadow cascade: "
+				+ before + " -> " + after);
+		}
+	}
+
+	/** Draws one alpha-tested terrain triangle into all four layers with the real shadow program. */
+	private static void assertLayeredShadowDraw(
+		final MetalDevice device,
+		final MetalGpuDevice gpuDevice,
+		final MetalShaderEngine engine,
+		final MetalWorldShadow shadow
+	) {
+		RenderPipeline standIn = shadow.standInForTesting(terrainPipeline("0.1"));
+		if (standIn == null) throw new AssertionError("The cutout shadow fixture was declined");
+		MetalTexture target = engine.targetTextureForTesting("shadow");
+		if (target == null) throw new AssertionError("The shadow target disappeared before its draw");
+		MetalRenderPipeline pipeline = gpuDevice.getOrCompilePipeline(standIn).metal(true);
+		Map<String, Integer> slots = resourceSlots(standIn);
+		shadow.useIdentityCascadesForTesting();
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture atlas = whiteTexture(device, queue);
+			 MetalTextureView atlasView = atlas.createView();
+			 MetalSampler sampler = device.createSampler(new MetalSampler.Descriptor(
+				 MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE));
+			 MetalBuffer vertices = uploadBuffer(device, shadowTerrainTriangle());
+			 MetalBuffer globals = uploadBuffer(device, globalsBlock());
+			 MetalBuffer section = uploadBuffer(device, chunkSectionBlock());
+			 MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+				List.of(),
+				new MetalRenderPass.DepthAttachment(
+					target, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 1.0
+				),
+				4
+			))) {
+				pass.setPipeline(pipeline);
+				pass.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, vertices, 0L);
+				pass.setUniformBuffer(slots.get("Globals"), globals, 0L, MetalRenderPass.STAGE_ALL);
+				pass.setUniformBuffer(slots.get("ChunkSection"), section, 0L, MetalRenderPass.STAGE_ALL);
+				pass.setUniformBuffer(
+					slots.get("MetalCraftShadow"), shadow.matricesForTesting(), 0L, MetalRenderPass.STAGE_ALL
+				);
+				pass.setTexture(slots.get("Sampler0"), atlasView, MetalRenderPass.STAGE_ALL);
+				pass.setSampler(slots.get("Sampler0"), sampler, MetalRenderPass.STAGE_ALL);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 4, 0);
+			}
+			commands.commitAndWait();
+			for (int layer = 0; layer < 4; layer++) {
+				ByteBuffer depth = target.readback(queue, 0, layer).order(ByteOrder.nativeOrder());
+				boolean written = false;
+				while (depth.remaining() >= Float.BYTES) {
+					float value = depth.getFloat();
+					if (value < 0.99F) {
+						written = true;
+						break;
+					}
+				}
+				if (!written) {
+					throw new AssertionError("The layered shadow draw did not reach cascade " + layer);
+				}
+			}
 		}
 	}
 
@@ -585,8 +745,8 @@ public final class MetalShaderTranslationSmoke {
 		assertChannel(solid.albedo(), new int[] {255, 128, 64, 1}, 2, "solid terrain albedo");
 		// The octahedral encoding of the tilted quad's reconstructed face normal, plus solid's roughness.
 		assertChannel(solid.normal(), new int[] {223, 191, 217, 0}, 3, "solid terrain normal");
-		// Block light 240/240, sky light 120/240, not emissive, alpha reserved.
-		assertChannel(solid.light(), new int[] {255, 128, 0, 0}, 2, "solid terrain light");
+		// Block light and sky light keep one byte each; B/A carry sixteen-bit linear view depth.
+		assertChannel(solid.light(), new int[] {255, 128, 0, 40}, 2, "solid terrain light");
 
 		// Cutout terrain, above its threshold: the same surface, classified as foliage and rougher
 		// for it. Alpha cutout on world terrain is overwhelmingly leaves, grass and crops.
@@ -625,16 +785,16 @@ public final class MetalShaderTranslationSmoke {
 		assertChannel(entity.scene(), new int[] {179, 90, 45, 255}, 2, "entity scene");
 		assertChannel(entity.albedo(), new int[] {255, 128, 64, 4}, 2, "entity albedo");
 		assertChannel(entity.normal(), new int[] {128, 255, 179, 0}, 2, "entity normal");
-		assertChannel(entity.light(), new int[] {255, 128, 0, 0}, 2, "entity light");
+		assertChannel(entity.light(), new int[] {255, 128, 0, 40}, 2, "entity light");
 
-		// The emissive variant: no lightmap to multiply by, a class of its own, and the light
-		// channel's third component set so a resolve can find it without consulting the material.
+		// The emissive variant: no lightmap to multiply by and a class of its own. The resolve finds
+		// emissive from the material byte, leaving both depth bytes available at full precision.
 		GBufferReadback emissive = drawWorldProgram(
 			device, gpuDevice, world, entityPipeline(false), entityQuad(), chunkSectionBlock(), dynamicTransformsBlock(1.0F)
 		);
 		assertChannel(emissive.scene(), new int[] {179, 90, 45, 255}, 2, "emissive entity scene");
 		assertChannel(emissive.albedo(), new int[] {255, 128, 64, 5}, 2, "emissive entity albedo");
-		assertChannel(emissive.light(), new int[] {255, 128, 255, 0}, 2, "emissive entity light");
+		assertChannel(emissive.light(), new int[] {255, 128, 0, 40}, 2, "emissive entity light");
 	}
 
 	/** The four attachments one world draw wrote, already read back. */
@@ -721,114 +881,166 @@ public final class MetalShaderTranslationSmoke {
 	}
 
 	/**
-	 * Runs the pack's last pass once per debug view, over a G-buffer this test wrote by hand.
-	 *
-	 * <p>What a geometry pass writes and what the pass after it reads are two halves of one contract,
-	 * and drawing only checks the writing half. Seeding the channels with chosen values and reading
-	 * the drawable back checks the other half: the octahedral decode, the material palette, the
-	 * depth curve, and that each view reads the channel it claims to.
+	 * Phase 4's exit mechanism: the real pack resolve consumes three memoryless attachments, a
+	 * shadowed sample is darker than an unshadowed one, and a blended forward draw lands afterward.
 	 */
-	private static void assertDebugViews(final MetalDevice device, final MetalShaderEngine engine) {
-		int size = GBUFFER_SIZE;
-		seedTarget(device, engine, "gbuffer_albedo", new int[] {200, 100, 50, 2});
-		seedTarget(device, engine, "gbuffer_normal", new int[] {223, 191, 217, 0});
-		seedTarget(device, engine, "gbuffer_light", new int[] {255, 128, 0, 0});
+	private static void assertPhaseFourDeferredResolve(
+		final MetalDevice device,
+		final MetalShaderEngine engine
+	) {
+		MetalTexture albedo = engine.targetTextureForTesting("gbuffer_albedo");
+		MetalTexture normal = engine.targetTextureForTesting("gbuffer_normal");
+		MetalTexture light = engine.targetTextureForTesting("gbuffer_light");
+		MetalTexture shadowTarget = engine.targetTextureForTesting("shadow");
+		MetalRenderPipeline resolve = engine.deferredResolvePipelineForTesting();
+		MetalWorldShadow shadow = engine.shadowForTesting();
+		if (albedo == null || normal == null || light == null || shadowTarget == null
+			|| resolve == null || shadow == null) {
+			throw new AssertionError("The built-in pack did not build the Phase 4 resolve resources");
+		}
+		for (MetalTexture target : List.of(albedo, normal, light)) {
+			if (!target.isMemoryless() || target.descriptor().byteSize() != 0L) {
+				throw new AssertionError("A G-buffer target has backing storage: " + target.descriptor());
+			}
+		}
 
-		try (MetalCommandQueue queue = device.createCommandQueue();
+		List<MetalRenderPipeline.ColorTarget> fillTargets = List.of(
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM)
+		);
+		MetalRenderPipeline.BlendState alphaBlend = new MetalRenderPipeline.BlendState(
+			MetalRenderPipeline.BlendFactor.SOURCE_ALPHA,
+			MetalRenderPipeline.BlendFactor.ONE_MINUS_SOURCE_ALPHA,
+			MetalRenderPipeline.BlendOperation.ADD,
+			MetalRenderPipeline.BlendFactor.ONE,
+			MetalRenderPipeline.BlendFactor.ONE_MINUS_SOURCE_ALPHA,
+			MetalRenderPipeline.BlendOperation.ADD
+		);
+		shadow.useResolveCascadesForTesting();
+		try (MetalRenderPipeline fill = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 PHASE_FOUR_MSL, "phase_four_vertex", PHASE_FOUR_MSL, "phase_four_fill",
+				 fillTargets, MetalTexture.Format.DEPTH32_FLOAT, MetalRenderPipeline.VertexDescriptor.EMPTY,
+				 MetalRenderPipeline.DepthState.DISABLED, MetalRenderPipeline.RasterState.DEFAULT));
+			 MetalRenderPipeline forward = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 PHASE_FOUR_MSL, "phase_four_vertex", PHASE_FOUR_MSL, "phase_four_forward",
+				 List.of(new MetalRenderPipeline.ColorTarget(
+					 MetalTexture.Format.RGBA8_UNORM, MetalRenderPipeline.WRITE_ALL, alphaBlend)),
+				 null, MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+				 MetalRenderPipeline.RasterState.DEFAULT));
+			 MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTextureView shadowView = shadowTarget.createView();
+			 MetalSampler sampler = device.createSampler(new MetalSampler.Descriptor(
+				 MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE));
 			 MetalTexture depth = device.createTexture(new MetalTexture.Descriptor(
-				 MetalTexture.Format.DEPTH32_FLOAT, size, size, 1,
-				 MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_RENDER_TARGET));
-			 MetalTextureView depthView = depth.createView();
-			 MetalTexture scene = device.createTexture(colorTarget(size));
-			 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(
-				 MetalTexture.Format.BGRA8_UNORM, size, size, 1))) {
-			uploadUniform(queue, scene, new int[] {64, 192, 32, 255});
-			try (MetalCommandBuffer clear = queue.createCommandBuffer()) {
-				try (MetalRenderPass ignored = clear.beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
-					new MetalRenderPass.DepthAttachment(
-						depth, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.25)
-				))) {
-					// Beginning and ending the pass performs the clear.
-				}
-				clear.commitAndWait();
+				 MetalTexture.Format.DEPTH32_FLOAT, GBUFFER_SIZE, GBUFFER_SIZE, 1,
+				 MetalTexture.USAGE_RENDER_TARGET));
+			 MetalTexture scene = device.createTexture(colorTarget(GBUFFER_SIZE))) {
+			clearShadowLayer(queue, shadowTarget, 1.0);
+			int[] lit = drawPhaseFourResolve(
+				queue, fill, resolve, null, scene, albedo, normal, light, depth,
+				shadowView, sampler, shadow, engine.optionUniformsForTesting()
+			);
+			clearShadowLayer(queue, shadowTarget, 0.0);
+			int[] occluded = drawPhaseFourResolve(
+				queue, fill, resolve, null, scene, albedo, normal, light, depth,
+				shadowView, sampler, shadow, engine.optionUniformsForTesting()
+			);
+			if (luminance(lit) <= luminance(occluded) + 20) {
+				throw new AssertionError("The deferred shadow term did not darken the surface: lit="
+					+ List.of(lit[0], lit[1], lit[2]) + ", shadowed="
+					+ List.of(occluded[0], occluded[1], occluded[2]));
 			}
 
-			// The scene passes through untouched, which also fixes the byte order everything below
-			// is read in: the drawable is BGRA, so its first byte is blue.
-			assertDebugView(device, engine, queue, scene, output, depthView, "off", new int[] {64, 192, 32});
-			assertDebugView(device, engine, queue, scene, output, depthView, "albedo", new int[] {200, 100, 50});
-			// The octahedral decode of the stored pair, remapped from a direction into a colour.
-			assertDebugView(device, engine, queue, scene, output, depthView, "normal", new int[] {232, 180, 76});
-			// Block light, sky light and emissive, one per channel.
-			assertDebugView(device, engine, queue, scene, output, depthView, "light", new int[] {255, 128, 0});
-			// Stored alpha two is one past foliage, which the palette paints green.
-			assertDebugView(device, engine, queue, scene, output, depthView, "material", new int[] {51, 217, 64});
-			// One minus the fourth root of the cleared depth.
-			assertDebugView(device, engine, queue, scene, output, depthView, "depth", new int[] {75, 75, 75});
-		} finally {
-			engine.setOption("debug_view", "off");
+			clearShadowLayer(queue, shadowTarget, 1.0);
+			int[] composited = drawPhaseFourResolve(
+				queue, fill, resolve, forward, scene, albedo, normal, light, depth,
+				shadowView, sampler, shadow, engine.optionUniformsForTesting()
+			);
+			if (composited[0] <= lit[0] || composited[1] >= lit[1] || composited[2] >= lit[2]) {
+				throw new AssertionError("Forward translucency did not blend after deferred lighting: lit="
+					+ List.of(lit[0], lit[1], lit[2]) + ", composited="
+					+ List.of(composited[0], composited[1], composited[2]));
+			}
 		}
 	}
 
-	private static void assertDebugView(
-		final MetalDevice device,
-		final MetalShaderEngine engine,
+	private static int[] drawPhaseFourResolve(
 		final MetalCommandQueue queue,
+		final MetalRenderPipeline fill,
+		final MetalRenderPipeline resolve,
+		final MetalRenderPipeline forward,
 		final MetalTexture scene,
-		final MetalTexture output,
-		final MetalTextureView depth,
-		final String view,
-		final int[] expected
+		final MetalTexture albedo,
+		final MetalTexture normal,
+		final MetalTexture light,
+		final MetalTexture depth,
+		final MetalTextureView shadowView,
+		final MetalSampler sampler,
+		final MetalWorldShadow shadow,
+		final MetalBuffer options
 	) {
-		engine.setOption("debug_view", view);
-		// Re-supplied per frame, because the engine forgets the world's depth once it has presented.
-		engine.supplyWorldDepthForTesting(depth);
 		try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
-			if (!engine.encodeForTesting(commands, scene, output)) {
-				throw new AssertionError("The pack declined to composite the '" + view + "' debug view");
+			try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+				List.of(
+					MetalRenderPass.ColorAttachment.clear(scene, 0.0, 0.0, 0.0, 1.0),
+					new MetalRenderPass.ColorAttachment(
+						albedo, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE,
+						0.0, 0.0, 0.0, 0.0),
+					new MetalRenderPass.ColorAttachment(
+						normal, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE,
+						0.5, 0.5, 0.0, 0.0),
+					new MetalRenderPass.ColorAttachment(
+						light, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE,
+						0.0, 0.0, 0.0, 0.0)
+				),
+				new MetalRenderPass.DepthAttachment(
+					depth, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.DONT_CARE, 1.0)
+			))) {
+				pass.setPipeline(fill);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				pass.setPipeline(resolve);
+				pass.setUniformBuffer(0, options, 0L, MetalRenderPass.STAGE_FRAGMENT);
+				pass.setUniformBuffer(1, shadow.matricesForTesting(), 0L, MetalRenderPass.STAGE_FRAGMENT);
+				pass.setTexture(0, shadowView, MetalRenderPass.STAGE_FRAGMENT);
+				pass.setSampler(0, sampler, MetalRenderPass.STAGE_FRAGMENT);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+			}
+			if (forward != null) {
+				try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+					new MetalRenderPass.ColorAttachment(
+						scene, MetalRenderPass.LoadAction.LOAD, MetalRenderPass.StoreAction.STORE,
+						0.0, 0.0, 0.0, 1.0)))) {
+					pass.setPipeline(forward);
+					pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				}
 			}
 			commands.commitAndWait();
 		}
-		ByteBuffer pixels = output.readback(queue, 0);
-		// The drawable is BGRA, so red and blue are the other way round from the G-buffer's own
-		// RGBA channels; reading them by name here is what keeps the expectations readable.
-		int[] rgb = {
-			Byte.toUnsignedInt(pixels.get(2)), Byte.toUnsignedInt(pixels.get(1)), Byte.toUnsignedInt(pixels.get(0))
+		ByteBuffer pixel = scene.readback(queue, 0);
+		return new int[] {
+			Byte.toUnsignedInt(pixel.get(0)), Byte.toUnsignedInt(pixel.get(1)), Byte.toUnsignedInt(pixel.get(2))
 		};
-		for (int component = 0; component < 3; component++) {
-			if (Math.abs(rgb[component] - expected[component]) > 3) {
-				throw new AssertionError(String.format(
-					"Debug view '%s' component %d is %d, expected %d (+/-3)", view, component, rgb[component], expected[component]
-				));
-			}
-		}
 	}
 
-	private static void seedTarget(
-		final MetalDevice device,
-		final MetalShaderEngine engine,
-		final String target,
-		final int[] rgba
+	private static void clearShadowLayer(
+		final MetalCommandQueue queue,
+		final MetalTexture shadow,
+		final double depth
 	) {
-		MetalTexture texture = engine.targetTextureForTesting(target);
-		if (texture == null) {
-			throw new AssertionError("The built-in pack does not allocate target '" + target + "'");
-		}
-		try (MetalCommandQueue queue = device.createCommandQueue()) {
-			uploadUniform(queue, texture, rgba);
+		try (MetalCommandBuffer commands = queue.createCommandBuffer();
+			 MetalRenderPass ignored = commands.beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
+				 new MetalRenderPass.DepthAttachment(
+					 shadow, 0, 0, MetalRenderPass.LoadAction.CLEAR,
+					 MetalRenderPass.StoreAction.STORE, depth)))) {
+			ignored.close();
+			commands.commitAndWait();
 		}
 	}
 
-	/** Fills every texel of an RGBA8 texture with one colour, so sampling it is size-independent. */
-	private static void uploadUniform(final MetalCommandQueue queue, final MetalTexture texture, final int[] rgba) {
-		int pixels = texture.descriptor().width() * texture.descriptor().height();
-		ByteBuffer contents = ByteBuffer.allocateDirect(pixels * 4);
-		for (int pixel = 0; pixel < pixels; pixel++) {
-			for (int component : rgba) {
-				contents.put((byte)component);
-			}
-		}
-		texture.upload(queue, 0, contents.flip());
+	private static int luminance(final int[] rgb) {
+		return rgb[0] * 3 + rgb[1] * 6 + rgb[2];
 	}
 
 	// ---- Phase 2 fixtures --------------------------------------------------------------------
@@ -1003,6 +1215,18 @@ public final class MetalShaderTranslationSmoke {
 			vertices.put((byte)0xFF).put((byte)0x80).put((byte)0x40).put((byte)alpha);
 			vertices.putFloat(0.5F).putFloat(0.5F);
 			vertices.putShort((short)240).putShort((short)120);
+		}
+		return vertices.flip();
+	}
+
+	/** Terrain whose chunk-relative position lands at depth 0.5 under the identity test cascades. */
+	private static ByteBuffer shadowTerrainTriangle() {
+		ByteBuffer vertices = ByteBuffer.allocateDirect(3 * 28).order(ByteOrder.nativeOrder());
+		for (float[] corner : QUAD_CORNERS) {
+			vertices.putFloat(corner[0]).putFloat(corner[1]).putFloat(-1.5F);
+			vertices.put((byte)0xFF).put((byte)0xFF).put((byte)0xFF).put((byte)0xFF);
+			vertices.putFloat(0.5F).putFloat(0.5F);
+			vertices.putShort((short)240).putShort((short)240);
 		}
 		return vertices.flip();
 	}
