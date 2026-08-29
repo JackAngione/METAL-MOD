@@ -380,18 +380,30 @@ in Phase 6's repeated whole-frame measurement rather than being inferred from tw
 
 ### Phase 6 — measurement
 
-The performance argument at the top of this file is a mechanism, not a result. Test it here, one
-change at a time, with `-PmetalBenchmarkRepeats=3`, against the 8–10% run-to-run spread this harness
-has. Specifically worth isolating:
+The performance argument at the top of this file is a mechanism, not a result. Phase 6 tests it one
+change at a time with three repeats and records the results in
+[APPLE_SILICON_PERFORMANCE.md](APPLE_SILICON_PERFORMANCE.md), including negative and inconclusive
+results.
 
-- memoryless G-buffer and merged resolve, against the same pack with both disabled,
-- layered single-pass cascades against four encoders,
-- compute bloom against fragment ping-pong,
-- the whole pack against vanilla Metal, and against OpenGL with a comparable Iris pack, which is the
-  comparison a user actually cares about.
+- [x] **Reproducible mechanism harness.** `shaderPhaseSixBenchmark` interleaves the two sides of each
+  A/B inside every repeat, reports repeat spread, and writes its full JSON under `build/reports`.
+- [x] **Memoryless G-buffer and merged resolve:** 0.0325 ms against 0.1326 ms for stored attachments
+  and a sampled second pass, a 75.5% reduction in the isolated GPU workload.
+- [x] **Layered cascades against four encoders:** 0.0662 ms against 0.0612 ms. The layered path is
+  8.1% slower on the isolated GPU workload, so it is retained for its one-pass CPU submission shape,
+  not claimed as a GPU optimization.
+- [x] **Compute bloom against fragment ping-pong:** 0.0395 ms against 0.0465 ms, a 15.0% reduction.
+- [x] **Whole pack against vanilla Metal:** matching three-repeat captures completed. Both were
+  compositor-paced to 120 Hz, making FPS and presentation-contaminated `GPU_FRAME` unsuitable for a
+  performance claim. The measurable CPU cost added by the pack is 1.66-1.86 ms at p50.
+- [x] **OpenGL/Iris comparison disposition:** no visually comparable Iris pack exists here, and
+  GLSL/Iris compatibility is an explicit non-goal. Vanilla OpenGL or an unrelated pack would change
+  both renderer and workload, so Phase 6 records the comparison as unavailable rather than publishing
+  a misleading number.
 
-Record the numbers in [APPLE_SILICON_PERFORMANCE.md](APPLE_SILICON_PERFORMANCE.md) whichever way they
-come out. If the memoryless resolve is worth less than the spread, that is the finding.
+Exit, met. Every runnable comparison has three repeats, the mechanism results exceed or explicitly
+fail the historical spread, the whole-world capture records its pacing confound, and the unavailable
+cross-backend workload is named rather than silently substituted.
 
 ## Risks worth stating before starting
 

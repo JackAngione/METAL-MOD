@@ -197,6 +197,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		private final int simulationDistance;
 		private final int phaseTicks;
 		private final int repeats;
+		private final String label;
 		private final double minimumFps;
 		private final double minimumOnePercentLow;
 		/** The presented drawable size, recorded so the report states it rather than the request. */
@@ -215,6 +216,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			// differed by 1.5x with identical per-frame CPU time, so a single pass cannot rank a
 			// change against the machine's own drift.
 			this.repeats = Math.max(1, intProperty("metalcraft.benchmarkRepeats", 3));
+			this.label = benchmarkLabel(System.getProperty("metalcraft.benchmarkLabel", this.backend));
 			this.minimumFps = doubleProperty("metalcraft.benchmarkMinimumFps", 20.0);
 			// A low floor on purpose. These gates exist to catch a broken scene, not to abort a run over
 			// a real frame-time stall: the traversal phase's streaming stalls are a defect the
@@ -614,10 +616,11 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				.map(GarbageCollectorMXBean::getName)
 				.collect(Collectors.joining("+"));
 			String header = String.format(Locale.ROOT,
-				"backend=%s arch=%s maxHeapMiB=%d gc=%s resolution=%dx%d drawable=%dx%d renderDistance=%d "
+				"label=%s backend=%s shaderPack=%s arch=%s maxHeapMiB=%d gc=%s resolution=%dx%d drawable=%dx%d renderDistance=%d "
 					+ "simulationDistance=%d seed=%s "
 					+ "site=%d,%d,%d roughness=%s flatFrameFraction=%s loadedChunkFraction=%s visibleSections=%d",
-				this.backend, architecture, maxHeapMiB, collectors, resolution[0], resolution[1],
+				this.label, this.backend, System.getProperty("metalcraft.shaderPack", "true"),
+				architecture, maxHeapMiB, collectors, resolution[0], resolution[1],
 				this.drawableWidth, this.drawableHeight, this.renderDistance,
 				this.simulationDistance, this.seed, site.x(), site.groundY(), site.z(),
 				format(site.roughness()), format(flatFraction), format(loadedFraction), visibleSections);
@@ -635,17 +638,18 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			}
 
 			String json = String.format(Locale.ROOT,
-				"{\"backend\":\"%s\",\"arch\":\"%s\",\"maxHeapMiB\":%d,\"gc\":\"%s\",\"width\":%d,\"height\":%d,"
+				"{\"label\":\"%s\",\"backend\":\"%s\",\"shaderPack\":%s,\"arch\":\"%s\",\"maxHeapMiB\":%d,\"gc\":\"%s\",\"width\":%d,\"height\":%d,"
 					+ "\"drawableWidth\":%d,\"drawableHeight\":%d,"
 					+ "\"renderDistance\":%d,\"simulationDistance\":%d,\"seed\":\"%s\","
 					+ "\"siteX\":%d,\"siteY\":%d,\"siteZ\":%d,\"siteRoughness\":%.3f,\"flatFrameFraction\":%.4f,"
 					+ "\"loadedChunkFraction\":%.4f,\"visibleSections\":%d,"
 					+ "\"phases\":[%s]}%n",
-				this.backend, architecture, maxHeapMiB, collectors, resolution[0], resolution[1],
+				this.label, this.backend, System.getProperty("metalcraft.shaderPack", "true"),
+				architecture, maxHeapMiB, collectors, resolution[0], resolution[1],
 				this.drawableWidth, this.drawableHeight, this.renderDistance,
 				this.simulationDistance, this.seed, site.x(), site.groundY(), site.z(), site.roughness(),
 				flatFraction, loadedFraction, visibleSections, phases.stream().map(MetalFrameMetrics.Phase::toJson).collect(Collectors.joining(",")));
-			Path output = Path.of("benchmarks", "metalcraft-" + this.backend.toLowerCase(Locale.ROOT) + ".json");
+			Path output = Path.of("benchmarks", "metalcraft-" + this.label + ".json");
 			try {
 				Files.createDirectories(output.getParent());
 				Files.writeString(output, json, StandardCharsets.UTF_8);
@@ -653,6 +657,11 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			} catch (Exception error) {
 				throw new AssertionError("Could not write Metal benchmark result to " + output, error);
 			}
+		}
+
+		private static String benchmarkLabel(final String value) {
+			String normalized = value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]+", "-");
+			return normalized.isBlank() ? "benchmark" : normalized;
 		}
 
 		/**
