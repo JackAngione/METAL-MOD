@@ -5,6 +5,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.MetalCraftRenderResolution;
 import dev.metalcraft.client.metal.MetalSurfaceProbe;
+import dev.metalcraft.client.metal.MetalShaderEngine;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
@@ -25,6 +26,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.TextureFilteringMethod;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.network.PlayerChunkSender;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.gamerules.GameRules;
@@ -120,6 +122,8 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			context.waitTicks(POST_RELOAD_SETTLE_TICKS);
 			LOGGER.info("Metal lifecycle validation: resource reload completed");
 
+			validateLocalLighting(context, world, backend);
+
 			Path screenshot = context.takeScreenshot("metalcraft-world-" + backend.toLowerCase(Locale.ROOT));
 			if (!Files.isRegularFile(screenshot) || fileSize(screenshot) == 0L) {
 				throw new AssertionError("Metal lifecycle screenshot was not written: " + screenshot);
@@ -171,6 +175,48 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		LOGGER.info("Metal lifecycle validation: world closed; clean client shutdown requested");
 
 		new MetalCreativeSearchGameTest(context).run();
+	}
+
+	/** Builds a controlled room and verifies a vanilla emitter plus opaque blocker in the final image. */
+	private static void validateLocalLighting(
+		final ClientGameTestContext context,
+		final TestSingleplayerContext world,
+		final String backend
+	) {
+		BlockPos origin = context.computeOnClient(client -> client.player.blockPosition());
+		int x = origin.getX();
+		int y = origin.getY();
+		int z = origin.getZ();
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"fill %d %d %d %d %d %d minecraft:air", x - 6, y, z - 1, x + 6, y + 5, z + 8));
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"fill %d %d %d %d %d %d minecraft:black_concrete", x - 6, y - 1, z - 1, x + 6, y - 1, z + 8));
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"fill %d %d %d %d %d %d minecraft:black_concrete", x - 6, y + 5, z - 1, x + 6, y + 5, z + 8));
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"fill %d %d %d %d %d %d minecraft:black_concrete", x - 6, y, z - 1, x - 6, y + 4, z + 8));
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"fill %d %d %d %d %d %d minecraft:black_concrete", x + 6, y, z - 1, x + 6, y + 4, z + 8));
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"fill %d %d %d %d %d %d minecraft:white_concrete", x - 5, y, z + 8, x + 5, y + 4, z + 8));
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"setblock %d %d %d minecraft:sea_lantern", x - 4, y + 2, z + 2));
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"tp @a %.1f %.1f %.1f 0 0", x + 0.5, (double)y, z + 0.5));
+		context.getInput().lookAt(0.0F, 0.0F);
+		context.waitTicks(30);
+		BlockPos source = new BlockPos(x - 4, y + 2, z + 2);
+		context.waitFor(client -> MetalShaderEngine.hasShadowedStaticLight(source));
+		Path unblocked = context.takeScreenshot("metalcraft-local-light-unblocked-" + backend.toLowerCase(Locale.ROOT));
+
+		// Source (-4,+2,+2), blocker (-2,+2,+5), and receiver (0,+2,+8) are collinear;
+		// the camera views the receiver head-on while the blocker projects to its left.
+		world.getServer().runCommand(String.format(Locale.ROOT,
+			"fill %d %d %d %d %d %d minecraft:obsidian", x - 3, y + 1, z + 5, x - 1, y + 3, z + 5));
+		context.waitTicks(20);
+		Path blocked = context.takeScreenshot("metalcraft-local-light-blocked-" + backend.toLowerCase(Locale.ROOT));
+		assertCenterDarkened(unblocked, blocked);
+		LOGGER.info("Metal lifecycle validation: local emitter followed its source and blocker darkened the receiver");
 	}
 
 	/**
@@ -880,6 +926,44 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		} catch (Exception error) {
 			throw new AssertionError("Could not validate Metal lifecycle screenshot " + path, error);
 		}
+	}
+
+	private static void assertCenterDarkened(final Path unblocked, final Path blocked) {
+		try (NativeImage lit = NativeImage.read(Files.newInputStream(unblocked));
+			 NativeImage occluded = NativeImage.read(Files.newInputStream(blocked))) {
+			if (lit.getWidth() != occluded.getWidth() || lit.getHeight() != occluded.getHeight()) {
+				throw new AssertionError("Local-light lifecycle screenshots changed size");
+			}
+			double litLuminance = centerLuminance(lit);
+			double occludedLuminance = centerLuminance(occluded);
+			if (litLuminance <= occludedLuminance + 2.5) {
+				throw new AssertionError(String.format(Locale.ROOT,
+					"Opaque local-light blocker did not darken the receiver: unblocked=%.3f blocked=%.3f",
+					litLuminance, occludedLuminance));
+			}
+		} catch (AssertionError error) {
+			throw error;
+		} catch (Exception error) {
+			throw new AssertionError("Could not validate local-light lifecycle screenshots", error);
+		}
+	}
+
+	private static double centerLuminance(final NativeImage image) {
+		int halfWidth = Math.max(2, image.getWidth() / 12);
+		int halfHeight = Math.max(2, image.getHeight() / 12);
+		int centerX = image.getWidth() / 2;
+		int centerY = image.getHeight() / 2;
+		double total = 0.0;
+		long pixels = 0L;
+		for (int y = centerY - halfHeight; y < centerY + halfHeight; y++) {
+			for (int x = centerX - halfWidth; x < centerX + halfWidth; x++) {
+				int pixel = image.getPixel(x, y);
+				total += 0.2126 * (pixel >>> 16 & 0xFF)
+					+ 0.7152 * (pixel >>> 8 & 0xFF) + 0.0722 * (pixel & 0xFF);
+				pixels++;
+			}
+		}
+		return total / pixels;
 	}
 
 	/** Catches the magenta cast that a swapped colour channel produces on distant terrain. */

@@ -223,7 +223,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	public void drawIndexed(final int indexCount, final int instanceCount, final int firstIndex, final int vertexOffset, final int firstInstance) {
 		this.bindResources();
 		this.requireIndexBuffer();
-		int instances = this.isShadowPipeline() ? Math.multiplyExact(instanceCount, 4) : instanceCount;
+		int instances = Math.multiplyExact(
+			instanceCount, this.pipeline == null ? 1 : MetalWorldShadow.shadowInstanceMultiplier(this.pipeline.info())
+		);
 		this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instances, vertexOffset, firstInstance);
 	}
 
@@ -231,7 +233,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	public void multiDrawIndexed(final IntBuffer drawParameters, final int instanceCount, final int firstInstance, final int drawCount) {
 		this.bindResources();
 		this.requireIndexBuffer();
-		int instances = this.isShadowPipeline() ? Math.multiplyExact(instanceCount, 4) : instanceCount;
+		int instances = Math.multiplyExact(
+			instanceCount, this.pipeline == null ? 1 : MetalWorldShadow.shadowInstanceMultiplier(this.pipeline.info())
+		);
 		this.pass().multiDrawIndexed(this.primitive(), this.indexBuffer.metal(), this.indexType, drawParameters, instances, firstInstance, drawCount);
 	}
 
@@ -243,7 +247,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			int count = indexCounts.get(indexCounts.position() + draw);
 			int baseVertex = vertexOffsets.get(vertexOffsets.position() + draw);
 			this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), firstIndexOffsets.get(firstIndexOffsets.position() + draw), this.indexType, count,
-				this.isShadowPipeline() ? 4 : 1, baseVertex, 0);
+				this.pipeline == null ? 1 : MetalWorldShadow.shadowInstanceMultiplier(this.pipeline.info()), baseVertex, 0);
 		}
 	}
 
@@ -282,17 +286,23 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	@Override
 	public void draw(final int vertexCount, final int instanceCount, final int firstVertex, final int firstInstance) {
 		this.bindResources();
+		int instances = Math.multiplyExact(
+			instanceCount, this.pipeline == null ? 1 : MetalWorldShadow.shadowInstanceMultiplier(this.pipeline.info())
+		);
 		if (this.isTriangleFan()) {
-			this.drawTriangleFan(vertexCount, instanceCount, firstVertex, firstInstance);
+			this.drawTriangleFan(vertexCount, instances, firstVertex, firstInstance);
 		} else {
-			this.pass().draw(this.primitive(), firstVertex, vertexCount, instanceCount, firstInstance);
+			this.pass().draw(this.primitive(), firstVertex, vertexCount, instances, firstInstance);
 		}
 	}
 
 	@Override
 	public void multiDraw(final IntBuffer drawParameters, final int instanceCount, final int firstInstance, final int drawCount) {
 		this.bindResources();
-		this.pass().multiDraw(this.primitive(), drawParameters, instanceCount, firstInstance, drawCount);
+		int instances = Math.multiplyExact(
+			instanceCount, this.pipeline == null ? 1 : MetalWorldShadow.shadowInstanceMultiplier(this.pipeline.info())
+		);
+		this.pass().multiDraw(this.primitive(), drawParameters, instances, firstInstance, drawCount);
 	}
 
 	@Override

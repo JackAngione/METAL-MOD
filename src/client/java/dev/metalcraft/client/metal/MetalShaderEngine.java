@@ -23,7 +23,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -108,7 +113,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 	private ShaderGraphCompiler.@Nullable CompiledPass shadowPass;
 	private @Nullable MetalWorldGeometry worldGeometry;
 	private @Nullable MetalWorldShadow worldShadow;
-	private final MetalWorldLighting worldLighting = new MetalWorldLighting(MetalCraftLights.registry());
+	private final MetalWorldLighting worldLighting;
 	private MetalBuffer uniforms;
 	private MetalSampler filteredSampler;
 	private MetalSampler unfilteredSampler;
@@ -158,8 +163,38 @@ public final class MetalShaderEngine implements AutoCloseable {
 	public static void publishLocalLights(final CameraRenderState camera) {
 		MetalShaderEngine engine = active;
 		if (engine != null) {
-			engine.worldLighting.publish(camera);
+			engine.worldLighting.publish(
+				camera, Minecraft.getInstance().level, engine.width, engine.height,
+				(int)engine.numericOption("local_shadow_count", 4.0F)
+			);
 		}
+	}
+
+	public static void localLightChunkLoaded(final ClientLevel level, final LevelChunk chunk) {
+		MetalShaderEngine engine = active;
+		if (engine != null) engine.worldLighting.chunkLoaded(level, chunk);
+	}
+
+	public static void localLightChunkUnloaded(final ClientLevel level, final LevelChunk chunk) {
+		MetalShaderEngine engine = active;
+		if (engine != null) engine.worldLighting.chunkUnloaded(level, chunk);
+	}
+
+	public static void localLightBlockChanged(
+		final ClientLevel level, final BlockPos position, final BlockState state
+	) {
+		MetalShaderEngine engine = active;
+		if (engine != null) engine.worldLighting.blockChanged(level, position, state);
+	}
+
+	/** Lifecycle-test probe proving a known static emitter reached a local-shadow slot. */
+	public static boolean hasShadowedStaticLight(final BlockPos position) {
+		MetalShaderEngine engine = active;
+		if (engine == null) return false;
+		long stableId = position.asLong();
+		return engine.worldLighting.snapshot().lights().stream().anyMatch(light ->
+			light.id().stableId() == stableId && light.usesBlockLightEnvelope() && light.shadowSlot() >= 0
+		);
 	}
 
 	public MetalShaderEngine(final MetalDevice device, final Path shaderpacksRoot, final Path settingsPath) {
@@ -167,6 +202,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 		this.shaderpacksRoot = Objects.requireNonNull(shaderpacksRoot, "shaderpacksRoot").toAbsolutePath().normalize();
 		this.settingsPath = Objects.requireNonNull(settingsPath, "settingsPath").toAbsolutePath().normalize();
 		this.pipelineCache = new MetalPipelineCache(device, this.shaderpacksRoot.resolve(".cache"));
+		this.worldLighting = new MetalWorldLighting(MetalCraftLights.registry());
 		this.settings = this.loadSettings();
 		try {
 			Files.createDirectories(this.shaderpacksRoot);
@@ -200,6 +236,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 	synchronized void attachDevice(final MetalGpuDevice attached) {
 		this.requireOpen();
 		this.gpuDevice = Objects.requireNonNull(attached, "device");
+		this.worldLighting.attach(attached);
 		this.rebuildWorldGeometry();
 	}
 
@@ -440,7 +477,9 @@ public final class MetalShaderEngine implements AutoCloseable {
 			}
 			compute.setBuffer(0, this.uniforms, 0L);
 			if (this.worldShadow != null) {
-				compute.setBuffer(1, this.worldShadow.matricesForTesting(), 0L);
+				compute.setBuffer(
+					1, this.worldShadow.matricesForTesting(), this.worldShadow.matricesOffsetForTesting()
+				);
 			}
 			MetalTexture.Descriptor extent = this.requireAttachment(declaration.writes().getFirst()).metal().descriptor();
 			compute.dispatchCovering(extent.width(), extent.height(), 8, 8);
@@ -498,6 +537,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 		}
 		this.closed = true;
 		this.closeResources();
+		this.worldLighting.close();
 		if (active == this) {
 			active = null;
 		}
@@ -705,7 +745,28 @@ public final class MetalShaderEngine implements AutoCloseable {
 		}
 		render.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
 		if (this.worldShadow != null) {
-			render.setUniformBuffer(1, this.worldShadow.matricesForTesting(), 0L, MetalRenderPass.STAGE_FRAGMENT);
+			render.setUniformBuffer(
+				1, this.worldShadow.matricesForTesting(), this.worldShadow.matricesOffsetForTesting(),
+				MetalRenderPass.STAGE_FRAGMENT
+			);
+		}
+		if (BUILTIN_ID.equals(this.pack.id())) {
+			render.setUniformBuffer(
+				2, this.worldLighting.lightBuffer(), this.worldLighting.lightBufferOffset(),
+				MetalRenderPass.STAGE_FRAGMENT
+			);
+			render.setUniformBuffer(
+				3, this.worldLighting.tileBuffer(), this.worldLighting.tileBufferOffset(),
+				MetalRenderPass.STAGE_FRAGMENT
+			);
+			if (this.worldShadow != null) {
+				render.setUniformBuffer(
+					4, this.worldShadow.localMatricesForTesting(), this.worldShadow.localMatricesOffsetForTesting(),
+					MetalRenderPass.STAGE_FRAGMENT
+				);
+				render.setTexture(textureSlot, this.worldShadow.localShadowViewForTesting(), MetalRenderPass.STAGE_FRAGMENT);
+				render.setSampler(textureSlot, this.unfilteredSampler, MetalRenderPass.STAGE_FRAGMENT);
+			}
 		}
 		render.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 		geometry.didResolve();
@@ -773,7 +834,11 @@ public final class MetalShaderEngine implements AutoCloseable {
 				this.gpuDevice, this.pipelineCache, this.pack.id(), this.shadowPass.declaration().id(),
 				this.configuredSource(), attachment.view(),
 				() -> this.numericOption("shadow_distance", 192.0F),
-				() -> this.numericOption("shadow_normal_offset", 0.08F)
+				() -> this.numericOption("shadow_normal_offset", 0.08F),
+				() -> BUILTIN_ID.equals(this.pack.id())
+					? (int)this.numericOption("local_shadow_count", 4.0F) : 0,
+				() -> (int)this.numericOption("local_shadow_resolution", 256.0F),
+				this.worldLighting
 			);
 			MetalWorldShadow.setActive(this.worldShadow);
 		}

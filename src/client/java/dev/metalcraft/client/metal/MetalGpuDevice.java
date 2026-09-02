@@ -109,6 +109,10 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		return this.shaderEngine;
 	}
 
+	MetalTransientMemory transientMemory() {
+		return this.commandEncoder.transientMemory();
+	}
+
 	void resolveShaderPackOpaque(final MetalShaderEngine engine) {
 		this.commandEncoder.resolveShaderPackOpaque(engine);
 	}

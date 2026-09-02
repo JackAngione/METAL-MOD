@@ -27,26 +27,19 @@ struct EffectShadowUniforms {
     float4 lightDirectionAndNormalOffset;
     float4 mapSize;
     float4 celestial;
+    float4x4 rasterProjection;
+    float4x4 inverseRasterProjection;
 };
 
 static inline float2 mc_clamped_uv(uint2 gid, uint2 size) {
     return (float2(min(gid, size - 1)) + 0.5) / float2(size);
 }
 
-static inline float3 mc_view_position(float2 uv, float depth, constant EffectShadowUniforms &shadow) {
-    float linearDepth = max(depth, 0.00001);
+static inline float3 mc_view_position(float2 uv, float deviceDepth, constant EffectShadowUniforms &shadow) {
     float2 ndc = uv * 2.0 - 1.0;
-    return float3(
-        ndc.x * linearDepth * shadow.mapSize.y,
-        -ndc.y * linearDepth * shadow.mapSize.z,
-        -linearDepth
-    );
-}
-
-static inline float mc_linear_depth(float deviceDepth, constant EffectShadowUniforms &shadow) {
-    constexpr float nearPlane = 0.05;
-    float farPlane = max(shadow.splits.w, 512.0);
-    return nearPlane * farPlane / max(farPlane - deviceDepth * (farPlane - nearPlane), nearPlane);
+    ndc.y = -ndc.y;
+    float4 view = shadow.inverseRasterProjection * float4(ndc, deviceDepth, 1.0);
+    return view.xyz / max(abs(view.w), 1e-8);
 }
 
 #ifdef MC_PASS_SSAO
@@ -64,7 +57,7 @@ kernel void ssao_kernel(
     float2 uv = mc_clamped_uv(gid, size);
     constexpr sampler nearestSampler(coord::normalized, address::clamp_to_edge, filter::nearest);
     float centerRaw = depth.sample(nearestSampler, uv);
-    if (centerRaw >= 0.99999) {
+    if (centerRaw <= 1e-5 || centerRaw >= 0.99999) {
         output.write(float4(1.0), gid);
         return;
     }
@@ -73,17 +66,16 @@ kernel void ssao_kernel(
     // surface. The eight-tap ring runs at half resolution and is bilateral by construction: a
     // depth discontinuity cannot darken the foreground side of an edge.
     float2 texel = 1.0 / float2(size);
-    float center = mc_linear_depth(centerRaw, shadow);
-    float left = mc_linear_depth(depth.sample(nearestSampler, uv - float2(texel.x, 0.0)), shadow);
-    float right = mc_linear_depth(depth.sample(nearestSampler, uv + float2(texel.x, 0.0)), shadow);
-    float up = mc_linear_depth(depth.sample(nearestSampler, uv - float2(0.0, texel.y)), shadow);
-    float down = mc_linear_depth(depth.sample(nearestSampler, uv + float2(0.0, texel.y)), shadow);
+    float left = depth.sample(nearestSampler, uv - float2(texel.x, 0.0));
+    float right = depth.sample(nearestSampler, uv + float2(texel.x, 0.0));
+    float up = depth.sample(nearestSampler, uv - float2(0.0, texel.y));
+    float down = depth.sample(nearestSampler, uv + float2(0.0, texel.y));
     float3 dx = mc_view_position(uv + float2(texel.x, 0.0), right, shadow)
         - mc_view_position(uv - float2(texel.x, 0.0), left, shadow);
     float3 dy = mc_view_position(uv + float2(0.0, texel.y), down, shadow)
         - mc_view_position(uv - float2(0.0, texel.y), up, shadow);
     float3 normal = normalize(cross(dx, dy));
-    float3 centerPosition = mc_view_position(uv, center, shadow);
+    float3 centerPosition = mc_view_position(uv, centerRaw, shadow);
 
     constexpr float2 ring[8] = {
         float2(1.0, 0.0), float2(-1.0, 0.0), float2(0.0, 1.0), float2(0.0, -1.0),
@@ -92,7 +84,7 @@ kernel void ssao_kernel(
     float occlusion = 0.0;
     for (uint index = 0; index < 8; ++index) {
         float2 sampleUv = uv + ring[index] * texel * 4.0;
-        float sampleDepth = mc_linear_depth(depth.sample(nearestSampler, sampleUv), shadow);
+        float sampleDepth = depth.sample(nearestSampler, sampleUv);
         float3 delta = mc_view_position(sampleUv, sampleDepth, shadow) - centerPosition;
         float distanceWeight = saturate(1.0 - length(delta) / 3.0);
         occlusion += step(0.025, dot(normal, normalize(delta))) * distanceWeight;
@@ -183,12 +175,14 @@ kernel void volumetrics_kernel(
     if (any(gid >= size)) return;
     float2 uv = mc_clamped_uv(gid, size);
     constexpr sampler nearestSampler(coord::normalized, address::clamp_to_edge, filter::nearest);
-    float surfaceDepth = min(mc_linear_depth(depth.sample(nearestSampler, uv), shadow), shadow.splits.w);
+    float3 surface = mc_view_position(uv, depth.sample(nearestSampler, uv), shadow);
+    float surfaceDepth = min(max(-surface.z, 0.0), shadow.splits.w);
     float scattering = 0.0;
     constexpr uint steps = 12;
     for (uint stepIndex = 0; stepIndex < steps; ++stepIndex) {
-        float distance = surfaceDepth * (float(stepIndex) + 0.5) / float(steps);
-        float3 position = mc_view_position(uv, distance, shadow);
+        float t = (float(stepIndex) + 0.5) / float(steps);
+        float3 position = surface * t;
+        float distance = max(-position.z, 0.0);
         uint cascade = mc_effect_cascade(distance, shadow.splits);
         float4 clip = shadow.cascade[cascade] * float4(position, 1.0);
         float3 projected = clip.xyz / clip.w;

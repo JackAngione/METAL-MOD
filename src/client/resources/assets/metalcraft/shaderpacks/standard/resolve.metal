@@ -23,6 +23,38 @@ struct ResolveOptions {
     float exposure;
     int shadowDistance;
     float shadowNormalOffset;
+    int ssao;
+    float ssaoStrength;
+    int bloom;
+    float bloomStrength;
+    int volumetrics;
+    float volumetricStrength;
+    int tonemap;
+    float saturation;
+    float contrast;
+    float temperature;
+    int localLights;
+    float localLightStrength;
+    int localShadowCount;
+    int localShadowResolution;
+};
+
+struct LocalLight {
+    float4 positionRadius;
+    float4 colorIntensity;
+    // x: use vanilla block-light reach envelope, y: local-shadow slot or -1.
+    int4 metadata;
+};
+
+struct LocalLighting {
+    // x: light count, y/z: tile grid, w: fixed tile stride.
+    uint4 header;
+    LocalLight lights[256];
+};
+
+struct LocalShadowUniforms {
+    float4x4 face[24];
+    uint4 parameters;
 };
 
 struct ShadowUniforms {
@@ -33,6 +65,9 @@ struct ShadowUniforms {
     float4 mapSize;
     // x: selected body's elevation, y: weather intensity, z: 0 none / 1 sun / 2 moon.
     float4 celestial;
+    // GPU projection Minecraft rasterized, including reversed-Z and view-bob.
+    float4x4 rasterProjection;
+    float4x4 inverseRasterProjection;
 };
 
 #define MC_DEBUG_OFF      0
@@ -45,6 +80,8 @@ struct ShadowUniforms {
 #define MC_DEBUG_SHADOW1  7
 #define MC_DEBUG_SHADOW2  8
 #define MC_DEBUG_SHADOW3  9
+#define MC_DEBUG_LOCAL_LIGHT_COUNT 10
+#define MC_DEBUG_LOCAL_SHADOWS 11
 
 vertex ResolveVaryings resolve_vertex(uint vertexId [[vertex_id]]) {
     const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
@@ -110,13 +147,113 @@ static inline float3 mc_sun_brdf(
     return (diffuse + specular) * nDotL;
 }
 
+static inline uint mc_local_shadow_face(float3 direction) {
+    float3 magnitude = abs(direction);
+    if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z) return direction.x >= 0.0 ? 0u : 1u;
+    if (magnitude.y >= magnitude.z) return direction.y >= 0.0 ? 2u : 3u;
+    return direction.z >= 0.0 ? 4u : 5u;
+}
+
+static inline float mc_local_shadow_term(
+    float3 viewPosition,
+    LocalLight light,
+    depth2d_array<float> shadowMap,
+    sampler shadowSampler,
+    constant LocalShadowUniforms &shadow
+) {
+    int slot = light.metadata.y;
+    if (slot < 0 || uint(slot) >= shadow.parameters.x) return 1.0;
+    uint layer = uint(slot) * 6u + mc_local_shadow_face(viewPosition - light.positionRadius.xyz);
+    float4 clip = shadow.face[layer] * float4(viewPosition, 1.0);
+    float3 projected = clip.xyz / clip.w;
+    float2 uv = float2(projected.x, -projected.y) * 0.5 + 0.5;
+    if (any(uv < 0.0) || any(uv > 1.0) || projected.z < 0.0 || projected.z > 1.0) return 1.0;
+    float texel = 1.0 / max(float(shadow.parameters.y), 1.0);
+    float visibility = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            float stored = shadowMap.sample(shadowSampler, uv + float2(x, y) * texel, layer);
+            visibility += projected.z - 0.0015 <= stored ? 1.0 : 0.0;
+        }
+    }
+    return visibility / 9.0;
+}
+
+static inline float3 mc_local_lighting(
+    float3 albedo,
+    float3 normal,
+    float3 viewPosition,
+    float roughness,
+    bool twoSided,
+    float blockLight,
+    float2 pixel,
+    constant LocalLighting &lighting,
+    device const uint *tiles,
+    depth2d_array<float> localShadowMap,
+    sampler localShadowSampler,
+    constant LocalShadowUniforms &localShadow,
+    float strength
+) {
+    if (lighting.header.x == 0 || lighting.header.y == 0 || lighting.header.z == 0) {
+        return float3(0.0);
+    }
+    uint tileX = min(uint(pixel.x) / 16u, lighting.header.y - 1u);
+    uint tileY = min(uint(pixel.y) / 16u, lighting.header.z - 1u);
+    uint base = (tileY * lighting.header.y + tileX) * lighting.header.w;
+    uint count = min(tiles[base], 64u);
+    float3 result = float3(0.0);
+    for (uint entry = 0; entry < count; ++entry) {
+        uint lightIndex = tiles[base + 1u + entry];
+        if (lightIndex >= lighting.header.x) continue;
+        LocalLight light = lighting.lights[lightIndex];
+        float3 toLight = light.positionRadius.xyz - viewPosition;
+        float distanceSquared = dot(toLight, toLight);
+        float radius = light.positionRadius.w;
+        if (distanceSquared >= radius * radius || distanceSquared < 1e-6) continue;
+        float distance = sqrt(distanceSquared);
+        float normalizedDistance = distance / radius;
+        float window = saturate(1.0 - normalizedDistance * normalizedDistance
+            * normalizedDistance * normalizedDistance);
+        float attenuation = window * window / max(distanceSquared, 0.25);
+        float envelope = light.metadata.x != 0 ? pow(saturate(blockLight), 1.35) : 1.0;
+        float3 brdf = mc_sun_brdf(
+            albedo, normal, viewPosition, toLight / distance, roughness, twoSided
+        );
+        float visibility = mc_local_shadow_term(
+            viewPosition, light, localShadowMap, localShadowSampler, localShadow
+        );
+        result += brdf * light.colorIntensity.rgb * light.colorIntensity.w
+            * attenuation * radius * radius * envelope * visibility * strength;
+    }
+    return result;
+}
+
+static inline uint mc_tile_light_count(
+    float2 pixel, constant LocalLighting &lighting, device const uint *tiles
+) {
+    if (lighting.header.y == 0 || lighting.header.z == 0) return 0;
+    uint tileX = min(uint(pixel.x) / 16u, lighting.header.y - 1u);
+    uint tileY = min(uint(pixel.y) / 16u, lighting.header.z - 1u);
+    return min(tiles[(tileY * lighting.header.y + tileX) * lighting.header.w], 64u);
+}
+
 static inline float3 mc_view_position(float2 uv, float depth, constant ShadowUniforms &shadow) {
+    // Packed view-Z is exact. XY must be solved through the same projection the G-buffer used,
+    // or lighting is evaluated on camera rays and slides with view-bob.
     float2 ndc = uv * 2.0 - 1.0;
-    return float3(
-        ndc.x * depth * shadow.mapSize.y,
-        -ndc.y * depth * shadow.mapSize.z,
-        -depth
-    );
+    ndc.y = -ndc.y;
+    float viewZ = -depth;
+    float4 col0 = shadow.rasterProjection[0];
+    float4 col1 = shadow.rasterProjection[1];
+    float4 known = shadow.rasterProjection[2] * viewZ + shadow.rasterProjection[3];
+    float2 a1 = col0.xy - ndc * col0.w;
+    float2 a2 = col1.xy - ndc * col1.w;
+    float det = a1.x * a2.y - a2.x * a1.y;
+    float2 b = ndc * known.w - known.xy;
+    float2 xy = abs(det) > 1e-8
+        ? float2(b.x * a2.y - a2.x * b.y, a1.x * b.y - b.x * a1.y) / det
+        : float2(ndc.x * depth * shadow.mapSize.y, ndc.y * depth * shadow.mapSize.z);
+    return float3(xy, viewZ);
 }
 
 static inline uint mc_cascade(float depth, float4 splits) {
@@ -173,7 +310,11 @@ fragment ResolveTargets resolve_fragment(
     ResolveTargets fetched,
     constant ResolveOptions &options [[buffer(0)]],
     constant ShadowUniforms &shadow [[buffer(1)]],
+    constant LocalLighting &localLighting [[buffer(2)]],
+    device const uint *localTiles [[buffer(3)]],
+    constant LocalShadowUniforms &localShadow [[buffer(4)]],
     depth2d_array<float> shadowMap [[texture(MC_TEX_SHADOW)]],
+    depth2d_array<float> localShadowMap [[texture(1)]],
     sampler shadowSampler [[sampler(MC_TEX_SHADOW)]]
 ) {
     int material = int(round(fetched.albedo.a * 255.0));
@@ -203,6 +344,24 @@ fragment ResolveTargets resolve_fragment(
         case MC_DEBUG_SHADOW3: {
             uint layer = uint(options.debugView - MC_DEBUG_SHADOW0);
             result = float3(shadowMap.sample(shadowSampler, in.uv, layer));
+            break;
+        }
+        case MC_DEBUG_LOCAL_LIGHT_COUNT: {
+            float heat = float(mc_tile_light_count(in.position.xy, localLighting, localTiles)) / 64.0;
+            result = float3(saturate(heat * 2.0), saturate(1.0 - abs(heat * 2.0 - 1.0)), saturate(1.0 - heat * 2.0));
+            break;
+        }
+        case MC_DEBUG_LOCAL_SHADOWS: {
+            uint count = mc_tile_light_count(in.position.xy, localLighting, localTiles);
+            uint tileX = min(uint(in.position.x) / 16u, localLighting.header.y - 1u);
+            uint tileY = min(uint(in.position.y) / 16u, localLighting.header.z - 1u);
+            uint base = (tileY * localLighting.header.y + tileX) * localLighting.header.w;
+            uint shadowed = 0;
+            for (uint entry = 0; entry < count; ++entry) {
+                uint lightIndex = localTiles[base + 1u + entry];
+                if (lightIndex < localLighting.header.x && localLighting.lights[lightIndex].metadata.y >= 0) shadowed++;
+            }
+            result = float3(float(shadowed) / 4.0, shadowed > 0 ? 0.35 : 0.0, 0.0);
             break;
         }
         default: {
@@ -240,11 +399,12 @@ fragment ResolveTargets resolve_fragment(
                 roughness, material == 2
             ) * directionalColor * visibility * skyLight * celestialIntensity
                 * mix(0.55, 2.5, horizon);
-            // Minecraft exposes block light as an isotropic scalar rather than a light position;
-            // treat it as warm diffuse irradiance while retaining energy conservation.
-            float3 block = fetched.albedo.rgb * (1.0 / M_PI_F) * float3(1.0, 0.48, 0.16)
-                * pow(blockLight, 1.6) * 2.6;
-            result = material == 5 ? fetched.albedo.rgb : ambient + directional + block;
+            float3 local = options.localLights != 0 ? mc_local_lighting(
+                fetched.albedo.rgb, normal, viewPosition, roughness, material == 2,
+                blockLight, in.position.xy, localLighting, localTiles,
+                localShadowMap, shadowSampler, localShadow, options.localLightStrength
+            ) : float3(0.0);
+            result = material == 5 ? fetched.albedo.rgb : ambient + directional + local;
             break;
         }
     }

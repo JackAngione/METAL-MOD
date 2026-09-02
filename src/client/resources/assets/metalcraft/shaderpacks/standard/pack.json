@@ -128,7 +128,7 @@
       "id": "debug_view",
       "category": "debug",
       "type": "enum",
-      "values": ["off", "albedo", "normal", "light", "material", "depth", "shadow0", "shadow1", "shadow2", "shadow3"],
+      "values": ["off", "albedo", "normal", "light", "material", "depth", "shadow0", "shadow1", "shadow2", "shadow3", "local_light_count", "local_shadows"],
       "default": "off",
       "apply": "uniform"
     },
@@ -273,6 +273,39 @@
       "step": 0.1,
       "default": 0.0,
       "apply": "uniform"
+    },
+    {
+      "id": "local_lights",
+      "category": "lighting",
+      "type": "bool",
+      "default": true,
+      "apply": "uniform"
+    },
+    {
+      "id": "local_light_strength",
+      "category": "lighting",
+      "type": "float",
+      "min": 0.0,
+      "max": 3.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "local_shadow_count",
+      "category": "shadows",
+      "type": "enum",
+      "values": [0, 2, 4],
+      "default": 4,
+      "apply": "uniform"
+    },
+    {
+      "id": "local_shadow_resolution",
+      "category": "shadows",
+      "type": "enum",
+      "values": [128, 256, 512],
+      "default": 256,
+      "apply": "reload"
     }
   ]
 }

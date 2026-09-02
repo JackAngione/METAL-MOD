@@ -89,6 +89,22 @@ tasks.register('shaderPhaseSixBenchmark', JavaExec) {
 	}
 }
 
+tasks.register('localLightingBenchmark', JavaExec) {
+	dependsOn tasks.named('clientClasses')
+	dependsOn tasks.named('compileShaderSmokeJava')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.metal.MetalLocalLightingBenchmark'
+	[
+		metalBenchmarkRepeats: 'metalcraft.benchmarkRepeats',
+		metalBenchmarkIterations: 'metalcraft.benchmarkIterations',
+		metalBenchmarkResolution: 'metalcraft.benchmarkResolution'
+	].each { gradleProperty, systemPropertyName ->
+		def value = providers.gradleProperty(gradleProperty)
+		if (value.isPresent()) systemProperty systemPropertyName, value.get()
+	}
+}
+
 tasks.named('check') {
 	dependsOn tasks.named('shaderTranslationSmoke')
 }

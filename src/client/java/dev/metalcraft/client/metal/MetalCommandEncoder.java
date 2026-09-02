@@ -75,7 +75,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	}
 
 	@Override
-	public TransientMemory transientMemory() {
+	public MetalTransientMemory transientMemory() {
 		return this.transientMemory;
 	}
 

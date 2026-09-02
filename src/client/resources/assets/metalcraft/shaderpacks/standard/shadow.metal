@@ -40,6 +40,20 @@ struct ShadowUniforms {
     float4 celestial;
 };
 
+struct LocalShadowUniforms {
+    float4x4 face[24];
+    // x: active light count, y: map size.
+    uint4 parameters;
+};
+
+#if MC_LOCAL_SHADOW
+typedef LocalShadowUniforms ActiveShadowUniforms;
+#define MC_ACTIVE_SHADOW_SLOT MC_SLOT_METALCRAFTLOCALSHADOW
+#else
+typedef ShadowUniforms ActiveShadowUniforms;
+#define MC_ACTIVE_SHADOW_SLOT MC_SLOT_METALCRAFTSHADOW
+#endif
+
 struct ShadowVaryings {
     float4 position [[position]];
     float3 cameraViewPos;
@@ -58,11 +72,16 @@ static inline ShadowVaryings mc_shadow_vertex(
     float3 normal,
     float2 uv,
     uint instanceId,
-    constant ShadowUniforms &shadow
+    constant ActiveShadowUniforms &shadow
 ) {
+#if MC_LOCAL_SHADOW
+    uint cascade = instanceId % max(shadow.parameters.x * 6u, 1u);
+    float4 clip = shadow.face[cascade] * float4(cameraViewPos, 1.0);
+#else
     uint cascade = instanceId & 3u;
-    ShadowVaryings out;
     float4 clip = shadow.cascade[cascade] * float4(cameraViewPos, 1.0);
+#endif
+    ShadowVaryings out;
     // Direct MSL does not receive the GLSL-to-Metal Y conversion.
     out.position = float4(clip.x, -clip.y, clip.z, clip.w);
     out.cameraViewPos = cameraViewPos;
@@ -83,8 +102,11 @@ static inline float3 mc_shadow_reconstruct_normal(float3 position) {
 
 static inline float mc_shadow_depth(
     ShadowVaryings in,
-    constant ShadowUniforms &shadow
+    constant ActiveShadowUniforms &shadow
 ) {
+#if MC_LOCAL_SHADOW
+    return in.position.z;
+#else
     float3 normal = length(in.normal) < 1e-8
         ? mc_shadow_reconstruct_normal(in.cameraViewPos)
         : normalize(in.normal);
@@ -95,6 +117,7 @@ static inline float mc_shadow_depth(
     float3 offsetPosition = in.cameraViewPos + normal * (normalOffset * grazing);
     float4 clip = shadow.cascade[in.cascadeIndex] * float4(offsetPosition, 1.0);
     return saturate(clip.z / clip.w);
+#endif
 }
 
 #endif
@@ -113,7 +136,7 @@ vertex ShadowVaryings shadow_terrain_vertex(
     uint instanceId [[instance_id]],
     constant McChunkSection &section [[buffer(MC_SLOT_TRANSFORMS)]],
     constant McGlobals &globals [[buffer(MC_SLOT_GLOBALS)]],
-    constant ShadowUniforms &shadow [[buffer(MC_SLOT_METALCRAFTSHADOW)]]
+    constant ActiveShadowUniforms &shadow [[buffer(MC_ACTIVE_SHADOW_SLOT)]]
 ) {
     float3 relative = in.Position + float3(section.ChunkPosition - globals.CameraBlockPos) + globals.CameraOffset;
     float3 cameraView = (section.ModelViewMat * float4(relative, 1.0)).xyz;
@@ -122,7 +145,7 @@ vertex ShadowVaryings shadow_terrain_vertex(
 
 fragment ShadowDepth shadow_terrain_fragment(
     ShadowVaryings in [[stage_in]],
-    constant ShadowUniforms &shadow [[buffer(MC_SLOT_METALCRAFTSHADOW)]],
+    constant ActiveShadowUniforms &shadow [[buffer(MC_ACTIVE_SHADOW_SLOT)]],
     texture2d<float> atlas [[texture(MC_SLOT_SAMPLER0)]],
     sampler atlasSampler [[sampler(MC_SLOT_SAMPLER0)]]
 ) {
@@ -147,7 +170,7 @@ vertex ShadowVaryings shadow_block_vertex(
     BlockVertex in [[stage_in]],
     uint instanceId [[instance_id]],
     constant McDynamicTransforms &transforms [[buffer(MC_SLOT_TRANSFORMS)]],
-    constant ShadowUniforms &shadow [[buffer(MC_SLOT_METALCRAFTSHADOW)]]
+    constant ActiveShadowUniforms &shadow [[buffer(MC_ACTIVE_SHADOW_SLOT)]]
 ) {
     float3 position = in.Position + transforms.ModelOffset;
     float3 cameraView = (transforms.ModelViewMat * float4(position, 1.0)).xyz;
@@ -156,7 +179,7 @@ vertex ShadowVaryings shadow_block_vertex(
 
 fragment ShadowDepth shadow_block_fragment(
     ShadowVaryings in [[stage_in]],
-    constant ShadowUniforms &shadow [[buffer(MC_SLOT_METALCRAFTSHADOW)]],
+    constant ActiveShadowUniforms &shadow [[buffer(MC_ACTIVE_SHADOW_SLOT)]],
     texture2d<float> atlas [[texture(MC_SLOT_SAMPLER0)]],
     sampler atlasSampler [[sampler(MC_SLOT_SAMPLER0)]]
 ) {
@@ -183,7 +206,7 @@ vertex ShadowVaryings shadow_entity_vertex(
     EntityVertex in [[stage_in]],
     uint instanceId [[instance_id]],
     constant McDynamicTransforms &transforms [[buffer(MC_SLOT_TRANSFORMS)]],
-    constant ShadowUniforms &shadow [[buffer(MC_SLOT_METALCRAFTSHADOW)]]
+    constant ActiveShadowUniforms &shadow [[buffer(MC_ACTIVE_SHADOW_SLOT)]]
 ) {
     float3 cameraView = (transforms.ModelViewMat * float4(in.Position, 1.0)).xyz;
     float3x3 normalMatrix = float3x3(
@@ -202,7 +225,7 @@ vertex ShadowVaryings shadow_entity_vertex(
 
 fragment ShadowDepth shadow_entity_fragment(
     ShadowVaryings in [[stage_in]],
-    constant ShadowUniforms &shadow [[buffer(MC_SLOT_METALCRAFTSHADOW)]],
+    constant ActiveShadowUniforms &shadow [[buffer(MC_ACTIVE_SHADOW_SLOT)]],
     texture2d<float> atlas [[texture(MC_SLOT_SAMPLER0)]],
     sampler atlasSampler [[sampler(MC_SLOT_SAMPLER0)]]
 ) {

@@ -3,6 +3,7 @@
   "package": "dev.metalcraft.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "ClientLevelLightingMixin",
     "BlockableEventLoopDrainMixin",
     "BlockableEventLoopTaskCensusMixin",
     "ChunkSectionsToRenderMixin",
@@ -17,6 +18,7 @@
     "OptionsSubScreenAccessor",
     "PreferredGraphicsApiMixin",
     "PreparedFeatureFrameMixin",
+    "ProjectionMatrixBufferMixin",
     "PreparedRenderTypeMixin",
     "ShaderManagerMixin",
     "VideoSettingsScreenMixin",

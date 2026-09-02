@@ -33,10 +33,13 @@ import dev.metalcraft.api.MetalCraftLocalLight;
 import net.minecraft.resources.Identifier;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.state.level.SkyRenderState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.dimension.DimensionType.Skybox;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 import dev.metalcraft.client.shader.ShaderPack;
 import dev.metalcraft.client.shader.ShaderGraphCompiler;
 import dev.metalcraft.client.shader.ShaderPackLoader;
@@ -630,11 +633,55 @@ public final class MetalShaderTranslationSmoke {
 		if (relative.usesBlockLightEnvelope()) {
 			throw new AssertionError("A registered visual light unexpectedly uses vanilla's block-light envelope");
 		}
+		MetalWorldLighting.TileGrid tiles = snapshot.tiles();
+		int centerX = tiles.tilesX() / 2;
+		int centerY = tiles.tilesY() / 2;
+		if (tiles.count(centerX, centerY) != MetalWorldLighting.MAX_LIGHTS_PER_TILE
+			|| tiles.overflowCount() == 0 || tiles.lightIndex(centerX, centerY, 0) != 0
+			|| tiles.lightIndex(centerX, centerY, MetalWorldLighting.MAX_LIGHTS_PER_TILE - 1) != 63) {
+			throw new AssertionError("The strongest-first 16x16 tile cap was not enforced");
+		}
+		Map<MetalWorldLighting.LightId, Integer> firstSlots = new LinkedHashMap<>();
+		for (MetalWorldLighting.FrameLight light : snapshot.lights()) {
+			if (light.shadowSlot() >= 0) firstSlots.put(light.id(), light.shadowSlot());
+		}
+		if (firstSlots.size() != MetalWorldLighting.MAX_SHADOW_LIGHTS) {
+			throw new AssertionError("Four stable local-shadow slots were not assigned: " + firstSlots);
+		}
+		if (snapshot.lights().stream().noneMatch(light -> light.shadowEligible() && light.shadowSlot() < 0)) {
+			throw new AssertionError("The fifth eligible light was not retained as an unshadowed contribution");
+		}
 		intensityOffset[0] = 100.0F;
 		MetalWorldLighting.Snapshot nextFrame = lighting.publish(camera);
 		if (nextFrame == snapshot || nextFrame.lights().getFirst().intensity() != 400.0F
 			|| snapshot.lights().getFirst().intensity() != 300.0F || lighting.snapshot() != nextFrame) {
 			throw new AssertionError("Dynamic publication mutated or failed to replace the prior frame snapshot");
+		}
+		for (MetalWorldLighting.FrameLight light : nextFrame.lights()) {
+			Integer slot = firstSlots.get(light.id());
+			if (slot != null && light.shadowSlot() != slot) {
+				throw new AssertionError("A retained stable light changed shadow slots across frames");
+			}
+		}
+		MetalWorldLighting.Snapshot shadowsOff = lighting.publish(camera, null, 16, 16, 0);
+		if (shadowsOff.lights().stream().anyMatch(light -> light.shadowSlot() >= 0)) {
+			throw new AssertionError("The zero local-shadow option retained an active slot");
+		}
+
+		MetalWorldLighting staticCache = new MetalWorldLighting(new MetalCraftLightRegistry());
+		BlockPos torch = new BlockPos(31, 70, -17);
+		staticCache.blockChangedForTesting(torch, true);
+		if (staticCache.staticEmitterCountForTesting() != 1) {
+			throw new AssertionError("A vanilla emitting block did not enter the incremental cache");
+		}
+		staticCache.blockChangedForTesting(torch, false);
+		if (staticCache.staticEmitterCountForTesting() != 0) {
+			throw new AssertionError("A removed emitting block remained in the incremental cache");
+		}
+		staticCache.blockChangedForTesting(torch, true);
+		staticCache.chunkUnloadedForTesting(ChunkPos.containing(torch));
+		if (staticCache.staticEmitterCountForTesting() != 0) {
+			throw new AssertionError("Chunk unload retained vanilla static emitters");
 		}
 
 		MetalCraftLightRegistry ties = new MetalCraftLightRegistry();
@@ -650,6 +697,121 @@ public final class MetalShaderTranslationSmoke {
 			throw new AssertionError("An invalid local-light intensity was accepted");
 		} catch (IllegalArgumentException expected) {
 			// Provider construction errors are caught and isolated by the registry during collection.
+		}
+
+		assertLocalLightsStayWorldBound();
+		assertViewReconstructionTracksWorldSurfaces();
+	}
+
+	/**
+	 * A world-fixed light must recover its world position from the uploaded view-space value after
+	 * camera translation and Minecraft's real view rotation. If the conversion dropped that
+	 * rotation, lighting would sit in camera-relative world space while geometry is in view space,
+	 * which makes the contribution follow the player.
+	 */
+	private static void assertLocalLightsStayWorldBound() {
+		Vec3 worldLight = new Vec3(100.5, 72.0, 210.25);
+		MetalCraftLightRegistry registry = new MetalCraftLightRegistry();
+		registry.register(Identifier.parse("metalcraft:world_bound"), output -> output.accept(
+			new MetalCraftLocalLight(1L, worldLight, 1.0F, 0.6F, 0.2F, 4.0F, 16.0F, false)
+		));
+		MetalWorldLighting lighting = new MetalWorldLighting(registry);
+		Matrix4f view = minecraftViewRotation(0.0F, 12.0F);
+		Vec3 firstCamera = new Vec3(100.0, 70.0, 200.0);
+		MetalWorldLighting.FrameLight first = publishedLight(lighting, firstCamera, view);
+		Vec3 recoveredFirst = recoverWorldPosition(first, firstCamera, view);
+		if (recoveredFirst.distanceTo(worldLight) > 1.0E-4) {
+			throw new AssertionError("View-space local-light conversion did not recover the world position: "
+				+ recoveredFirst + " from " + worldLight);
+		}
+		Vec3 secondCamera = new Vec3(108.0, 71.5, 205.0);
+		MetalWorldLighting.FrameLight second = publishedLight(lighting, secondCamera, view);
+		Vec3 recoveredSecond = recoverWorldPosition(second, secondCamera, view);
+		if (recoveredSecond.distanceTo(worldLight) > 1.0E-4) {
+			throw new AssertionError("A camera translation moved a world-fixed local light: "
+				+ recoveredSecond + " from " + worldLight);
+		}
+		if (Math.abs(first.viewX() - second.viewX()) < 1.0E-3F
+			&& Math.abs(first.viewY() - second.viewY()) < 1.0E-3F
+			&& Math.abs(first.viewZ() - second.viewZ()) < 1.0E-3F) {
+			throw new AssertionError("A world-fixed local light kept a camera-attached view position: " + second);
+		}
+	}
+
+	private static MetalWorldLighting.FrameLight publishedLight(
+		final MetalWorldLighting lighting, final Vec3 cameraPos, final Matrix4f viewRotation
+	) {
+		CameraRenderState camera = new CameraRenderState();
+		camera.projectionMatrix.setPerspective((float)Math.toRadians(70.0), 16.0F / 9.0F, 0.05F, 512.0F, true);
+		camera.viewRotationMatrix.set(viewRotation);
+		camera.pos = cameraPos;
+		MetalWorldLighting.Snapshot snapshot = lighting.publish(camera);
+		if (snapshot.lights().size() != 1) {
+			throw new AssertionError("Expected one world-fixed light, got " + snapshot.lights());
+		}
+		return snapshot.lights().getFirst();
+	}
+
+	private static Vec3 recoverWorldPosition(
+		final MetalWorldLighting.FrameLight light, final Vec3 cameraPos, final Matrix4f viewRotation
+	) {
+		Vector3f relative = viewRotation.invert(new Matrix4f()).transformPosition(
+			new Vector3f(light.viewX(), light.viewY(), light.viewZ())
+		);
+		return cameraPos.add(relative.x, relative.y, relative.z);
+	}
+
+	/** Minecraft's view matrix: conjugate of {@code rotationYXZ(PI - yaw, -pitch, 0)}. */
+	private static Matrix4f minecraftViewRotation(final float yawDegrees, final float pitchDegrees) {
+		float yaw = (float)Math.toRadians(yawDegrees);
+		float pitch = (float)Math.toRadians(pitchDegrees);
+		org.joml.Quaternionf rotation = new org.joml.Quaternionf().rotationYXZ(
+			(float)Math.PI - yaw, -pitch, 0.0F
+		);
+		return new Matrix4f().rotation(rotation.conjugate());
+	}
+
+	/**
+	 * Reconstruction must invert the projection Minecraft rasterized, including reversed-Z and
+	 * view-bob. Tan-half-FOV from the un-bobbed camera matrix leaves lighting on camera rays.
+	 */
+	private static void assertViewReconstructionTracksWorldSurfaces() {
+		Vector3f viewPos = new Vector3f(1.25F, -0.40F, -8.0F);
+		Matrix4f pinhole = new Matrix4f().setPerspective(
+			(float)Math.toRadians(70.0), 16.0F / 9.0F, 0.05F, 512.0F, true
+		);
+		float tanHalfX = 1.0F / Math.abs(pinhole.m00());
+		float tanHalfY = 1.0F / Math.abs(pinhole.m11());
+		Vector3f pinholeExpected = new Vector3f(tanHalfX * 10.0F, tanHalfY * 10.0F, -10.0F);
+		Vector3f pinholeActual = MetalWorldShadow.viewFromNdc(pinhole, 1.0F, 1.0F, -10.0F);
+		if (pinholeActual.distance(pinholeExpected) > 1.0E-4F) {
+			throw new AssertionError("Pinhole unprojection diverged from tan-half-FOV corners: "
+				+ pinholeExpected + " vs " + pinholeActual);
+		}
+
+		Matrix4f cameraProjection = new Matrix4f().setPerspective(
+			(float)Math.toRadians(70.0), 16.0F / 9.0F, 512.0F, 0.05F, true
+		);
+		assertReconstructedView("reversed-Z camera projection", viewPos, cameraProjection);
+
+		Matrix4f gpuProjection = new Matrix4f(cameraProjection);
+		gpuProjection.translate(0.12F, -0.18F, 0.0F);
+		gpuProjection.rotateZ((float)Math.toRadians(3.0));
+		gpuProjection.rotateX((float)Math.toRadians(5.0));
+		assertReconstructedView("walk-bob GPU projection", viewPos, gpuProjection);
+	}
+
+	private static void assertReconstructedView(
+		final String label, final Vector3f viewPos, final Matrix4f rasterProjection
+	) {
+		Vector4f clip = rasterProjection.transform(new Vector4f(viewPos.x, viewPos.y, viewPos.z, 1.0F), new Vector4f());
+		Vector3f reconstructed = MetalWorldShadow.viewFromNdc(
+			rasterProjection, clip.x / clip.w, clip.y / clip.w, viewPos.z
+		);
+		if (reconstructed.distance(viewPos) > 1.0E-3F) {
+			throw new AssertionError("View reconstruction from " + label
+				+ " did not recover a world-surface view position: true=" + viewPos
+				+ " reconstructed=" + reconstructed);
 		}
 	}
 
@@ -858,6 +1020,26 @@ public final class MetalShaderTranslationSmoke {
 			|| target.descriptor().sliceCount() != 4 || target.descriptor().width() != 1024) {
 			throw new AssertionError("The shadow target is not a configurable four-layer depth array");
 		}
+		shadow.useIdentityCascadesForTesting();
+		shadow.useIdentityLocalShadowsForTesting(4);
+		MetalWorldLighting lighting = engine.lightingForTesting();
+		lighting.publishForTesting(List.of(), new Matrix4f(), GBUFFER_SIZE, GBUFFER_SIZE, 0);
+		GpuBufferSlice firstCelestial = shadow.matricesSliceForTesting();
+		GpuBufferSlice firstLocal = shadow.localMatricesSliceForTesting();
+		MetalBuffer firstLights = lighting.lightBuffer();
+		long firstLightsOffset = lighting.lightBufferOffset();
+		MetalBuffer firstTiles = lighting.tileBuffer();
+		long firstTilesOffset = lighting.tileBufferOffset();
+		((MetalCommandEncoder)gpuDevice.createCommandEncoder()).submit();
+		shadow.useIdentityCascadesForTesting();
+		shadow.useIdentityLocalShadowsForTesting(4);
+		lighting.publishForTesting(List.of(), new Matrix4f(), GBUFFER_SIZE, GBUFFER_SIZE, 0);
+		if (firstCelestial.equals(shadow.matricesSliceForTesting())
+			|| firstLocal.equals(shadow.localMatricesSliceForTesting())
+			|| firstLights == lighting.lightBuffer() && firstLightsOffset == lighting.lightBufferOffset()
+			|| firstTiles == lighting.tileBuffer() && firstTilesOffset == lighting.tileBufferOffset()) {
+			throw new AssertionError("Lighting data reused one shared GPU slice across frame submissions");
+		}
 		for (Map.Entry<RenderPipeline, String> fixture : Map.of(
 			terrainPipeline(null), "solid terrain",
 			terrainPipeline("0.1"), "cutout terrain",
@@ -878,11 +1060,16 @@ public final class MetalShaderTranslationSmoke {
 			if (!gpuDevice.getOrCompilePipeline(standIn).isValid()) {
 				throw new AssertionError("The shadow program for " + fixture.getValue() + " did not compile on this device");
 			}
+			RenderPipeline localStandIn = shadow.localStandInForTesting(fixture.getKey());
+			if (localStandIn == null || !gpuDevice.getOrCompilePipeline(localStandIn).isValid()) {
+				throw new AssertionError("The local-shadow program for " + fixture.getValue() + " did not compile on this device");
+			}
 		}
 		if (shadow.standInForTesting(translucentTerrainPipeline()) != null) {
 			throw new AssertionError("A blended surface was routed into the shadow pass");
 		}
 		assertLayeredShadowDraw(device, gpuDevice, engine, shadow);
+		assertLayeredLocalShadowDraw(device, gpuDevice, shadow);
 		assertStableShadowCascades(shadow);
 	}
 
@@ -924,6 +1111,75 @@ public final class MetalShaderTranslationSmoke {
 			throw new AssertionError("A sub-texel camera move shifted a large-world shadow cascade: "
 				+ before + " -> " + after);
 		}
+
+		// The identity-camera case above cannot catch a missing inverse-view in the cascade matrix.
+		// Minecraft's yaw-0 view is a 180° Y rotation; geometry is multiplied by that matrix, so the
+		// cascade must be too, or a stationary world point crawls as the player translates.
+		camera.viewRotationMatrix.set(minecraftViewRotation(0.0F, 12.0F));
+		camera.pos = new Vec3(100.25, 70.0, 200.25);
+		shadow.prepareForTesting(camera, sky);
+		before = shadow.projectWorldPointForTesting(0, worldPoint);
+		camera.pos = new Vec3(100.251, 70.0, 200.251);
+		shadow.prepareForTesting(camera, sky);
+		after = shadow.projectWorldPointForTesting(0, worldPoint);
+		if (Math.abs(before.x - after.x) > 1.0E-5F || Math.abs(before.y - after.y) > 1.0E-5F) {
+			throw new AssertionError("A sub-texel move with Minecraft's view rotation shifted the cascade: "
+				+ before + " -> " + after);
+		}
+
+		// Occlusion between two world-fixed points is a light-space offset. Camera translation must
+		// not change that offset, or tree shadows slide across the ground with the player.
+		Vector3f occluder = new Vector3f(102.0F, 74.0F, 190.0F);
+		Vector3f receiver = new Vector3f(108.0F, 64.0F, 196.0F);
+		camera.pos = new Vec3(100.0, 70.0, 200.0);
+		shadow.prepareForTesting(camera, sky);
+		Vector3f firstDelta = shadow.projectWorldPointForTesting(0, receiver)
+			.sub(shadow.projectWorldPointForTesting(0, occluder));
+		camera.pos = new Vec3(115.0, 73.0, 188.0);
+		shadow.prepareForTesting(camera, sky);
+		Vector3f secondDelta = shadow.projectWorldPointForTesting(0, receiver)
+			.sub(shadow.projectWorldPointForTesting(0, occluder));
+		if (Math.abs(firstDelta.x - secondDelta.x) > 1.0E-4F
+			|| Math.abs(firstDelta.y - secondDelta.y) > 1.0E-4F) {
+			throw new AssertionError("Camera translation changed a world-fixed shadow offset: "
+				+ firstDelta + " -> " + secondDelta);
+		}
+
+		Matrix4f bobbed = new Matrix4f(camera.projectionMatrix)
+			.translate(0.12F, -0.18F, 0.0F)
+			.rotateZ((float)Math.toRadians(3.0))
+			.rotateX((float)Math.toRadians(5.0));
+		MetalWorldShadow.captureRasterProjection(bobbed);
+		try {
+			camera.pos = new Vec3(100.0, 70.0, 200.0);
+			shadow.prepareForTesting(camera, sky);
+			firstDelta = shadow.projectWorldPointForTesting(0, receiver)
+				.sub(shadow.projectWorldPointForTesting(0, occluder));
+			camera.pos = new Vec3(115.0, 73.0, 188.0);
+			shadow.prepareForTesting(camera, sky);
+			secondDelta = shadow.projectWorldPointForTesting(0, receiver)
+				.sub(shadow.projectWorldPointForTesting(0, occluder));
+			if (Math.abs(firstDelta.x - secondDelta.x) > 1.0E-4F
+				|| Math.abs(firstDelta.y - secondDelta.y) > 1.0E-4F) {
+				throw new AssertionError("Walk-bob raster projection unbound a world-fixed shadow offset: "
+					+ firstDelta + " -> " + secondDelta);
+			}
+
+			camera.pos = new Vec3(100.25, 70.0, 200.25);
+			MetalWorldShadow.captureRasterProjection(new Matrix4f(camera.projectionMatrix));
+			shadow.prepareForTesting(camera, sky);
+			Vector3f unbobbedUv = shadow.projectWorldPointForTesting(0, worldPoint);
+			MetalWorldShadow.captureRasterProjection(bobbed);
+			shadow.prepareForTesting(camera, sky);
+			Vector3f bobbedUv = shadow.projectWorldPointForTesting(0, worldPoint);
+			if (Math.abs(unbobbedUv.x - bobbedUv.x) > 1.0E-5F
+				|| Math.abs(unbobbedUv.y - bobbedUv.y) > 1.0E-5F) {
+				throw new AssertionError("View-bob crawled a stationary shadow texel: "
+					+ unbobbedUv + " -> " + bobbedUv);
+			}
+		} finally {
+			MetalWorldShadow.clearRasterProjectionForTesting();
+		}
 	}
 
 	/** Draws one alpha-tested terrain triangle into all four layers with the real shadow program. */
@@ -961,7 +1217,8 @@ public final class MetalShaderTranslationSmoke {
 				pass.setUniformBuffer(slots.get("Globals"), globals, 0L, MetalRenderPass.STAGE_ALL);
 				pass.setUniformBuffer(slots.get("ChunkSection"), section, 0L, MetalRenderPass.STAGE_ALL);
 				pass.setUniformBuffer(
-					slots.get("MetalCraftShadow"), shadow.matricesForTesting(), 0L, MetalRenderPass.STAGE_ALL
+					slots.get("MetalCraftShadow"), shadow.matricesForTesting(),
+					shadow.matricesOffsetForTesting(), MetalRenderPass.STAGE_ALL
 				);
 				pass.setTexture(slots.get("Sampler0"), atlasView, MetalRenderPass.STAGE_ALL);
 				pass.setSampler(slots.get("Sampler0"), sampler, MetalRenderPass.STAGE_ALL);
@@ -981,6 +1238,62 @@ public final class MetalShaderTranslationSmoke {
 				if (!written) {
 					throw new AssertionError("The layered shadow draw did not reach cascade " + layer);
 				}
+			}
+		}
+	}
+
+	/** Draws one alpha-tested triangle through every face of all four local shadow slots. */
+	private static void assertLayeredLocalShadowDraw(
+		final MetalDevice device,
+		final MetalGpuDevice gpuDevice,
+		final MetalWorldShadow shadow
+	) {
+		RenderPipeline standIn = shadow.localStandInForTesting(terrainPipeline("0.1"));
+		if (standIn == null) throw new AssertionError("The cutout local-shadow fixture was declined");
+		MetalTexture target = shadow.localShadowViewForTesting().texture();
+		if (target.descriptor().format() != MetalTexture.Format.DEPTH32_FLOAT
+			|| target.descriptor().sliceCount() != 24 || target.descriptor().width() != 256) {
+			throw new AssertionError("The local-shadow target is not a configurable 24-layer depth array");
+		}
+		MetalRenderPipeline pipeline = gpuDevice.getOrCompilePipeline(standIn).metal(true);
+		Map<String, Integer> slots = resourceSlots(standIn);
+		shadow.useIdentityLocalShadowsForTesting(4);
+		try (MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture atlas = whiteTexture(device, queue);
+			 MetalTextureView atlasView = atlas.createView();
+			 MetalSampler sampler = device.createSampler(new MetalSampler.Descriptor(
+				 MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE));
+			 MetalBuffer vertices = uploadBuffer(device, shadowTerrainTriangle());
+			 MetalBuffer globals = uploadBuffer(device, globalsBlock());
+			 MetalBuffer section = uploadBuffer(device, chunkSectionBlock());
+			 MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+				List.of(),
+				new MetalRenderPass.DepthAttachment(
+					target, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 1.0
+				),
+				24
+			))) {
+				pass.setPipeline(pipeline);
+				pass.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, vertices, 0L);
+				pass.setUniformBuffer(slots.get("Globals"), globals, 0L, MetalRenderPass.STAGE_ALL);
+				pass.setUniformBuffer(slots.get("ChunkSection"), section, 0L, MetalRenderPass.STAGE_ALL);
+				pass.setUniformBuffer(
+					slots.get("MetalCraftLocalShadow"), shadow.localMatricesForTesting(),
+					shadow.localMatricesOffsetForTesting(), MetalRenderPass.STAGE_ALL
+				);
+				pass.setTexture(slots.get("Sampler0"), atlasView, MetalRenderPass.STAGE_ALL);
+				pass.setSampler(slots.get("Sampler0"), sampler, MetalRenderPass.STAGE_ALL);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 24, 0);
+			}
+			commands.commitAndWait();
+			for (int layer = 0; layer < 24; layer++) {
+				ByteBuffer depth = target.readback(queue, 0, layer).order(ByteOrder.nativeOrder());
+				boolean written = false;
+				while (depth.remaining() >= Float.BYTES) {
+					if (depth.getFloat() < 0.99F) { written = true; break; }
+				}
+				if (!written) throw new AssertionError("The local-shadow draw did not reach layer " + layer);
 			}
 		}
 	}
@@ -1229,12 +1542,12 @@ public final class MetalShaderTranslationSmoke {
 			clearShadowLayer(queue, shadowTarget, 1.0);
 			int[] lit = drawPhaseFourResolve(
 				queue, fill, resolve, null, scene, albedo, normal, light, depth,
-				shadowView, sampler, shadow, engine.optionUniformsForTesting()
+				shadowView, sampler, shadow, engine.lightingForTesting(), engine.optionUniformsForTesting()
 			);
 			clearShadowLayer(queue, shadowTarget, 0.0);
 			int[] occluded = drawPhaseFourResolve(
 				queue, fill, resolve, null, scene, albedo, normal, light, depth,
-				shadowView, sampler, shadow, engine.optionUniformsForTesting()
+				shadowView, sampler, shadow, engine.lightingForTesting(), engine.optionUniformsForTesting()
 			);
 			if (luminance(lit) <= luminance(occluded) + 20) {
 				throw new AssertionError("The deferred shadow term did not darken the surface: lit="
@@ -1245,14 +1558,91 @@ public final class MetalShaderTranslationSmoke {
 			clearShadowLayer(queue, shadowTarget, 1.0);
 			int[] composited = drawPhaseFourResolve(
 				queue, fill, resolve, forward, scene, albedo, normal, light, depth,
-				shadowView, sampler, shadow, engine.optionUniformsForTesting()
+				shadowView, sampler, shadow, engine.lightingForTesting(), engine.optionUniformsForTesting()
 			);
 			if (composited[0] <= lit[0] || composited[1] >= lit[1] || composited[2] >= lit[2]) {
 				throw new AssertionError("Forward translucency did not blend after deferred lighting: lit="
 					+ List.of(lit[0], lit[1], lit[2]) + ", composited="
 					+ List.of(composited[0], composited[1], composited[2]));
 			}
+
+			Matrix4f projection = new Matrix4f().setPerspective(
+				(float)Math.toRadians(70.0), 1.0F, 0.05F, 512.0F, true
+			);
+			MetalWorldLighting lighting = engine.lightingForTesting();
+			shadow.useIdentityLocalShadowsForTesting(0);
+			lighting.publishForTesting(List.of(resolveLight(1L, 0.0F, 0.0F, 0.5F,
+				1.0F, 0.02F, 0.02F, 5.0F, 6.0F, false)), projection, GBUFFER_SIZE, GBUFFER_SIZE, 0);
+			int[] redNear = drawPhaseFourResolve(
+				queue, fill, resolve, null, scene, albedo, normal, light, depth,
+				shadowView, sampler, shadow, lighting, engine.optionUniformsForTesting()
+			);
+			lighting.publishForTesting(List.of(resolveLight(1L, 0.0F, 0.0F, 4.0F,
+				1.0F, 0.02F, 0.02F, 5.0F, 6.0F, false)), projection, GBUFFER_SIZE, GBUFFER_SIZE, 0);
+			int[] redFar = drawPhaseFourResolve(
+				queue, fill, resolve, null, scene, albedo, normal, light, depth,
+				shadowView, sampler, shadow, lighting, engine.optionUniformsForTesting()
+			);
+			if (redNear[0] <= lit[0] || redFar[0] <= redFar[1] || luminance(redNear) <= luminance(redFar)) {
+				throw new AssertionError("Positioned colored local-light falloff was not resolved: baseline="
+					+ List.of(lit[0], lit[1], lit[2]) + ", near="
+					+ List.of(redNear[0], redNear[1], redNear[2]) + ", far="
+					+ List.of(redFar[0], redFar[1], redFar[2]));
+			}
+			lighting.publishForTesting(List.of(resolveLight(2L, 0.0F, 0.0F, 0.5F,
+				0.02F, 0.08F, 1.0F, 0.12F, 6.0F, false)), projection, GBUFFER_SIZE, GBUFFER_SIZE, 0);
+			int[] blue = drawPhaseFourResolve(
+				queue, fill, resolve, null, scene, albedo, normal, light, depth,
+				shadowView, sampler, shadow, lighting, engine.optionUniformsForTesting()
+			);
+			if (blue[2] - lit[2] <= blue[0] - lit[0] + 20) {
+				throw new AssertionError("A blue positional light lost its color in the GGX resolve: "
+					+ List.of(blue[0], blue[1], blue[2]));
+			}
+			lighting.publishForTesting(List.of(resolveLight(3L, 0.0F, 0.0F, 0.5F,
+				1.0F, 0.02F, 0.02F, 5.0F, 6.0F, true)), projection, GBUFFER_SIZE, GBUFFER_SIZE, 0);
+			int[] enveloped = drawPhaseFourResolve(
+				queue, fill, resolve, null, scene, albedo, normal, light, depth,
+				shadowView, sampler, shadow, lighting, engine.optionUniformsForTesting()
+			);
+			if (Math.abs(luminance(enveloped) - luminance(lit)) > 5) {
+				throw new AssertionError("A zero vanilla block-light envelope leaked a static positional light");
+			}
+
+			// A light offset in view +X must brighten the right of a facing plane more than the left.
+			// If reconstruction flips X relative to the uploaded view-space position, the left wins.
+			lighting.publishForTesting(List.of(resolveLight(4L, 0.25F, 0.0F, 0.5F,
+				1.0F, 0.02F, 0.02F, 8.0F, 6.0F, false)), projection, GBUFFER_SIZE, GBUFFER_SIZE, 0);
+			ByteBuffer offsetLit = drawPhaseFourResolveImage(
+				queue, fill, resolve, scene, albedo, normal, light, depth,
+				shadowView, sampler, shadow, lighting, engine.optionUniformsForTesting()
+			);
+			int[] left = pixelRgb(offsetLit, 1, GBUFFER_SIZE / 2, GBUFFER_SIZE);
+			int[] right = pixelRgb(offsetLit, GBUFFER_SIZE - 2, GBUFFER_SIZE / 2, GBUFFER_SIZE);
+			if (luminance(right) <= luminance(left)) {
+				throw new AssertionError("A view-space +X local light did not stay bound to its offset: left="
+					+ List.of(left[0], left[1], left[2]) + ", right="
+					+ List.of(right[0], right[1], right[2]));
+			}
 		}
+	}
+
+	private static MetalWorldLighting.FrameLight resolveLight(
+		final long id,
+		final float x,
+		final float y,
+		final float z,
+		final float red,
+		final float green,
+		final float blue,
+		final float intensity,
+		final float radius,
+		final boolean envelope
+	) {
+		return new MetalWorldLighting.FrameLight(
+			new MetalWorldLighting.LightId(Identifier.parse("metalcraft:resolve_fixture"), id),
+			x, y, z, x, y, z, red, green, blue, intensity, radius, false, envelope, -1
+		);
 	}
 
 	private static int[] drawPhaseFourResolve(
@@ -1268,6 +1658,50 @@ public final class MetalShaderTranslationSmoke {
 		final MetalTextureView shadowView,
 		final MetalSampler sampler,
 		final MetalWorldShadow shadow,
+		final MetalWorldLighting lighting,
+		final MetalBuffer options
+	) {
+		return pixelRgb(drawPhaseFourResolveImage(
+			queue, fill, resolve, forward, scene, albedo, normal, light, depth,
+			shadowView, sampler, shadow, lighting, options
+		), 0, 0, GBUFFER_SIZE);
+	}
+
+	private static ByteBuffer drawPhaseFourResolveImage(
+		final MetalCommandQueue queue,
+		final MetalRenderPipeline fill,
+		final MetalRenderPipeline resolve,
+		final MetalTexture scene,
+		final MetalTexture albedo,
+		final MetalTexture normal,
+		final MetalTexture light,
+		final MetalTexture depth,
+		final MetalTextureView shadowView,
+		final MetalSampler sampler,
+		final MetalWorldShadow shadow,
+		final MetalWorldLighting lighting,
+		final MetalBuffer options
+	) {
+		return drawPhaseFourResolveImage(
+			queue, fill, resolve, null, scene, albedo, normal, light, depth,
+			shadowView, sampler, shadow, lighting, options
+		);
+	}
+
+	private static ByteBuffer drawPhaseFourResolveImage(
+		final MetalCommandQueue queue,
+		final MetalRenderPipeline fill,
+		final MetalRenderPipeline resolve,
+		final MetalRenderPipeline forward,
+		final MetalTexture scene,
+		final MetalTexture albedo,
+		final MetalTexture normal,
+		final MetalTexture light,
+		final MetalTexture depth,
+		final MetalTextureView shadowView,
+		final MetalSampler sampler,
+		final MetalWorldShadow shadow,
+		final MetalWorldLighting lighting,
 		final MetalBuffer options
 	) {
 		try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
@@ -1291,8 +1725,21 @@ public final class MetalShaderTranslationSmoke {
 				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 				pass.setPipeline(resolve);
 				pass.setUniformBuffer(0, options, 0L, MetalRenderPass.STAGE_FRAGMENT);
-				pass.setUniformBuffer(1, shadow.matricesForTesting(), 0L, MetalRenderPass.STAGE_FRAGMENT);
+				pass.setUniformBuffer(
+					1, shadow.matricesForTesting(), shadow.matricesOffsetForTesting(), MetalRenderPass.STAGE_FRAGMENT
+				);
+				pass.setUniformBuffer(
+					2, lighting.lightBuffer(), lighting.lightBufferOffset(), MetalRenderPass.STAGE_FRAGMENT
+				);
+				pass.setUniformBuffer(
+					3, lighting.tileBuffer(), lighting.tileBufferOffset(), MetalRenderPass.STAGE_FRAGMENT
+				);
+				pass.setUniformBuffer(
+					4, shadow.localMatricesForTesting(), shadow.localMatricesOffsetForTesting(),
+					MetalRenderPass.STAGE_FRAGMENT
+				);
 				pass.setTexture(0, shadowView, MetalRenderPass.STAGE_FRAGMENT);
+				pass.setTexture(1, shadow.localShadowViewForTesting(), MetalRenderPass.STAGE_FRAGMENT);
 				pass.setSampler(0, sampler, MetalRenderPass.STAGE_FRAGMENT);
 				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 			}
@@ -1307,9 +1754,15 @@ public final class MetalShaderTranslationSmoke {
 			}
 			commands.commitAndWait();
 		}
-		ByteBuffer pixel = scene.readback(queue, 0);
+		return scene.readback(queue, 0);
+	}
+
+	private static int[] pixelRgb(final ByteBuffer image, final int x, final int y, final int size) {
+		int offset = (y * size + x) * 4;
 		return new int[] {
-			Byte.toUnsignedInt(pixel.get(0)), Byte.toUnsignedInt(pixel.get(1)), Byte.toUnsignedInt(pixel.get(2))
+			Byte.toUnsignedInt(image.get(offset)),
+			Byte.toUnsignedInt(image.get(offset + 1)),
+			Byte.toUnsignedInt(image.get(offset + 2))
 		};
 	}
 
