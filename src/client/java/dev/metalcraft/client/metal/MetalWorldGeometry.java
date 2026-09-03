@@ -233,7 +233,7 @@ public final class MetalWorldGeometry implements AutoCloseable {
 				// G-buffer. Resolve it while it is still resident, then let this draw use
 				// Minecraft's ordinary forward path. Blended water, glass and stained glass all
 				// arrive here after the opaque boundary and therefore composite over the lit scene.
-				binding.engine.resolveOpaque();
+				MetalShaderEngine.resolveOpaque();
 				return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 			}
 		}
@@ -242,7 +242,7 @@ public final class MetalWorldGeometry implements AutoCloseable {
 		// the two disagree, resize to what the world actually is and let the next frame carry the
 		// G-buffer; declining costs one frame of it and cannot produce a rejected descriptor.
 		if (!binding.matchesWorldSize(color)) {
-			binding.engine.resolveOpaque();
+			MetalShaderEngine.resolveOpaque();
 			binding.engine.resizeToWorld(color.getWidth(0), color.getHeight(0));
 			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 		}

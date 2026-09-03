@@ -33,10 +33,11 @@ sourceSets {
 }
 
 processResources {
-	inputs.property 'version', project.version
+	def version = project.version
+	inputs.property 'version', version
 
 	filesMatching('fabric.mod.json') {
-		expand version: project.version
+		expand version: version
 	}
 }
 
@@ -56,6 +57,7 @@ tasks.register('compileMetalNative', Exec) {
 	commandLine 'xcrun', 'clang',
 		'-O3', '-fobjc-arc', '-fvisibility=hidden', '-dynamiclib',
 		'-arch', 'arm64', '-mmacosx-version-min=13.0',
+		'-Wall', '-Wextra', '-Wshadow', '-Wconversion', '-Wno-unused-parameter', '-Werror',
 		"-I${System.getProperty('java.home')}/include",
 		"-I${System.getProperty('java.home')}/include/darwin",
 		'-framework', 'Foundation', '-framework', 'Metal', '-framework', 'MetalFX', '-framework', 'QuartzCore', '-framework', 'AppKit',
@@ -163,8 +165,32 @@ processClientResources {
 	}
 }
 
+// Java 25 requires an explicit native-access grant for System.load, and JOML still uses sun.misc.Unsafe.
+def metalRuntimeJvmArgs = [
+	'--enable-native-access=ALL-UNNAMED',
+	'--sun-misc-unsafe-memory-access=allow'
+]
+
+tasks.withType(JavaExec).configureEach {
+	jvmArgs metalRuntimeJvmArgs
+}
+
 tasks.withType(JavaCompile).configureEach {
 	options.release = 25
+	options.encoding = 'UTF-8'
+	options.deprecation = true
+	options.compilerArgs += [
+		'-Xlint:all',
+		'-Xlint:-serial',
+		'-Xlint:-processing',
+		'-Xlint:-classfile'
+	]
+}
+
+tasks.named('compileShaderSmokeJava', JavaCompile).configure {
+	// Smoke tests close GPU passes before committing the command buffer they share a try-with-resources
+	// with; that explicit close is the lifetime, not a leak.
+	options.compilerArgs += ['-Xlint:-try']
 }
 
 java {
@@ -174,8 +200,9 @@ java {
 }
 
 jar {
+	def licenseSuffix = project.base.archivesName.get()
 	from('LICENSE') {
-		rename { "${it}_${project.base.archivesName.get()}" }
+		rename { original -> "${original}_${licenseSuffix}" }
 	}
 }
 

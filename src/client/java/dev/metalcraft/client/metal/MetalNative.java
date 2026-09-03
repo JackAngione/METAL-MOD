@@ -16,6 +16,7 @@ public final class MetalNative {
 	private MetalNative() {
 	}
 
+	@SuppressWarnings("restricted")
 	public static synchronized boolean load() {
 		if (loaded) {
 			return true;

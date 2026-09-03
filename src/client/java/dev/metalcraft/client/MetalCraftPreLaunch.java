@@ -29,7 +29,7 @@ public final class MetalCraftPreLaunch implements PreLaunchEntrypoint {
 	}
 
 	private static void probeDeviceAndQueue(final MetalDevice device) {
-		try (device; MetalCommandQueue commandQueue = device.createCommandQueue()) {
+		try (device; MetalCommandQueue _ = device.createCommandQueue()) {
 			LOGGER.info(
 				"MetalCraft direct Metal bridge opened an owned device and command queue: {} (recommended working set: {} MiB)",
 				device.name(),

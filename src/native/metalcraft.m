@@ -24,6 +24,16 @@ typedef NS_OPTIONS(uint32_t, MCShaderStage) {
 	MCShaderStageFragment = 2
 };
 
+static inline BOOL mc_has_stage(int32_t stages, MCShaderStage stage) {
+	return ((uint32_t)stages & (uint32_t)stage) != 0;
+}
+
+static inline BOOL mc_stages_valid(int32_t stages) {
+	uint32_t mask = (uint32_t)stages;
+	uint32_t allowed = (uint32_t)MCShaderStageVertex | (uint32_t)MCShaderStageFragment;
+	return mask != 0U && (mask & ~allowed) == 0U;
+}
+
 /**
  * One recorded render command, laid out exactly as MetalCommandStream writes it.
  *
@@ -191,7 +201,7 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 		_layer.maximumDrawableCount = 3;
 		_layer.contentsScale = view.window.backingScaleFactor;
 		_layer.frame = view.bounds;
-		_layer.drawableSize = CGSizeMake(width, height);
+		_layer.drawableSize = CGSizeMake((CGFloat)width, (CGFloat)height);
 		view.wantsLayer = YES;
 		view.layer = _layer;
 	}
@@ -201,7 +211,7 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 - (void)resizeToWidth:(NSUInteger)width height:(NSUInteger)height {
 	self.layer.contentsScale = self.view.window.backingScaleFactor;
 	self.layer.frame = self.view.bounds;
-	self.layer.drawableSize = CGSizeMake(width, height);
+	self.layer.drawableSize = CGSizeMake((CGFloat)width, (CGFloat)height);
 }
 
 - (void)detach {
@@ -1471,11 +1481,6 @@ static id mc_get_object(JNIEnv *env, jlong handle, MCObjectType expectedType) {
 		return nil;
 	}
 	return object;
-}
-
-static jlong mc_root_device_handle_locked(jlong handle) {
-	MCSlot *entry = mc_slot_locked(handle);
-	return entry == NULL ? 0 : entry->rootDeviceHandle;
 }
 
 static BOOL mc_get_objects_same_device(
@@ -2837,7 +2842,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 			descriptor.binaryArchives = @[archive];
 		}
 		for (jsize index = 0; index < colorCount; index++) {
-			MTLRenderPipelineColorAttachmentDescriptor *color = descriptor.colorAttachments[index];
+			MTLRenderPipelineColorAttachmentDescriptor *color = descriptor.colorAttachments[(NSUInteger)index];
 			color.pixelFormat = colorPixelFormats[index];
 			color.writeMask = mc_color_write_mask(env, colorWriteMasks[index]);
 			if (blendEnabled[index] != 0) {
@@ -2876,7 +2881,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 					mc_throw_state(env, @"Metal vertex buffer layout is out of range");
 					return 0;
 				}
-				MTLVertexBufferLayoutDescriptor *layout = vertexDescriptor.layouts[bufferIndex];
+				MTLVertexBufferLayoutDescriptor *layout = vertexDescriptor.layouts[(NSUInteger)bufferIndex];
 				layout.stride = (NSUInteger)layoutStrides[index];
 				layout.stepFunction = layoutStepRates[index] > 0 ? MTLVertexStepFunctionPerInstance : MTLVertexStepFunctionPerVertex;
 				layout.stepRate = layoutStepRates[index] > 0 ? (NSUInteger)layoutStepRates[index] : 1;
@@ -2888,7 +2893,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 					mc_throw_state(env, @"Metal vertex attribute is out of range");
 					return 0;
 				}
-				MTLVertexAttributeDescriptor *attribute = vertexDescriptor.attributes[location];
+				MTLVertexAttributeDescriptor *attribute = vertexDescriptor.attributes[(NSUInteger)location];
 				attribute.format = mc_vertex_format(env, attributeFormats[index]);
 				attribute.offset = (NSUInteger)attributeOffsets[index];
 				attribute.bufferIndex = (NSUInteger)bufferIndex;
@@ -3120,12 +3125,13 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			if ((*env)->ExceptionCheck(env)) {
 				return 0;
 			}
-			descriptor.colorAttachments[index].texture = colorTextures[index];
-			descriptor.colorAttachments[index].level = (NSUInteger)fields[MC_COLOR_FIELD_MIP_LEVEL];
-			descriptor.colorAttachments[index].slice = (NSUInteger)fields[MC_COLOR_FIELD_ARRAY_SLICE];
-			descriptor.colorAttachments[index].loadAction = loadAction;
-			descriptor.colorAttachments[index].storeAction = storeAction;
-			descriptor.colorAttachments[index].clearColor = MTLClearColorMake(clear[0], clear[1], clear[2], clear[3]);
+			NSUInteger colorIndex = (NSUInteger)index;
+			descriptor.colorAttachments[colorIndex].texture = colorTextures[index];
+			descriptor.colorAttachments[colorIndex].level = (NSUInteger)fields[MC_COLOR_FIELD_MIP_LEVEL];
+			descriptor.colorAttachments[colorIndex].slice = (NSUInteger)fields[MC_COLOR_FIELD_ARRAY_SLICE];
+			descriptor.colorAttachments[colorIndex].loadAction = loadAction;
+			descriptor.colorAttachments[colorIndex].storeAction = storeAction;
+			descriptor.colorAttachments[colorIndex].clearColor = MTLClearColorMake(clear[0], clear[1], clear[2], clear[3]);
 		}
 		if (attachedColorCount == 0) {
 			// Without a colour attachment Metal cannot infer the pass dimensions from one.
@@ -3192,7 +3198,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			return 0;
 		}
 		encoder.label = @"MetalCraft render pass";
-		[encoder setViewport:(MTLViewport){0.0, 0.0, targetWidth, targetHeight, 0.0, 1.0}];
+		[encoder setViewport:(MTLViewport){0.0, 0.0, (double)targetWidth, (double)targetHeight, 0.0, 1.0}];
 		[encoder setScissorRect:(MTLScissorRect){0, 0, targetWidth, targetHeight}];
 		MCMetalRenderPass *renderPass = [[MCMetalRenderPass alloc]
 			initWithEncoder:encoder
@@ -3312,10 +3318,10 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetUniformBuffer(
 		}
 		MCMetalRenderPass *renderPass = objects[0];
 		[renderPass.commandBuffer pin:buffer];
-		if (stages & MCShaderStageVertex) {
+		if (mc_has_stage(stages, MCShaderStageVertex)) {
 			[renderPass.encoder setVertexBuffer:buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index];
 		}
-		if (stages & MCShaderStageFragment) {
+		if (mc_has_stage(stages, MCShaderStageFragment)) {
 			[renderPass.encoder setFragmentBuffer:buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index];
 		}
 	}
@@ -3396,10 +3402,10 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexelBuffer(
 		MCMetalRenderPass *renderPass = objects[0];
 		[renderPass.commandBuffer pin:buffer];
 		[renderPass.commandBuffer pin:texture];
-		if (stages & MCShaderStageVertex) {
+		if (mc_has_stage(stages, MCShaderStageVertex)) {
 			[renderPass.encoder setVertexTexture:texture atIndex:(NSUInteger)index];
 		}
-		if (stages & MCShaderStageFragment) {
+		if (mc_has_stage(stages, MCShaderStageFragment)) {
 			[renderPass.encoder setFragmentTexture:texture atIndex:(NSUInteger)index];
 		}
 	}
@@ -3426,10 +3432,10 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexture(
 		MCMetalRenderPass *renderPass = objects[0];
 		id<MTLTexture> texture = objects[1];
 		[renderPass.commandBuffer pin:texture];
-		if (stages & MCShaderStageVertex) {
+		if (mc_has_stage(stages, MCShaderStageVertex)) {
 			[renderPass.encoder setVertexTexture:texture atIndex:(NSUInteger)index];
 		}
-		if (stages & MCShaderStageFragment) {
+		if (mc_has_stage(stages, MCShaderStageFragment)) {
 			[renderPass.encoder setFragmentTexture:texture atIndex:(NSUInteger)index];
 		}
 	}
@@ -3456,10 +3462,10 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetSampler(
 		MCMetalRenderPass *renderPass = objects[0];
 		id<MTLSamplerState> sampler = objects[1];
 		[renderPass.commandBuffer pin:sampler];
-		if (stages & MCShaderStageVertex) {
+		if (mc_has_stage(stages, MCShaderStageVertex)) {
 			[renderPass.encoder setVertexSamplerState:sampler atIndex:(NSUInteger)index];
 		}
-		if (stages & MCShaderStageFragment) {
+		if (mc_has_stage(stages, MCShaderStageFragment)) {
 			[renderPass.encoder setFragmentSamplerState:sampler atIndex:(NSUInteger)index];
 		}
 	}
@@ -3867,14 +3873,14 @@ static BOOL mc_validate_command(JNIEnv *env, const MCCommand *command, int32_t i
 				break;
 			case MCCommandSetUniformBuffer:
 				if (command->slot < 0 || command->slot >= 16 || command->offset < 0
-					|| command->stages == 0 || (command->stages & ~(MCShaderStageVertex | MCShaderStageFragment)) != 0) {
+					|| !mc_stages_valid(command->stages)) {
 					problem = @"uniform-buffer binding index, offset, or stage mask";
 				}
 				break;
 			case MCCommandSetTexture:
 			case MCCommandSetSampler:
 				if (command->slot < 0 || command->slot >= 16
-					|| command->stages == 0 || (command->stages & ~(MCShaderStageVertex | MCShaderStageFragment)) != 0) {
+					|| !mc_stages_valid(command->stages)) {
 					problem = @"texture or sampler binding index or stage mask";
 				}
 				break;
@@ -4027,26 +4033,26 @@ static void mc_encode_commands(
 				[encoder setVertexBuffer:object offset:(NSUInteger)command->offset atIndex:slot];
 				break;
 			case MCCommandSetUniformBuffer:
-				if (command->stages & MCShaderStageVertex) {
+				if (mc_has_stage(command->stages, MCShaderStageVertex)) {
 					[encoder setVertexBuffer:object offset:(NSUInteger)command->offset atIndex:slot];
 				}
-				if (command->stages & MCShaderStageFragment) {
+				if (mc_has_stage(command->stages, MCShaderStageFragment)) {
 					[encoder setFragmentBuffer:object offset:(NSUInteger)command->offset atIndex:slot];
 				}
 				break;
 			case MCCommandSetTexture:
-				if (command->stages & MCShaderStageVertex) {
+				if (mc_has_stage(command->stages, MCShaderStageVertex)) {
 					[encoder setVertexTexture:object atIndex:slot];
 				}
-				if (command->stages & MCShaderStageFragment) {
+				if (mc_has_stage(command->stages, MCShaderStageFragment)) {
 					[encoder setFragmentTexture:object atIndex:slot];
 				}
 				break;
 			case MCCommandSetSampler:
-				if (command->stages & MCShaderStageVertex) {
+				if (mc_has_stage(command->stages, MCShaderStageVertex)) {
 					[encoder setVertexSamplerState:object atIndex:slot];
 				}
-				if (command->stages & MCShaderStageFragment) {
+				if (mc_has_stage(command->stages, MCShaderStageFragment)) {
 					[encoder setFragmentSamplerState:object atIndex:slot];
 				}
 				break;

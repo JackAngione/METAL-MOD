@@ -291,7 +291,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		// A depth-only pass. This previously created a full-size BGRA scratch render target for every
 		// clear purely to satisfy the descriptor, which at 3840x2160 allocated and released 33 MB of
 		// texture per call on the render path.
-		try (MetalRenderPass pass = this.commands().beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
+		try (MetalRenderPass _ = this.commands().beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
 			new MetalRenderPass.DepthAttachment(depth.metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth)
 		), MetalPassCensus.kindFor("(depth clear)"))) {
 			// Beginning and ending the pass performs the clear.
@@ -485,7 +485,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		MetalRenderPass.DepthAttachment depthAttachment = depthTexture == null ? null : new MetalRenderPass.DepthAttachment(
 			requireTexture(depthTexture).metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth
 		);
-		try (MetalRenderPass pass = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(
+		try (MetalRenderPass _ = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(
 			MetalRenderPass.ColorAttachment.clear(color.metal(), clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w()), depthAttachment
 		))) {
 			// Beginning and ending the pass performs the clear.

@@ -453,14 +453,6 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		}
 
 		/**
-		 * Settles the world before the capture, without requiring it to settle completely. Generating
-		 * and streaming a 32-chunk radius of fresh terrain can outlast any reasonable deadline, and a
-		 * player who has just flown somewhere is looking at a partly loaded world too. The measured
-		 * fraction is reported so a badly under-loaded run is visible rather than silent.
-		 *
-		 * @return the fraction of the chunks inside the render distance that the client holds
-		 */
-		/**
 		 * Captures one window of frames while terrain is still streaming, for attribution only.
 		 *
 		 * <p>The three measured phases all run after the settle wait, and the main-thread task queue
@@ -482,6 +474,14 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			}
 		}
 
+		/**
+		 * Settles the world before the capture, without requiring it to settle completely. Generating
+		 * and streaming a 32-chunk radius of fresh terrain can outlast any reasonable deadline, and a
+		 * player who has just flown somewhere is looking at a partly loaded world too. The measured
+		 * fraction is reported so a badly under-loaded run is visible rather than silent.
+		 *
+		 * @return the fraction of the chunks inside the render distance that the client holds
+		 */
 		private double awaitLoadedTerrain(final TestSingleplayerContext world) {
 			int served = world.getServer().computeOnServer(server ->
 				server.getPlayerList().getPlayers().stream().mapToInt(player -> player.requestedViewDistance()).max().orElse(0));
@@ -735,10 +735,6 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		}
 
 		/**
-		 * Only a floor is enforced. The scenario's job is to produce a number that tracks real play,
-		 * and a target for that number has to come from measurement rather than from the harness.
-		 */
-		/**
 		 * Warns when a phase's frames arrive at the display's refresh interval.
 		 *
 		 * <p>Presentation is requested in immediate mode and the frame limiter is off, so this should
@@ -770,6 +766,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			}
 		}
 
+		/**
+		 * Only a floor is enforced. The scenario's job is to produce a number that tracks real play,
+		 * and a target for that number has to come from measurement rather than from the harness.
+		 */
 		private void assertThresholds(final List<MetalFrameMetrics.Phase> phases) {
 			for (MetalFrameMetrics.Phase phase : phases) {
 				if (phase.averageFps() < this.minimumFps) {
