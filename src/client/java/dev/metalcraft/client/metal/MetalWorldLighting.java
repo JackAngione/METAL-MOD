@@ -15,6 +15,7 @@ import java.util.Objects;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Display;
@@ -34,15 +35,21 @@ import org.joml.Vector3f;
 import org.joml.Vector4f;
 import org.jspecify.annotations.Nullable;
 
-/** Collects vanilla and registered emitters and publishes the bounded GPU-ready frame snapshot. */
+/**
+ * Metal world lighting: collects emitters, keeps a voxel occupancy volume of the real world,
+ * and publishes GPU-ready lights, tiles, and occlusion data for the deferred resolve.
+ */
 public final class MetalWorldLighting implements AutoCloseable {
 	public static final int MAX_LIGHTS = 256;
 	public static final int TILE_SIZE = 16;
 	public static final int MAX_LIGHTS_PER_TILE = 64;
 	public static final int MAX_SHADOW_LIGHTS = 4;
+	public static final int OCCUPANCY_SIZE = 64;
 	static final int GPU_LIGHT_BYTES = 48;
-	private static final int GPU_HEADER_BYTES = 16;
+	private static final int GPU_HEADER_BYTES = 128;
 	private static final int GPU_BUFFER_BYTES = GPU_HEADER_BYTES + MAX_LIGHTS * GPU_LIGHT_BYTES;
+	private static final int OCCUPANCY_WORDS = OCCUPANCY_SIZE * OCCUPANCY_SIZE * OCCUPANCY_SIZE / 32;
+	private static final int OCCUPANCY_BYTES = OCCUPANCY_WORDS * Integer.BYTES;
 	private static final int TILE_STRIDE = MAX_LIGHTS_PER_TILE + 1;
 	private static final Identifier STATIC_PROVIDER = Identifier.parse("metalcraft:vanilla_static");
 	private static final Identifier DYNAMIC_PROVIDER = Identifier.parse("metalcraft:vanilla_dynamic");
@@ -53,15 +60,30 @@ public final class MetalWorldLighting implements AutoCloseable {
 
 	private final MetalCraftLightRegistry registry;
 	private final Map<Long, List<WorldLight>> staticChunks = new HashMap<>();
+	private final Map<Long, long[]> occupancySections = new HashMap<>();
 	private final Map<LightId, Integer> shadowSlots = new LinkedHashMap<>();
+	private final Matrix4f worldFromView = new Matrix4f();
 	private @Nullable ClientLevel cachedLevel;
 	private @Nullable MetalGpuDevice gpuDevice;
 	private @Nullable GpuBufferSlice lightBuffer;
 	private @Nullable GpuBufferSlice tileBuffer;
+	private @Nullable GpuBufferSlice occupancyBuffer;
+	private int cameraBlockX;
+	private int cameraBlockY;
+	private int cameraBlockZ;
+	private float cameraFracX;
+	private float cameraFracY;
+	private float cameraFracZ;
+	private int occupancyOriginX;
+	private int occupancyOriginY;
+	private int occupancyOriginZ;
+	private int occupancySolid;
 	private volatile Snapshot current = Snapshot.EMPTY;
 
 	public MetalWorldLighting(final MetalCraftLightRegistry registry) {
 		this.registry = Objects.requireNonNull(registry, "registry");
+		this.worldFromView.identity();
+		this.resetOccupancyWindow();
 	}
 
 	/** Rebuilds one chunk atomically when it arrives from the client chunk cache. */
@@ -73,22 +95,26 @@ public final class MetalWorldLighting implements AutoCloseable {
 			if (light != null) found.add(light);
 		});
 		this.staticChunks.put(chunk.getPos().pack(), List.copyOf(found));
+		this.rebuildChunkOccupancy(chunk);
 	}
 
-	/** Drops all emitters owned by an unloading chunk. */
+	/** Drops all emitters and occupancy owned by an unloading chunk. */
 	public synchronized void chunkUnloaded(final ClientLevel level, final LevelChunk chunk) {
 		this.selectLevel(level);
 		this.staticChunks.remove(chunk.getPos().pack());
+		this.dropChunkOccupancy(chunk.getPos(), chunk.getMinSectionY(), chunk.getMaxSectionY());
 	}
 
-	/** Incrementally replaces the emitter at one changed block position. */
+	/** Incrementally replaces the emitter and occupancy bit at one changed block position. */
 	public synchronized void blockChanged(final ClientLevel level, final BlockPos position, final BlockState state) {
 		this.selectLevel(level);
 		this.replaceBlockEmitter(position, state);
+		this.setOccupied(position, occludesLight(state));
 	}
 
 	synchronized void blockChangedForTesting(final BlockPos position, final BlockState state) {
 		this.replaceBlockEmitter(position, state);
+		this.setOccupied(position, occludesLight(state));
 	}
 
 	synchronized void blockChangedForTesting(final BlockPos position, final boolean emitting) {
@@ -99,7 +125,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 		if (emitting) {
 			replacement.add(new WorldLight(
 				new LightId(STATIC_PROVIDER, position.asLong()), Vec3.atCenterOf(position),
-				1.0F, 0.86F, 0.68F, 3.0F, 18.5F, true, true
+				1.0F, 0.86F, 0.68F, 3.0F, 18.5F, true
 			));
 		}
 		if (replacement.isEmpty()) this.staticChunks.remove(chunkKey);
@@ -108,10 +134,28 @@ public final class MetalWorldLighting implements AutoCloseable {
 
 	synchronized void chunkUnloadedForTesting(final ChunkPos position) {
 		this.staticChunks.remove(position.pack());
+		this.dropChunkOccupancy(position, -4, 20);
 	}
 
 	synchronized int staticEmitterCountForTesting() {
 		return this.staticChunks.values().stream().mapToInt(List::size).sum();
+	}
+
+	/** Marks a world block as a solid occluder for headless occupancy tests. */
+	synchronized void occupyForTesting(final BlockPos position, final boolean solid) {
+		this.setOccupied(position, solid);
+	}
+
+	synchronized void clearOccupancyForTesting() {
+		this.occupancySections.clear();
+	}
+
+	synchronized int occupancySolidCountForTesting() {
+		int count = 0;
+		for (long[] section : this.occupancySections.values()) {
+			for (long word : section) count += Long.bitCount(word);
+		}
+		return count;
 	}
 
 	private void replaceBlockEmitter(final BlockPos position, final BlockState state) {
@@ -149,6 +193,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 			throw new IllegalArgumentException("Local shadow limit must be between zero and four");
 		}
 		if (level != null) this.selectLevel(level);
+		this.captureCamera(camera);
 		Matrix4f viewProjection = new Matrix4f(camera.projectionMatrix).mul(camera.viewRotationMatrix);
 		FrustumIntersection frustum = new FrustumIntersection(viewProjection, true);
 		List<RankedLight> ranked = new ArrayList<>();
@@ -164,7 +209,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 			this.rank(new WorldLight(
 				new LightId(registered.providerId(), light.stableId()), light.position(),
 				light.red(), light.green(), light.blue(), light.intensity(), light.radius(),
-				light.shadowEligible(), false
+				light.shadowEligible()
 			), camera, frustum, ranked);
 		}
 
@@ -177,7 +222,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 				light.id(), light.cameraX(), light.cameraY(), light.cameraZ(),
 				light.viewX(), light.viewY(), light.viewZ(),
 				light.red(), light.green(), light.blue(), light.intensity(), light.radius(),
-				light.shadowEligible(), light.usesBlockLightEnvelope(), -1
+				light.shadowEligible(), -1
 			));
 		}
 		lights = this.assignShadowSlots(lights, shadowLimit);
@@ -199,6 +244,14 @@ public final class MetalWorldLighting implements AutoCloseable {
 		final int height,
 		final int shadowLimit
 	) {
+		this.worldFromView.identity();
+		this.cameraBlockX = 0;
+		this.cameraBlockY = 0;
+		this.cameraBlockZ = 0;
+		this.cameraFracX = 0.0F;
+		this.cameraFracY = 0.0F;
+		this.cameraFracZ = 0.0F;
+		this.resetOccupancyWindow();
 		List<FrameLight> assigned = this.assignShadowSlots(List.copyOf(frameLights), shadowLimit);
 		Snapshot published = new Snapshot(assigned, 0, buildTiles(assigned, projection, width, height));
 		this.current = published;
@@ -222,12 +275,20 @@ public final class MetalWorldLighting implements AutoCloseable {
 		return metal(Objects.requireNonNull(this.tileBuffer, "local-light tile GPU buffer"));
 	}
 
+	MetalBuffer occupancyBuffer() {
+		return metal(Objects.requireNonNull(this.occupancyBuffer, "world occupancy GPU buffer"));
+	}
+
 	long lightBufferOffset() {
 		return Objects.requireNonNull(this.lightBuffer, "local-light GPU buffer").offset();
 	}
 
 	long tileBufferOffset() {
 		return Objects.requireNonNull(this.tileBuffer, "local-light tile GPU buffer").offset();
+	}
+
+	long occupancyBufferOffset() {
+		return Objects.requireNonNull(this.occupancyBuffer, "world occupancy GPU buffer").offset();
 	}
 
 	private void rank(
@@ -251,7 +312,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 		ranked.add(new RankedLight(
 			light.id(), relativeX, relativeY, relativeZ, view.x, view.y, view.z,
 			light.red(), light.green(), light.blue(), light.intensity(), light.radius(),
-			light.shadowEligible(), light.usesBlockLightEnvelope(), impact
+			light.shadowEligible(), impact
 		));
 	}
 
@@ -329,7 +390,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 		long stableId = ((long)entity.getId() << 8) | (ordinal & 0xFFL);
 		return new WorldLight(
 			new LightId(DYNAMIC_PROVIDER, stableId), position, red, green, blue,
-			intensity, radius, true, false
+			intensity, radius, true
 		);
 	}
 
@@ -431,10 +492,40 @@ public final class MetalWorldLighting implements AutoCloseable {
 		return Math.max(0, Math.min(tileCount - 1, value));
 	}
 
+	private void captureCamera(final CameraRenderState camera) {
+		this.cameraBlockX = (int)Math.floor(camera.pos.x);
+		this.cameraBlockY = (int)Math.floor(camera.pos.y);
+		this.cameraBlockZ = (int)Math.floor(camera.pos.z);
+		this.cameraFracX = (float)(camera.pos.x - this.cameraBlockX);
+		this.cameraFracY = (float)(camera.pos.y - this.cameraBlockY);
+		this.cameraFracZ = (float)(camera.pos.z - this.cameraBlockZ);
+		this.occupancyOriginX = this.cameraBlockX - OCCUPANCY_SIZE / 2;
+		this.occupancyOriginY = this.cameraBlockY - OCCUPANCY_SIZE / 2;
+		this.occupancyOriginZ = this.cameraBlockZ - OCCUPANCY_SIZE / 2;
+		this.worldFromView.set(camera.viewRotationMatrix).invert();
+		if (!Float.isFinite(this.worldFromView.determinant())) {
+			this.worldFromView.identity();
+		}
+	}
+
+	private void resetOccupancyWindow() {
+		this.occupancyOriginX = -OCCUPANCY_SIZE / 2;
+		this.occupancyOriginY = -OCCUPANCY_SIZE / 2;
+		this.occupancyOriginZ = -OCCUPANCY_SIZE / 2;
+	}
+
 	private void upload(final Snapshot snapshot) {
 		MetalGpuDevice device = this.gpuDevice;
 		if (device == null) return;
 		int alignment = device.getDeviceInfo().limits().minUniformOffsetAlignment();
+		int[] occupancy = this.packOccupancy();
+		this.occupancySolid = 0;
+		for (int word : occupancy) {
+			if (word != 0) {
+				this.occupancySolid = 1;
+				break;
+			}
+		}
 		try (GpuBufferSlice.MappedView mapping = device.transientMemory().allocateGpuMapped(
 			GPU_BUFFER_BYTES, alignment, GpuBuffer.USAGE_UNIFORM
 		)) {
@@ -444,10 +535,24 @@ public final class MetalWorldLighting implements AutoCloseable {
 			bytes.putInt(snapshot.tiles().tilesX());
 			bytes.putInt(snapshot.tiles().tilesY());
 			bytes.putInt(TILE_STRIDE);
+			bytes.putInt(this.occupancyOriginX);
+			bytes.putInt(this.occupancyOriginY);
+			bytes.putInt(this.occupancyOriginZ);
+			bytes.putInt(OCCUPANCY_SIZE);
+			bytes.putInt(this.cameraBlockX);
+			bytes.putInt(this.cameraBlockY);
+			bytes.putInt(this.cameraBlockZ);
+			bytes.putInt(this.occupancySolid);
+			bytes.putFloat(this.cameraFracX);
+			bytes.putFloat(this.cameraFracY);
+			bytes.putFloat(this.cameraFracZ);
+			bytes.putFloat(0.0F);
+			this.worldFromView.get(64, bytes);
+			bytes.position(GPU_HEADER_BYTES);
 			for (FrameLight light : snapshot.lights()) {
 				bytes.putFloat(light.viewX()).putFloat(light.viewY()).putFloat(light.viewZ()).putFloat(light.radius());
 				bytes.putFloat(light.red()).putFloat(light.green()).putFloat(light.blue()).putFloat(light.intensity());
-				bytes.putInt(light.usesBlockLightEnvelope() ? 1 : 0).putInt(light.shadowSlot()).putInt(0).putInt(0);
+				bytes.putInt(light.shadowSlot()).putInt(0).putInt(0).putInt(0);
 			}
 		}
 		try (GpuBufferSlice.MappedView mapping = device.transientMemory().allocateGpuMapped(
@@ -457,6 +562,96 @@ public final class MetalWorldLighting implements AutoCloseable {
 			var bytes = mapping.data().order(ByteOrder.nativeOrder());
 			for (int entry : snapshot.tiles().entries) bytes.putInt(entry);
 		}
+		try (GpuBufferSlice.MappedView mapping = device.transientMemory().allocateGpuMapped(
+			OCCUPANCY_BYTES, alignment, GpuBuffer.USAGE_UNIFORM
+		)) {
+			this.occupancyBuffer = mapping.slice();
+			var bytes = mapping.data().order(ByteOrder.nativeOrder());
+			for (int word : occupancy) bytes.putInt(word);
+		}
+	}
+
+	private int[] packOccupancy() {
+		int[] packed = new int[OCCUPANCY_WORDS];
+		int minX = this.occupancyOriginX;
+		int minY = this.occupancyOriginY;
+		int minZ = this.occupancyOriginZ;
+		int maxX = minX + OCCUPANCY_SIZE - 1;
+		int maxY = minY + OCCUPANCY_SIZE - 1;
+		int maxZ = minZ + OCCUPANCY_SIZE - 1;
+		for (int sectionX = minX >> 4; sectionX <= maxX >> 4; sectionX++) {
+			for (int sectionY = minY >> 4; sectionY <= maxY >> 4; sectionY++) {
+				for (int sectionZ = minZ >> 4; sectionZ <= maxZ >> 4; sectionZ++) {
+					long[] section = this.occupancySections.get(SectionPos.asLong(sectionX, sectionY, sectionZ));
+					if (section == null) continue;
+					this.copySection(section, sectionX, sectionY, sectionZ, packed);
+				}
+			}
+		}
+		return packed;
+	}
+
+	private void copySection(
+		final long[] section,
+		final int sectionX,
+		final int sectionY,
+		final int sectionZ,
+		final int[] packed
+	) {
+		int baseX = sectionX << 4;
+		int baseY = sectionY << 4;
+		int baseZ = sectionZ << 4;
+		for (int bit = 0; bit < 4096; bit++) {
+			if ((section[bit >> 6] & 1L << (bit & 63)) == 0L) continue;
+			int worldX = baseX + (bit & 15);
+			int worldZ = baseZ + (bit >> 4 & 15);
+			int worldY = baseY + (bit >> 8 & 15);
+			int localX = worldX - this.occupancyOriginX;
+			int localY = worldY - this.occupancyOriginY;
+			int localZ = worldZ - this.occupancyOriginZ;
+			if (localX < 0 || localX >= OCCUPANCY_SIZE || localY < 0 || localY >= OCCUPANCY_SIZE
+				|| localZ < 0 || localZ >= OCCUPANCY_SIZE) {
+				continue;
+			}
+			int index = (localY * OCCUPANCY_SIZE + localZ) * OCCUPANCY_SIZE + localX;
+			packed[index >> 5] |= 1 << (index & 31);
+		}
+	}
+
+	private void rebuildChunkOccupancy(final LevelChunk chunk) {
+		this.dropChunkOccupancy(chunk.getPos(), chunk.getMinSectionY(), chunk.getMaxSectionY());
+		chunk.findBlocks(MetalWorldLighting::occludesLight, (position, state) -> this.setOccupied(position, true));
+	}
+
+	private void dropChunkOccupancy(final ChunkPos position, final int minSectionY, final int maxSectionY) {
+		for (int sectionY = minSectionY; sectionY <= maxSectionY; sectionY++) {
+			this.occupancySections.remove(SectionPos.asLong(position.x(), sectionY, position.z()));
+		}
+	}
+
+	private void setOccupied(final BlockPos position, final boolean solid) {
+		long key = SectionPos.asLong(position.getX() >> 4, position.getY() >> 4, position.getZ() >> 4);
+		int local = (position.getX() & 15) | (position.getZ() & 15) << 4 | (position.getY() & 15) << 8;
+		if (solid) {
+			long[] bits = this.occupancySections.get(key);
+			if (bits == null) {
+				bits = new long[64];
+				this.occupancySections.put(key, bits);
+			}
+			bits[local >> 6] |= 1L << (local & 63);
+			return;
+		}
+		long[] bits = this.occupancySections.get(key);
+		if (bits == null) return;
+		bits[local >> 6] &= ~(1L << (local & 63));
+		for (long word : bits) {
+			if (word != 0L) return;
+		}
+		this.occupancySections.remove(key);
+	}
+
+	private static boolean occludesLight(final BlockState state) {
+		return state.canOcclude() && state.isSolidRender();
 	}
 
 	private static MetalBuffer metal(final GpuBufferSlice slice) {
@@ -467,6 +662,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 		if (this.cachedLevel == level) return;
 		this.cachedLevel = level;
 		this.staticChunks.clear();
+		this.occupancySections.clear();
 		this.shadowSlots.clear();
 	}
 
@@ -478,16 +674,16 @@ public final class MetalWorldLighting implements AutoCloseable {
 		return new WorldLight(
 			new LightId(STATIC_PROVIDER, position.asLong()), Vec3.atCenterOf(position),
 			color.red(), color.green(), color.blue(), intensityFor(emission), radiusFor(emission),
-			true, true
+			true
 		);
 	}
 
 	private static float intensityFor(final int emission) {
-		return 0.35F + 2.65F * emission / 15.0F;
+		return 0.55F + 3.2F * emission / 15.0F;
 	}
 
 	private static float radiusFor(final int emission) {
-		return 2.0F + emission * 1.1F;
+		return 3.0F + emission * 1.25F;
 	}
 
 	private static int itemEmission(final String name) {
@@ -524,7 +720,9 @@ public final class MetalWorldLighting implements AutoCloseable {
 		this.gpuDevice = null;
 		this.lightBuffer = null;
 		this.tileBuffer = null;
+		this.occupancyBuffer = null;
 		this.staticChunks.clear();
+		this.occupancySections.clear();
 		this.shadowSlots.clear();
 		this.cachedLevel = null;
 		this.current = Snapshot.EMPTY;
@@ -548,7 +746,6 @@ public final class MetalWorldLighting implements AutoCloseable {
 		float intensity,
 		float radius,
 		boolean shadowEligible,
-		boolean usesBlockLightEnvelope,
 		int shadowSlot
 	) {
 		public FrameLight { Objects.requireNonNull(id, "id"); }
@@ -557,7 +754,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 			return new FrameLight(
 				this.id, this.cameraX, this.cameraY, this.cameraZ, this.viewX, this.viewY, this.viewZ,
 				this.red, this.green, this.blue, this.intensity, this.radius,
-				this.shadowEligible, this.usesBlockLightEnvelope, slot
+				this.shadowEligible, slot
 			);
 		}
 	}
@@ -612,7 +809,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 
 	private record WorldLight(
 		LightId id, Vec3 position, float red, float green, float blue,
-		float intensity, float radius, boolean shadowEligible, boolean usesBlockLightEnvelope
+		float intensity, float radius, boolean shadowEligible
 	) { }
 
 	private record RankedLight(
@@ -621,7 +818,7 @@ public final class MetalWorldLighting implements AutoCloseable {
 		float viewX, float viewY, float viewZ,
 		float red, float green, float blue,
 		float intensity, float radius,
-		boolean shadowEligible, boolean usesBlockLightEnvelope,
+		boolean shadowEligible,
 		double impact
 	) { }
 

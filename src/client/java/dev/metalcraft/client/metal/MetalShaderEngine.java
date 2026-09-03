@@ -193,7 +193,7 @@ public final class MetalShaderEngine implements AutoCloseable {
 		if (engine == null) return false;
 		long stableId = position.asLong();
 		return engine.worldLighting.snapshot().lights().stream().anyMatch(light ->
-			light.id().stableId() == stableId && light.usesBlockLightEnvelope() && light.shadowSlot() >= 0
+			light.id().stableId() == stableId && light.shadowSlot() >= 0
 		);
 	}
 
@@ -767,6 +767,10 @@ public final class MetalShaderEngine implements AutoCloseable {
 				render.setTexture(textureSlot, this.worldShadow.localShadowViewForTesting(), MetalRenderPass.STAGE_FRAGMENT);
 				render.setSampler(textureSlot, this.unfilteredSampler, MetalRenderPass.STAGE_FRAGMENT);
 			}
+			render.setUniformBuffer(
+				5, this.worldLighting.occupancyBuffer(), this.worldLighting.occupancyBufferOffset(),
+				MetalRenderPass.STAGE_FRAGMENT
+			);
 		}
 		render.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 		geometry.didResolve();

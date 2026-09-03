@@ -92,13 +92,16 @@ Add-ons may also register a `MetalCraftLightProvider` through `MetalCraftLights.
 registered identifier. One provider's exception, null output, or duplicate stable ID discards only
 that provider's contribution for the frame.
 
-`MetalWorldLighting` is the render-side module at this seam. Once per extracted world frame it
-collects registered providers, converts positions from doubles to camera-relative floats, rejects
-light spheres outside the camera frustum, ranks the remainder by estimated visible impact with
-stable-ID tie breaks, and publishes an immutable snapshot of at most 256 lights. Registered lights
-are visual sources and will bypass the vanilla block-light reach envelope when the GPU resolve path
-consumes this snapshot. Static and entity emitter adapters, tile lists, and GPU resources remain
-inside this same module rather than expanding the provider interface.
+`MetalWorldLighting` is the render-side lighting engine at this seam. Once per extracted world
+frame it collects vanilla block/entity emitters and registered providers, converts positions from
+doubles to camera-relative floats, rejects light spheres outside the camera frustum, ranks the
+remainder by estimated visible impact with stable-ID tie breaks, and publishes an immutable snapshot
+of at most 256 lights. The same module keeps a 64³ occupancy volume of opaque world blocks around
+the camera. The deferred resolve lights surfaces with Metal GGX, occludes every local light through
+that occupancy volume, and applies cube-map shadows for the four highest-impact casters plus
+cascaded sun/moon shadows. Vanilla's 4-bit block-light flood fill is not the occlusion model.
+Static and entity emitter adapters, occupancy, tile lists, and GPU resources remain inside this
+same module rather than expanding the provider interface.
 
 ## Compatibility contract
 

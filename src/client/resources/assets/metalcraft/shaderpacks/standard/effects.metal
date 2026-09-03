@@ -29,6 +29,7 @@ struct EffectShadowUniforms {
     float4 celestial;
     float4x4 rasterProjection;
     float4x4 inverseRasterProjection;
+    float4x4 viewRotation;
 };
 
 static inline float2 mc_clamped_uv(uint2 gid, uint2 size) {
@@ -184,7 +185,10 @@ kernel void volumetrics_kernel(
         float3 position = surface * t;
         float distance = max(-position.z, 0.0);
         uint cascade = mc_effect_cascade(distance, shadow.splits);
-        float4 clip = shadow.cascade[cascade] * float4(position, 1.0);
+        float3 relativeWorld = transpose(float3x3(
+            shadow.viewRotation[0].xyz, shadow.viewRotation[1].xyz, shadow.viewRotation[2].xyz
+        )) * position;
+        float4 clip = shadow.cascade[cascade] * float4(relativeWorld, 1.0);
         float3 projected = clip.xyz / clip.w;
         float2 shadowUv = float2(projected.x, -projected.y) * 0.5 + 0.5;
         if (all(shadowUv >= 0.0) && all(shadowUv <= 1.0)) {

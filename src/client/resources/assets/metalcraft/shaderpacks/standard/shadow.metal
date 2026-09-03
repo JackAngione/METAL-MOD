@@ -38,6 +38,10 @@ struct ShadowUniforms {
     float4 lightDirectionAndNormalOffset;
     float4 mapSize;
     float4 celestial;
+    float4x4 rasterProjection;
+    float4x4 inverseRasterProjection;
+    // Minecraft view rotation. transpose(3x3) takes view space back to camera-relative world.
+    float4x4 viewRotation;
 };
 
 struct LocalShadowUniforms {
@@ -110,10 +114,12 @@ static inline float mc_shadow_depth(
     float3 normal = length(in.normal) < 1e-8
         ? mc_shadow_reconstruct_normal(in.cameraViewPos)
         : normalize(in.normal);
+    float3x3 worldFromView = transpose(float3x3(
+        shadow.viewRotation[0].xyz, shadow.viewRotation[1].xyz, shadow.viewRotation[2].xyz
+    ));
+    float3 worldLight = worldFromView * shadow.lightDirectionAndNormalOffset.xyz;
     float normalOffset = shadow.lightDirectionAndNormalOffset.w;
-    // Move most at a grazing light angle and least when the surface faces the light. This is in
-    // camera-view world units, so the offset remains consistent across cascade resolutions.
-    float grazing = 1.0 - abs(dot(normal, shadow.lightDirectionAndNormalOffset.xyz));
+    float grazing = 1.0 - abs(dot(normal, worldLight));
     float3 offsetPosition = in.cameraViewPos + normal * (normalOffset * grazing);
     float4 clip = shadow.cascade[in.cascadeIndex] * float4(offsetPosition, 1.0);
     return saturate(clip.z / clip.w);
@@ -139,8 +145,12 @@ vertex ShadowVaryings shadow_terrain_vertex(
     constant ActiveShadowUniforms &shadow [[buffer(MC_ACTIVE_SHADOW_SLOT)]]
 ) {
     float3 relative = in.Position + float3(section.ChunkPosition - globals.CameraBlockPos) + globals.CameraOffset;
-    float3 cameraView = (section.ModelViewMat * float4(relative, 1.0)).xyz;
-    return mc_shadow_vertex(cameraView, float3(0.0), in.UV0, instanceId, shadow);
+#if MC_LOCAL_SHADOW
+    float3 shadowPos = (section.ModelViewMat * float4(relative, 1.0)).xyz;
+#else
+    float3 shadowPos = relative;
+#endif
+    return mc_shadow_vertex(shadowPos, float3(0.0), in.UV0, instanceId, shadow);
 }
 
 fragment ShadowDepth shadow_terrain_fragment(
@@ -174,7 +184,14 @@ vertex ShadowVaryings shadow_block_vertex(
 ) {
     float3 position = in.Position + transforms.ModelOffset;
     float3 cameraView = (transforms.ModelViewMat * float4(position, 1.0)).xyz;
-    return mc_shadow_vertex(cameraView, float3(0.0), in.UV0, instanceId, shadow);
+#if MC_LOCAL_SHADOW
+    float3 shadowPos = cameraView;
+#else
+    float3 shadowPos = transpose(float3x3(
+        shadow.viewRotation[0].xyz, shadow.viewRotation[1].xyz, shadow.viewRotation[2].xyz
+    )) * cameraView;
+#endif
+    return mc_shadow_vertex(shadowPos, float3(0.0), in.UV0, instanceId, shadow);
 }
 
 fragment ShadowDepth shadow_block_fragment(
@@ -220,7 +237,14 @@ vertex ShadowVaryings shadow_entity_vertex(
 #else
     float2 uv = in.UV0;
 #endif
+#if MC_LOCAL_SHADOW
     return mc_shadow_vertex(cameraView, normal, uv, instanceId, shadow);
+#else
+    float3x3 worldFromView = transpose(float3x3(
+        shadow.viewRotation[0].xyz, shadow.viewRotation[1].xyz, shadow.viewRotation[2].xyz
+    ));
+    return mc_shadow_vertex(worldFromView * cameraView, worldFromView * normal, uv, instanceId, shadow);
+#endif
 }
 
 fragment ShadowDepth shadow_entity_fragment(

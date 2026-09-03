@@ -42,13 +42,19 @@ struct ResolveOptions {
 struct LocalLight {
     float4 positionRadius;
     float4 colorIntensity;
-    // x: use vanilla block-light reach envelope, y: local-shadow slot or -1.
+    // x: cube-shadow slot or -1. World voxel occlusion applies to every light.
     int4 metadata;
 };
 
 struct LocalLighting {
     // x: light count, y/z: tile grid, w: fixed tile stride.
     uint4 header;
+    // xyz: world-block origin of the occupancy volume, w: volume edge length.
+    int4 occupancyOrigin;
+    // xyz: camera block, w: 1 when the volume contains any solid.
+    int4 cameraBlock;
+    float4 cameraFrac;
+    float4x4 worldFromView;
     LocalLight lights[256];
 };
 
@@ -68,6 +74,7 @@ struct ShadowUniforms {
     // GPU projection Minecraft rasterized, including reversed-Z and view-bob.
     float4x4 rasterProjection;
     float4x4 inverseRasterProjection;
+    float4x4 viewRotation;
 };
 
 #define MC_DEBUG_OFF      0
@@ -161,7 +168,7 @@ static inline float mc_local_shadow_term(
     sampler shadowSampler,
     constant LocalShadowUniforms &shadow
 ) {
-    int slot = light.metadata.y;
+    int slot = light.metadata.x;
     if (slot < 0 || uint(slot) >= shadow.parameters.x) return 1.0;
     uint layer = uint(slot) * 6u + mc_local_shadow_face(viewPosition - light.positionRadius.xyz);
     float4 clip = shadow.face[layer] * float4(viewPosition, 1.0);
@@ -179,16 +186,73 @@ static inline float mc_local_shadow_term(
     return visibility / 9.0;
 }
 
+static inline float3 mc_world_position(float3 viewPosition, constant LocalLighting &lighting) {
+    float3 relative = (lighting.worldFromView * float4(viewPosition, 1.0)).xyz;
+    return float3(lighting.cameraBlock.xyz) + lighting.cameraFrac.xyz + relative;
+}
+
+static inline bool mc_occupancy_solid(
+    int3 voxel, constant LocalLighting &lighting, device const uint *occupancy
+) {
+    int size = lighting.occupancyOrigin.w;
+    int3 local = voxel - lighting.occupancyOrigin.xyz;
+    if (any(local < 0) || any(local >= size)) return false;
+    uint index = uint((local.y * size + local.z) * size + local.x);
+    return (occupancy[index >> 5] & (1u << (index & 31u))) != 0u;
+}
+
+// Amanatides & Woo DDA through the camera-centred occupancy volume. Opaque world blocks
+// occlude every local light, including those that do not own a cube-shadow slot.
+static inline float mc_voxel_visibility(
+    float3 startWorld,
+    float3 endWorld,
+    constant LocalLighting &lighting,
+    device const uint *occupancy
+) {
+    if (lighting.occupancyOrigin.w <= 0 || lighting.cameraBlock.w == 0) return 1.0;
+    float3 delta = endWorld - startWorld;
+    float lengthSquared = dot(delta, delta);
+    if (lengthSquared < 0.25) return 1.0;
+    int3 voxel = int3(floor(startWorld));
+    int3 endVoxel = int3(floor(endWorld));
+    int3 difference = endVoxel - voxel;
+    int manhattan = abs(difference.x) + abs(difference.y) + abs(difference.z);
+    if (manhattan <= 1) return 1.0;
+
+    float3 dir = delta / sqrt(lengthSquared);
+    int3 step = int3(dir.x >= 0.0 ? 1 : -1, dir.y >= 0.0 ? 1 : -1, dir.z >= 0.0 ? 1 : -1);
+    float3 inv = 1.0 / max(abs(dir), float3(1e-8));
+    float3 nextBoundary = float3(voxel) + float3(dir.x >= 0.0, dir.y >= 0.0, dir.z >= 0.0);
+    float3 tMax = (nextBoundary - startWorld) / dir;
+    tMax = select(float3(1e30), tMax, abs(dir) > 1e-8);
+    int3 startVoxel = voxel;
+    for (int i = 0; i < 48; ++i) {
+        if (all(voxel == endVoxel)) return 1.0;
+        if (!all(voxel == startVoxel) && mc_occupancy_solid(voxel, lighting, occupancy)) return 0.0;
+        if (tMax.x < tMax.y && tMax.x < tMax.z) {
+            voxel.x += step.x;
+            tMax.x += inv.x;
+        } else if (tMax.y < tMax.z) {
+            voxel.y += step.y;
+            tMax.y += inv.y;
+        } else {
+            voxel.z += step.z;
+            tMax.z += inv.z;
+        }
+    }
+    return 1.0;
+}
+
 static inline float3 mc_local_lighting(
     float3 albedo,
     float3 normal,
     float3 viewPosition,
     float roughness,
     bool twoSided,
-    float blockLight,
     float2 pixel,
     constant LocalLighting &lighting,
     device const uint *tiles,
+    device const uint *occupancy,
     depth2d_array<float> localShadowMap,
     sampler localShadowSampler,
     constant LocalShadowUniforms &localShadow,
@@ -201,6 +265,7 @@ static inline float3 mc_local_lighting(
     uint tileY = min(uint(pixel.y) / 16u, lighting.header.z - 1u);
     uint base = (tileY * lighting.header.y + tileX) * lighting.header.w;
     uint count = min(tiles[base], 64u);
+    float3 worldPosition = mc_world_position(viewPosition, lighting);
     float3 result = float3(0.0);
     for (uint entry = 0; entry < count; ++entry) {
         uint lightIndex = tiles[base + 1u + entry];
@@ -215,15 +280,16 @@ static inline float3 mc_local_lighting(
         float window = saturate(1.0 - normalizedDistance * normalizedDistance
             * normalizedDistance * normalizedDistance);
         float attenuation = window * window / max(distanceSquared, 0.25);
-        float envelope = light.metadata.x != 0 ? pow(saturate(blockLight), 1.35) : 1.0;
         float3 brdf = mc_sun_brdf(
             albedo, normal, viewPosition, toLight / distance, roughness, twoSided
         );
-        float visibility = mc_local_shadow_term(
-            viewPosition, light, localShadowMap, localShadowSampler, localShadow
-        );
+        float3 lightWorld = mc_world_position(light.positionRadius.xyz, lighting);
+        float visibility = mc_voxel_visibility(worldPosition, lightWorld, lighting, occupancy)
+            * mc_local_shadow_term(
+                viewPosition, light, localShadowMap, localShadowSampler, localShadow
+            );
         result += brdf * light.colorIntensity.rgb * light.colorIntensity.w
-            * attenuation * radius * radius * envelope * visibility * strength;
+            * attenuation * radius * radius * visibility * strength;
     }
     return result;
 }
@@ -273,7 +339,10 @@ static inline float mc_shadow_term(
 ) {
     if (viewDepth > shadow.splits.w) return 1.0;
     uint cascade = mc_cascade(viewDepth, shadow.splits);
-    float4 clip = shadow.cascade[cascade] * float4(viewPosition, 1.0);
+    float3 relativeWorld = transpose(float3x3(
+        shadow.viewRotation[0].xyz, shadow.viewRotation[1].xyz, shadow.viewRotation[2].xyz
+    )) * viewPosition;
+    float4 clip = shadow.cascade[cascade] * float4(relativeWorld, 1.0);
     float3 projected = clip.xyz / clip.w;
     float2 uv = float2(projected.x, -projected.y) * 0.5 + 0.5;
     if (any(uv < 0.0) || any(uv > 1.0) || projected.z < 0.0 || projected.z > 1.0) return 1.0;
@@ -313,6 +382,7 @@ fragment ResolveTargets resolve_fragment(
     constant LocalLighting &localLighting [[buffer(2)]],
     device const uint *localTiles [[buffer(3)]],
     constant LocalShadowUniforms &localShadow [[buffer(4)]],
+    device const uint *occupancy [[buffer(5)]],
     depth2d_array<float> shadowMap [[texture(MC_TEX_SHADOW)]],
     depth2d_array<float> localShadowMap [[texture(1)]],
     sampler shadowSampler [[sampler(MC_TEX_SHADOW)]]
@@ -359,7 +429,7 @@ fragment ResolveTargets resolve_fragment(
             uint shadowed = 0;
             for (uint entry = 0; entry < count; ++entry) {
                 uint lightIndex = localTiles[base + 1u + entry];
-                if (lightIndex < localLighting.header.x && localLighting.lights[lightIndex].metadata.y >= 0) shadowed++;
+                if (lightIndex < localLighting.header.x && localLighting.lights[lightIndex].metadata.x >= 0) shadowed++;
             }
             result = float3(float(shadowed) / 4.0, shadowed > 0 ? 0.35 : 0.0, 0.0);
             break;
@@ -401,10 +471,11 @@ fragment ResolveTargets resolve_fragment(
                 * mix(0.55, 2.5, horizon);
             float3 local = options.localLights != 0 ? mc_local_lighting(
                 fetched.albedo.rgb, normal, viewPosition, roughness, material == 2,
-                blockLight, in.position.xy, localLighting, localTiles,
+                in.position.xy, localLighting, localTiles, occupancy,
                 localShadowMap, shadowSampler, localShadow, options.localLightStrength
             ) : float3(0.0);
-            result = material == 5 ? fetched.albedo.rgb : ambient + directional + local;
+            float3 fill = fetched.albedo.rgb * blockLight * 0.03;
+            result = material == 5 ? fetched.albedo.rgb : ambient + directional + local + fill;
             break;
         }
     }
