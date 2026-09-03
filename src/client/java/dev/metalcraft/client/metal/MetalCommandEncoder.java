@@ -75,7 +75,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	}
 
 	@Override
-	public MetalTransientMemory transientMemory() {
+	public TransientMemory transientMemory() {
 		return this.transientMemory;
 	}
 
@@ -84,45 +84,26 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (this.renderPass != null) {
 			throw new IllegalStateException("A direct Metal render pass is already active");
 		}
-		List<RenderPassDescriptor.Attachment<Optional<Vector4fc>>> colors = descriptor.colorAttachments();
-		if (colors.size() > MetalRenderPass.MAX_COLOR_ATTACHMENTS) {
-			throw new UnsupportedOperationException(
-				"Direct Metal accepts at most " + MetalRenderPass.MAX_COLOR_ATTACHMENTS
-					+ " color attachments, not " + colors.size()
-			);
+		if (descriptor.colorAttachments().size() != 1 || descriptor.colorAttachments().getFirst() == null) {
+			throw new UnsupportedOperationException("Direct Metal currently requires exactly one color attachment");
 		}
-		// Blaze3D's list is positional and may hold a null where the layout reserves an index the
-		// pass does not write, so the attachment list keeps the same shape rather than compacting.
-		List<MetalRenderPass.ColorAttachment> colorAttachments = new ArrayList<>(colors.size());
-		MetalGpuTextureView firstColorView = null;
-		for (RenderPassDescriptor.Attachment<Optional<Vector4fc>> color : colors) {
-			if (color == null) {
-				colorAttachments.add(null);
-				continue;
-			}
-			MetalGpuTextureView colorView = requireTextureView(color.textureView());
-			if (firstColorView == null) {
-				firstColorView = colorView;
-			}
-			Optional<Vector4fc> colorClear = color.clearValue();
-			boolean memoryless = colorView.texture().metal().isMemoryless();
-			colorAttachments.add(new MetalRenderPass.ColorAttachment(
-				colorView.texture().metal(),
-				colorView.baseMipLevel(),
-				colorClear.isPresent() ? MetalRenderPass.LoadAction.CLEAR
-					: memoryless ? MetalRenderPass.LoadAction.DONT_CARE : MetalRenderPass.LoadAction.LOAD,
-				memoryless ? MetalRenderPass.StoreAction.DONT_CARE : MetalRenderPass.StoreAction.STORE,
-				colorClear.map(Vector4fc::x).orElse(0.0F),
-				colorClear.map(Vector4fc::y).orElse(0.0F),
-				colorClear.map(Vector4fc::z).orElse(0.0F),
-				colorClear.map(Vector4fc::w).orElse(0.0F)
-			));
-		}
+		RenderPassDescriptor.Attachment<Optional<Vector4fc>> color = descriptor.colorAttachments().getFirst();
+		MetalGpuTextureView colorView = requireTextureView(color.textureView());
+		Optional<Vector4fc> colorClear = color.clearValue();
+		MetalRenderPass.ColorAttachment colorAttachment = new MetalRenderPass.ColorAttachment(
+			colorView.texture().metal(),
+			colorView.baseMipLevel(),
+			colorClear.isPresent() ? MetalRenderPass.LoadAction.CLEAR : MetalRenderPass.LoadAction.LOAD,
+			MetalRenderPass.StoreAction.STORE,
+			colorClear.map(Vector4fc::x).orElse(0.0F),
+			colorClear.map(Vector4fc::y).orElse(0.0F),
+			colorClear.map(Vector4fc::z).orElse(0.0F),
+			colorClear.map(Vector4fc::w).orElse(0.0F)
+		);
 		MetalRenderPass.DepthAttachment depthAttachment = null;
-		MetalGpuTextureView depthView = null;
 		if (descriptor.depthAttachment() != null) {
 			RenderPassDescriptor.Attachment<OptionalDouble> depth = descriptor.depthAttachment();
-			depthView = requireTextureView(depth.textureView());
+			MetalGpuTextureView depthView = requireTextureView(depth.textureView());
 			depthAttachment = new MetalRenderPass.DepthAttachment(
 				depthView.texture().metal(),
 				depthView.baseMipLevel(),
@@ -131,15 +112,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 				depth.clearValue().orElse(1.0)
 			);
 		}
-		if (firstColorView == null && depthView == null) {
-			throw new UnsupportedOperationException("Direct Metal requires at least one render attachment");
-		}
-		int renderTargetArrayLength = firstColorView == null && depthView != null
-			&& MetalShaderEngine.isLayeredShadowAttachment(depthView.texture())
-			? depthView.texture().getDepthOrLayers() : 0;
-		MetalRenderPass.Descriptor next = new MetalRenderPass.Descriptor(
-			colorAttachments, depthAttachment, renderTargetArrayLength
-		);
+		MetalRenderPass.Descriptor next = new MetalRenderPass.Descriptor(colorAttachment, depthAttachment);
 		if (PASS_MERGING && this.deferredRenderPass != null && canMerge(this.deferredDescriptor, next)) {
 			// Continue into the encoder the previous pass left open, so its attachments are never
 			// resolved out and loaded back in.
@@ -156,8 +129,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		RenderPass.RenderArea area = descriptor.renderArea;
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
 		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
-		MetalGpuTextureView sizeView = firstColorView != null ? firstColorView : depthView;
-		this.renderPassBackend.reset(this.renderPass, area, sizeView.getWidth(0), sizeView.getHeight(0), depthAttachment != null);
+		this.renderPassBackend.reset(this.renderPass, area, colorView.getWidth(0), colorView.getHeight(0), depthAttachment != null);
 		return this.renderPassBackend;
 	}
 
@@ -187,28 +159,15 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (open == null || next == null) {
 			return false;
 		}
-		if (open.colorAttachments().size() != next.colorAttachments().size()) {
-			return false;
+		MetalRenderPass.ColorAttachment openColor = open.colorAttachment();
+		MetalRenderPass.ColorAttachment nextColor = next.colorAttachment();
+		if (openColor == null || nextColor == null) {
+			return openColor == nextColor;
 		}
-		for (int index = 0; index < open.colorAttachments().size(); index++) {
-			MetalRenderPass.ColorAttachment openColor = open.colorAttachments().get(index);
-			MetalRenderPass.ColorAttachment nextColor = next.colorAttachments().get(index);
-			if (openColor == null || nextColor == null) {
-				if (openColor != nextColor) {
-					return false;
-				}
-				continue;
-			}
-			boolean memoryless = openColor.target() instanceof MetalTexture texture && texture.isMemoryless();
-			MetalRenderPass.LoadAction continuingLoad = memoryless
-				? MetalRenderPass.LoadAction.DONT_CARE : MetalRenderPass.LoadAction.LOAD;
-			MetalRenderPass.StoreAction continuingStore = memoryless
-				? MetalRenderPass.StoreAction.DONT_CARE : MetalRenderPass.StoreAction.STORE;
-			if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel()
-				|| nextColor.loadAction() != continuingLoad
-				|| openColor.storeAction() != continuingStore) {
-				return false;
-			}
+		if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel()
+			|| nextColor.loadAction() != MetalRenderPass.LoadAction.LOAD
+			|| openColor.storeAction() != MetalRenderPass.StoreAction.STORE) {
+			return false;
 		}
 		MetalRenderPass.DepthAttachment openDepth = open.depthAttachment();
 		MetalRenderPass.DepthAttachment nextDepth = next.depthAttachment();
@@ -291,7 +250,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		// A depth-only pass. This previously created a full-size BGRA scratch render target for every
 		// clear purely to satisfy the descriptor, which at 3840x2160 allocated and released 33 MB of
 		// texture per call on the render path.
-		try (MetalRenderPass _ = this.commands().beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
+		try (MetalRenderPass pass = this.commands().beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
 			new MetalRenderPass.DepthAttachment(depth.metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth)
 		), MetalPassCensus.kindFor("(depth clear)"))) {
 			// Beginning and ending the pass performs the clear.
@@ -452,21 +411,6 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.commands().present(drawable);
 	}
 
-	void renderShaderPack(final MetalShaderEngine engine, final MetalTexture texture, final MetalDrawable drawable) {
-		MetalCommandBuffer commands = this.commands();
-		// A pack whose graph begins in the world has nothing to composite on a screen with no world
-		// behind it, and says so rather than presenting an empty G-buffer.
-		if (!engine.encode(commands, texture, drawable)) {
-			commands.blitToDrawable(texture, drawable);
-		}
-		commands.present(drawable);
-	}
-
-	/** Consumes a pending memoryless G-buffer before forward or non-render work ends its encoder. */
-	void resolveShaderPackOpaque(final MetalShaderEngine engine) {
-		this.resolvePendingOpaque(engine);
-	}
-
 	void finishPendingWork() {
 		this.finishSubmission(true);
 	}
@@ -485,7 +429,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		MetalRenderPass.DepthAttachment depthAttachment = depthTexture == null ? null : new MetalRenderPass.DepthAttachment(
 			requireTexture(depthTexture).metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth
 		);
-		try (MetalRenderPass _ = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(
+		try (MetalRenderPass pass = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(
 			MetalRenderPass.ColorAttachment.clear(color.metal(), clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w()), depthAttachment
 		))) {
 			// Beginning and ending the pass performs the clear.
@@ -503,24 +447,13 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	 */
 	private MetalCommandBuffer commands() {
 		if (this.closed) throw new IllegalStateException("Metal command encoder is closed");
-		this.resolvePendingOpaque(this.device.shaderEngine());
 		this.endDeferredRenderPass();
 		if (this.commands == null) this.commands = this.commandQueue.createCommandBuffer();
 		return this.commands;
 	}
 
-	private void resolvePendingOpaque(final MetalShaderEngine engine) {
-		MetalRenderPass deferred = this.deferredRenderPass;
-		if (engine != null && deferred != null && engine.encodeDeferredResolve(deferred)) {
-			this.deferredRenderPass = null;
-			this.deferredDescriptor = null;
-			deferred.close();
-		}
-	}
-
 	private void finishSubmission(final boolean wait) {
 		if (this.renderPass != null) throw new IllegalStateException("Cannot submit with an active Metal render pass");
-		this.resolvePendingOpaque(this.device.shaderEngine());
 		this.endDeferredRenderPass();
 		MetalCommandBuffer submitted = this.commands;
 		boolean completed = wait || !this.completionCallbacks.isEmpty();

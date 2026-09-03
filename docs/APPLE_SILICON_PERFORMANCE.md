@@ -679,45 +679,6 @@ FPS, and the traversal repeats did not overlap. That is recorded only as a reaso
 is not a result**: the two runs come from different pairs, which is exactly the cross-session
 comparison this document's own methodology forbids.
 
-### Shader-engine Phase 6: controlled mechanism measurements
-
-Phase 6 adds `shaderPhaseSixBenchmark`, a GPU-only A/B harness for the three shader mechanisms that
-cannot be isolated from a world capture without building a second renderer. Each pair is warmed 20
-times, alternated A/B for 100 samples inside each repeat, and reported as the median sample from each
-of three repeats followed by the median repeat. The target is 1920x1080, with a 2048-square,
-four-layer cascade target, on the M4 Max. The metric is the command buffer's
-`GPUStartTime`/`GPUEndTime`, not CPU submission time or overlapping pass spans.
-
-| Mechanism | Phase 6 path | Control | Change | Repeat spread, path/control |
-|---|---:|---:|---:|---:|
-| Memoryless G-buffer + in-encoder resolve | **0.0325 ms** | 0.1326 ms stored G-buffer + sampled second pass | **-75.5%** | 3.1% / 5.3% |
-| One layered cascade encoder | 0.0662 ms | **0.0612 ms** across four slice encoders | **+8.1%** | 3.4% / 1.8% |
-| Three-stage compute bloom | **0.0395 ms** | 0.0465 ms fragment ping-pong | **-15.0%** | 3.8% / 0.4% |
-
-The tile-memory hypothesis is decisively supported at this resolution, and compute bloom clears the
-8-10% historical run spread. The layered-cascade GPU hypothesis is not supported: for identical
-full-target depth work, the one layered encoder is slightly slower. Layering remains useful because
-the live renderer submits the world once instead of replaying its Java draw traversal four times,
-but it must not be described as a measured GPU win.
-
-The real-world harness now accepts `-PmetalBenchmarkLabel=...`, records `shaderPack` in its JSON, and
-writes one file per label instead of overwriting the preceding configuration. Matching pack-on and
-vanilla-Metal captures were taken at 1920x1080, 12 chunks, 100 ticks per phase and three repeats.
-Both were compositor-paced to 120 Hz in every repeat, so average FPS is deliberately not compared.
-The pack's median p50 CPU cost was 2.271/2.319/2.174 ms for stationary/pan/traversal, versus
-0.413/0.504/0.511 ms without it: the current pack adds 1.66-1.86 ms of render-thread work. Reported
-`GPU_FRAME` occupancy was lower with the pack, but this document already proved that metric absorbs
-presentation retirement while paced, so treating it as a GPU win would contradict the harness's own
-warning. The whole-pack frame-rate result is therefore **inconclusive because of compositor pacing**,
-not zero cost and not a win.
-
-The planned OpenGL/Iris row is not a runnable comparison in this repository. The shader engine is
-MSL-only by design, Iris/GLSL import is an explicit non-goal, and there is no Iris pack with the same
-passes, options and image quality. Vanilla OpenGL would compare different rendering rather than a
-different backend, while choosing an unrelated Iris pack would add an uncontrolled workload. Phase
-6 records that gap instead of manufacturing a number. A future cross-backend claim requires a
-separately authored, visually matched Iris fixture and is outside the shader-engine implementation.
-
 ## Ranked implementation plan
 
 Current status of each item, and the work that is open now, is tracked in [NEXT_STEPS.md](NEXT_STEPS.md). Some descriptions below predate later changes; that file names which.

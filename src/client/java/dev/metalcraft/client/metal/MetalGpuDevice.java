@@ -47,11 +47,8 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	private final MetalCommandQueue commandQueue;
 	private final MetalCommandEncoder commandEncoder;
 	private final DeviceInfo deviceInfo;
-	private final MetalShaderEngine shaderEngine;
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> pipelineCache = new IdentityHashMap<>();
 	private final Map<ShaderKey, String> shaderSourceCache = new HashMap<>();
-	/** Pipelines whose programs the shader engine supplies as MSL; see {@link #registerNativePipeline}. */
-	private final Map<RenderPipeline, NativeProgram> nativePipelines = new IdentityHashMap<>();
 	// Triangle-fan indices are a pure function of vertex count, and the pattern for a large fan
 	// contains the pattern for every smaller one as a prefix. One buffer filled once therefore
 	// serves every fan draw, replacing a create-map-fill-destroy cycle that ran per draw call.
@@ -67,10 +64,6 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	private MetalRegionClear regionClear;
 
 	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource) {
-		this(metal, defaultShaderSource, false);
-	}
-
-	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource, final boolean enableShaderEngine) {
 		this.metal = metal;
 		this.defaultShaderSource = defaultShaderSource;
 		this.commandQueue = metal.createCommandQueue();
@@ -81,40 +74,17 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			true,
 			"Metal",
 			1.0F,
-			// Eight colour attachments, which is Metal's limit and Blaze3D's own: the pass layer has
-			// carried a positional list of that length since the G-buffer work, and Blaze3D rejects a
-			// descriptor wider than what the device reports, so understating it here would make a
-			// multiple-render-target pass unreachable from above the backend.
-			new DeviceLimits(
-				16, 256, 16384, Math.max(1L, metal.recommendedWorkingSetBytes()),
-				Integer.MAX_VALUE, MetalRenderPass.MAX_COLOR_ATTACHMENTS
-			),
+			new DeviceLimits(16, 256, 16384, Math.max(1L, metal.recommendedWorkingSetBytes()), Integer.MAX_VALUE, 1),
 			new DeviceFeatures(true, true, true, true, true, true, true),
 			Set.of("Metal"),
 			new HintsAndWorkarounds(false, false),
 			DeviceType.INTEGRATED
 		);
 		this.commandEncoder = new MetalCommandEncoder(this, this.commandQueue);
-		this.shaderEngine = enableShaderEngine ? MetalShaderEngine.createDefault(metal) : null;
-		if (this.shaderEngine != null) {
-			this.shaderEngine.attachDevice(this);
-		}
 	}
 
 	MetalDevice metal() {
 		return this.metal;
-	}
-
-	MetalShaderEngine shaderEngine() {
-		return this.shaderEngine;
-	}
-
-	MetalTransientMemory transientMemory() {
-		return this.commandEncoder.transientMemory();
-	}
-
-	void resolveShaderPackOpaque(final MetalShaderEngine engine) {
-		this.commandEncoder.resolveShaderPackOpaque(engine);
 	}
 
 	MetalRegionClear regionClear() {
@@ -124,58 +94,6 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 
 	MetalCompiledRenderPipeline getOrCompilePipeline(final RenderPipeline pipeline) {
 		return this.pipelineCache.computeIfAbsent(pipeline, ignored -> this.compilePipeline(pipeline, this.defaultShaderSource));
-	}
-
-	/**
-	 * Declares that a Blaze3D pipeline's programs are the pack's MSL rather than Minecraft's GLSL.
-	 *
-	 * <p>The shader engine builds a stand-in pipeline for each vanilla one it substitutes, carrying
-	 * the same bind-group layouts and vertex bindings so every name the caller binds resolves to the
-	 * same Metal slot. Only the programs differ, and they never existed as GLSL, so
-	 * {@link #compilePipeline} has to be told to skip the translator rather than fail looking for
-	 * shader sources that are not in any resource pack.
-	 */
-	void registerNativePipeline(final RenderPipeline pipeline, final NativeProgram program) {
-		if (pipeline == null || program == null) {
-			throw new NullPointerException("A native Metal pipeline needs both a Blaze3D pipeline and a program");
-		}
-		this.nativePipelines.put(pipeline, program);
-	}
-
-	/** Releases one pack stand-in without disturbing the other active world bindings. */
-	void forgetNativePipeline(final RenderPipeline pipeline) {
-		this.nativePipelines.remove(pipeline);
-		MetalCompiledRenderPipeline compiled = this.pipelineCache.remove(pipeline);
-		if (compiled != null) {
-			compiled.close();
-		}
-	}
-
-	/** Drops registered stand-ins and their compiled state, so a pack switch cannot reuse either. */
-	void forgetNativePipelines() {
-		for (RenderPipeline pipeline : this.nativePipelines.keySet()) {
-			MetalCompiledRenderPipeline compiled = this.pipelineCache.remove(pipeline);
-			if (compiled != null) {
-				compiled.close();
-			}
-		}
-		this.nativePipelines.clear();
-	}
-
-	/**
-	 * One pack program, already MSL, named by its two entry points in a single source unit.
-	 *
-	 * <p>It carries the pack's own pipeline cache rather than compiling against the device directly,
-	 * so a substituted world pipeline is served from the same persistent binary archive as the
-	 * pack's fullscreen ones. Compiling it here instead would leave the largest programs the pack
-	 * has - one per vanilla world pipeline - rebuilt from source on every launch.
-	 */
-	record NativeProgram(MetalPipelineCache cache, String source, String vertexFunction, String fragmentFunction) {
-		NativeProgram {
-			if (cache == null || source == null || vertexFunction == null || fragmentFunction == null) {
-				throw new NullPointerException("A native Metal program needs a cache, a source and both entry points");
-			}
-		}
 	}
 
 	@Override
@@ -288,9 +206,6 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		this.commandEncoder.finishPendingWork();
 		this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 		this.pipelineCache.clear();
-		if (this.shaderEngine != null) {
-			this.shaderEngine.reload();
-		}
 	}
 
 	@Override
@@ -298,9 +213,6 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		if (!this.closed) {
 			this.closed = true;
 			this.commandEncoder.close();
-			if (this.shaderEngine != null) {
-				this.shaderEngine.close();
-			}
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.pipelineCache.clear();
 			if (this.regionClear != null) {
@@ -386,10 +298,6 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	}
 
 	private MetalCompiledRenderPipeline compilePipeline(final RenderPipeline pipeline, final ShaderSource shaderSource) {
-		NativeProgram program = this.nativePipelines.get(pipeline);
-		if (program != null) {
-			return this.compileNativePipeline(pipeline, program);
-		}
 		String vertex = this.resolveShader(pipeline.getVertexShader(), ShaderType.VERTEX, pipeline.getShaderDefines(), shaderSource);
 		String fragment = this.resolveShader(pipeline.getFragmentShader(), ShaderType.FRAGMENT, pipeline.getShaderDefines(), shaderSource);
 		if (vertex == null || fragment == null) {
@@ -422,46 +330,6 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			return new MetalCompiledRenderPipeline(pipeline, withDepth, withoutDepth, shaders);
 		} catch (RuntimeException error) {
 			LOGGER.error("Couldn't compile direct Metal pipeline {}", pipeline.getLocation(), error);
-			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
-		}
-	}
-
-	/**
-	 * Compiles a pack-supplied MSL program against a vanilla pipeline's fixed-function state.
-	 *
-	 * <p>The stage masks are left unresolved, which makes every slot claim both stages. The masks
-	 * exist to skip an encoder call for a stage that does not read a slot; claiming both is what the
-	 * backend did before it could tell them apart, so it costs a redundant bind and is never wrong.
-	 */
-	private MetalCompiledRenderPipeline compileNativePipeline(final RenderPipeline pipeline, final NativeProgram program) {
-		MetalRenderPipeline withoutDepth = null;
-		try {
-			MetalRenderPipeline.Descriptor descriptor = Blaze3DMetalMappings.pipelineDescriptor(
-				pipeline, program.source(), program.vertexFunction(), program.source(), program.fragmentFunction()
-			);
-			// A layered shadow pipeline is deliberately depth-only. Metal has no useful depthless
-			// variant for it, but Blaze3D's compiled-pipeline wrapper expects both handles to be valid;
-			// sharing the depth handle is safe because such a pipeline can only match a depth pass.
-			if (descriptor.colorTargets().isEmpty()) {
-				MetalRenderPipeline withDepth = program.cache().createRenderPipeline(descriptor);
-				return new MetalCompiledRenderPipeline(pipeline, withDepth, withDepth, null);
-			}
-			withoutDepth = program.cache().createRenderPipeline(new MetalRenderPipeline.Descriptor(
-				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
-				descriptor.colorTargets(), null, descriptor.vertexDescriptor(), MetalRenderPipeline.DepthState.DISABLED,
-				descriptor.rasterState()
-			));
-			MetalRenderPipeline.Descriptor depthDescriptor = pipeline.wantsDepthTexture() ? descriptor : new MetalRenderPipeline.Descriptor(
-				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
-				descriptor.colorTargets(), MetalTexture.Format.DEPTH32_FLOAT, descriptor.vertexDescriptor(), descriptor.depthState(),
-				descriptor.rasterState()
-			);
-			return new MetalCompiledRenderPipeline(pipeline, program.cache().createRenderPipeline(depthDescriptor), withoutDepth, null);
-		} catch (RuntimeException error) {
-			if (withoutDepth != null) {
-				withoutDepth.close();
-			}
-			LOGGER.error("Couldn't compile shader-pack Metal pipeline {}", pipeline.getLocation(), error);
 			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
 		}
 	}

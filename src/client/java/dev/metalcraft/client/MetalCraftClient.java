@@ -8,7 +8,6 @@ import dev.metalcraft.api.MetalCraftShaderContext;
 import dev.metalcraft.api.MetalCraftShaderExtension;
 import dev.metalcraft.api.MetalCraftShaderRegistry;
 import dev.metalcraft.api.MetalCraftShaders;
-import dev.metalcraft.api.MetalCraftLights;
 import java.util.List;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -35,7 +34,7 @@ public final class MetalCraftClient implements ClientModInitializer {
 		}
 
 		MetalCraftShaderRegistry registry = MetalCraftShaders.registry();
-		MetalCraftShaderContext context = new MetalCraftShaderContext(info, registry, MetalCraftLights.registry());
+		MetalCraftShaderContext context = new MetalCraftShaderContext(info, registry);
 		List<MetalCraftShaderExtension> extensions = FabricLoader.getInstance().getEntrypoints(SHADER_ENTRYPOINT, MetalCraftShaderExtension.class);
 		for (MetalCraftShaderExtension extension : extensions) {
 			extension.registerShaders(context);

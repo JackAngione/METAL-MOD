@@ -48,9 +48,6 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 				config.width(), config.height(), config.presentMode(), this.displaySyncEnabled,
 				MetalCraftConfig.unlockedFrameRate());
 			MetalSurfaceProbe.configured(config.width(), config.height());
-			if (this.device.shaderEngine() != null) {
-				this.device.shaderEngine().resize(config.width(), config.height());
-			}
 			this.configured = true;
 		} catch (RuntimeException error) {
 			throw new SurfaceException("Metal could not configure the window surface: " + error.getMessage());
@@ -89,11 +86,7 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		if (this.drawable == null) {
 			throw new IllegalStateException("Metal surface has no acquired drawable");
 		}
-		if (this.device.shaderEngine() == null) {
-			metalEncoder.blitToDrawable(metalView.texture().metal(), this.drawable);
-		} else {
-			metalEncoder.renderShaderPack(this.device.shaderEngine(), metalView.texture().metal(), this.drawable);
-		}
+		metalEncoder.blitToDrawable(metalView.texture().metal(), this.drawable);
 	}
 
 	@Override

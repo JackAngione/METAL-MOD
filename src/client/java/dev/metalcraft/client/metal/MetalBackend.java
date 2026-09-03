@@ -13,18 +13,6 @@ import org.lwjgl.glfw.GLFW;
 
 /** Minecraft backend entry point for MetalCraft's direct Metal renderer. */
 public final class MetalBackend implements GpuBackend {
-	/**
-	 * Whether the first-party shader pack loads at all.
-	 *
-	 * <p>A kill switch rather than a setting, for the reason the command-batching and pass-merging
-	 * ones exist: turning it off restores the renderer exactly as it was before the pack, which is
-	 * what makes the two comparable back to back in one session - the only comparison this
-	 * renderer's run-to-run spread admits. It is also how a screenshot of the world without the
-	 * pack is taken, since Minecraft's own screenshot reads the main render target rather than the
-	 * drawable and therefore cannot see the pack's last pass either way.
-	 */
-	private static final boolean SHADER_PACK = Boolean.parseBoolean(System.getProperty("metalcraft.shaderPack", "true"));
-
 	@Override
 	public String getName() {
 		return "Metal";
@@ -59,7 +47,7 @@ public final class MetalBackend implements GpuBackend {
 		}
 		MetalDevice metal = MetalNative.openDefaultDevice().orElseThrow(() -> failure("Metal did not provide a default device", null));
 		try {
-			return new GpuDevice(new MetalGpuDevice(metal, defaultShaderSource, SHADER_PACK), criticalShaderLoader);
+			return new GpuDevice(new MetalGpuDevice(metal, defaultShaderSource), criticalShaderLoader);
 		} catch (RuntimeException error) {
 			metal.close();
 			throw failure("MetalCraft could not create its Blaze3D device adapter", error);

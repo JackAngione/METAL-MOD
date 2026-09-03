@@ -219,33 +219,11 @@ public final class MetalRenderPipeline implements AutoCloseable {
 		}
 	}
 
-	/**
-	 * The primitive class a pipeline will be drawn with.
-	 *
-	 * <p>Metal infers this from the draw call unless the vertex stage writes
-	 * {@code [[render_target_array_index]]}, in which case the pipeline has to declare it up front,
-	 * because the layer is resolved before the primitive is assembled.
-	 */
-	public enum TopologyClass {
-		UNSPECIFIED,
-		POINT,
-		LINE,
-		TRIANGLE;
-
-		public int nativeCode() {
-			return this.ordinal();
-		}
-	}
-
-	public record RasterState(CullMode cullMode, FillMode fillMode, TopologyClass topologyClass) {
-		public static final RasterState DEFAULT = new RasterState(CullMode.NONE, FillMode.FILL, TopologyClass.UNSPECIFIED);
-
-		public RasterState(final CullMode cullMode, final FillMode fillMode) {
-			this(cullMode, fillMode, TopologyClass.UNSPECIFIED);
-		}
+	public record RasterState(CullMode cullMode, FillMode fillMode) {
+		public static final RasterState DEFAULT = new RasterState(CullMode.NONE, FillMode.FILL);
 
 		public RasterState {
-			if (cullMode == null || fillMode == null || topologyClass == null) {
+			if (cullMode == null || fillMode == null) {
 				throw new NullPointerException("Metal raster state fields cannot be null");
 			}
 		}
@@ -302,11 +280,8 @@ public final class MetalRenderPipeline implements AutoCloseable {
 				throw new IllegalArgumentException("A Metal render pipeline requires a fragment function name");
 			}
 			colorTargets = List.copyOf(colorTargets);
-			if (colorTargets.size() > 8) {
-				throw new IllegalArgumentException("A Metal render pipeline accepts at most eight color target slots");
-			}
-			if (colorTargets.isEmpty() && depthStencilFormat == null) {
-				throw new IllegalArgumentException("A Metal render pipeline requires a color or depth-stencil target");
+			if (colorTargets.isEmpty() || colorTargets.size() > 8) {
+				throw new IllegalArgumentException("A Metal render pipeline requires between one and eight color target slots");
 			}
 			if (depthStencilFormat != null && !depthStencilFormat.hasDepthAspect() && !depthStencilFormat.hasStencilAspect()) {
 				throw new IllegalArgumentException("The Metal depth-stencil format has no depth or stencil aspect");
@@ -320,7 +295,7 @@ public final class MetalRenderPipeline implements AutoCloseable {
 		}
 
 		public MetalTexture.@Nullable Format colorFormat() {
-			return this.colorTargets.isEmpty() ? null : this.colorTargets.getFirst().format();
+			return this.colorTargets.getFirst().format();
 		}
 
 		public MetalTexture.@Nullable Format depthFormat() {

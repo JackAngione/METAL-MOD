@@ -33,11 +33,10 @@ sourceSets {
 }
 
 processResources {
-	def version = project.version
-	inputs.property 'version', version
+	inputs.property 'version', project.version
 
 	filesMatching('fabric.mod.json') {
-		expand version: version
+		expand version: project.version
 	}
 }
 
@@ -57,10 +56,9 @@ tasks.register('compileMetalNative', Exec) {
 	commandLine 'xcrun', 'clang',
 		'-O3', '-fobjc-arc', '-fvisibility=hidden', '-dynamiclib',
 		'-arch', 'arm64', '-mmacosx-version-min=13.0',
-		'-Wall', '-Wextra', '-Wshadow', '-Wconversion', '-Wno-unused-parameter', '-Werror',
 		"-I${System.getProperty('java.home')}/include",
 		"-I${System.getProperty('java.home')}/include/darwin",
-		'-framework', 'Foundation', '-framework', 'Metal', '-framework', 'MetalFX', '-framework', 'QuartzCore', '-framework', 'AppKit',
+		'-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-framework', 'AppKit',
 		'src/native/metalcraft.m', '-o', metalNativeOutput.get().asFile.absolutePath
 }
 
@@ -70,41 +68,6 @@ tasks.register('shaderTranslationSmoke', JavaExec) {
 	onlyIf { isAppleSiliconBuild }
 	classpath = sourceSets.shaderSmoke.runtimeClasspath
 	mainClass = 'dev.metalcraft.client.metal.MetalShaderTranslationSmoke'
-}
-
-tasks.register('shaderPhaseSixBenchmark', JavaExec) {
-	dependsOn tasks.named('clientClasses')
-	dependsOn tasks.named('compileShaderSmokeJava')
-	onlyIf { isAppleSiliconBuild }
-	classpath = sourceSets.shaderSmoke.runtimeClasspath
-	mainClass = 'dev.metalcraft.client.metal.MetalPhaseSixBenchmark'
-	[
-		metalBenchmarkRepeats: 'metalcraft.benchmarkRepeats',
-		metalBenchmarkIterations: 'metalcraft.benchmarkIterations',
-		metalBenchmarkResolution: 'metalcraft.benchmarkResolution',
-		metalBenchmarkShadowSize: 'metalcraft.benchmarkShadowSize'
-	].each { gradleProperty, systemPropertyName ->
-		def value = providers.gradleProperty(gradleProperty)
-		if (value.isPresent()) {
-			systemProperty systemPropertyName, value.get()
-		}
-	}
-}
-
-tasks.register('localLightingBenchmark', JavaExec) {
-	dependsOn tasks.named('clientClasses')
-	dependsOn tasks.named('compileShaderSmokeJava')
-	onlyIf { isAppleSiliconBuild }
-	classpath = sourceSets.shaderSmoke.runtimeClasspath
-	mainClass = 'dev.metalcraft.client.metal.MetalLocalLightingBenchmark'
-	[
-		metalBenchmarkRepeats: 'metalcraft.benchmarkRepeats',
-		metalBenchmarkIterations: 'metalcraft.benchmarkIterations',
-		metalBenchmarkResolution: 'metalcraft.benchmarkResolution'
-	].each { gradleProperty, systemPropertyName ->
-		def value = providers.gradleProperty(gradleProperty)
-		if (value.isPresent()) systemProperty systemPropertyName, value.get()
-	}
 }
 
 tasks.named('check') {
@@ -122,15 +85,12 @@ def benchmarkProperties = [
 	metalBenchmarkMinimumOnePercentLow: 'metalcraft.benchmarkMinimumOnePercentLow',
 	metalBenchmarkMinimumVisibleSections: 'metalcraft.benchmarkMinimumVisibleSections',
 	metalBenchmarkRepeats: 'metalcraft.benchmarkRepeats',
-	metalBenchmarkLabel: 'metalcraft.benchmarkLabel',
 	// The command-batching kill switch and its checked ABI, so a run can be compared against the
 	// per-command path back to back rather than across sessions.
 	metalCommandBatching: 'metalcraft.commandBatching',
 	metalCheckedCommands: 'metalcraft.checkedCommands',
 	// The pass-merging kill switch, for the same back-to-back comparison.
-	metalPassMerging: 'metalcraft.passMerging',
-	// The shader-pack kill switch, likewise.
-	metalShaderPack: 'metalcraft.shaderPack'
+	metalPassMerging: 'metalcraft.passMerging'
 ]
 
 tasks.named('runClient') {
@@ -165,32 +125,8 @@ processClientResources {
 	}
 }
 
-// Java 25 requires an explicit native-access grant for System.load, and JOML still uses sun.misc.Unsafe.
-def metalRuntimeJvmArgs = [
-	'--enable-native-access=ALL-UNNAMED',
-	'--sun-misc-unsafe-memory-access=allow'
-]
-
-tasks.withType(JavaExec).configureEach {
-	jvmArgs metalRuntimeJvmArgs
-}
-
 tasks.withType(JavaCompile).configureEach {
 	options.release = 25
-	options.encoding = 'UTF-8'
-	options.deprecation = true
-	options.compilerArgs += [
-		'-Xlint:all',
-		'-Xlint:-serial',
-		'-Xlint:-processing',
-		'-Xlint:-classfile'
-	]
-}
-
-tasks.named('compileShaderSmokeJava', JavaCompile).configure {
-	// Smoke tests close GPU passes before committing the command buffer they share a try-with-resources
-	// with; that explicit close is the lifetime, not a leak.
-	options.compilerArgs += ['-Xlint:-try']
 }
 
 java {
@@ -200,9 +136,8 @@ java {
 }
 
 jar {
-	def licenseSuffix = project.base.archivesName.get()
 	from('LICENSE') {
-		rename { original -> "${original}_${licenseSuffix}" }
+		rename { "${it}_${project.base.archivesName.get()}" }
 	}
 }
 

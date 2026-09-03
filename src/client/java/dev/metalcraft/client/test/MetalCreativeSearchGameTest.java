@@ -30,7 +30,7 @@ final class MetalCreativeSearchGameTest {
 		var worldBuilder = this.context.worldBuilder()
 			.adjustSettings(settings -> settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE));
 
-		try (TestSingleplayerContext _ = worldBuilder.create()) {
+		try (TestSingleplayerContext world = worldBuilder.create()) {
 			this.context.waitFor(client -> client.level != null && client.player != null);
 			this.context.waitTicks(20);
 			LOGGER.info("Metal creative search validation: world loaded");

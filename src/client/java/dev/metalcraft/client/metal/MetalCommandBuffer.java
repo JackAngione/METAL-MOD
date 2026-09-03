@@ -1,14 +1,11 @@
 package dev.metalcraft.client.metal;
 
-import java.util.List;
-
 /** An owned {@code MTLCommandBuffer} used to schedule and present one frame. */
 public final class MetalCommandBuffer implements AutoCloseable {
 	private final MetalCommandQueue commandQueue;
 	private long handle;
 	private boolean committed;
 	private MetalRenderPass activeRenderPass;
-	private MetalComputePass activeComputePass;
 
 	MetalCommandBuffer(final MetalCommandQueue commandQueue, final long handle) {
 		if (handle == 0L) {
@@ -77,23 +74,11 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		final long destinationOffset,
 		final long bytesPerRow
 	) {
-		this.copyTextureToBuffer(source, mipLevel, 0, destination, destinationOffset, bytesPerRow);
-	}
-
-	public synchronized void copyTextureToBuffer(
-		final MetalTexture source,
-		final int mipLevel,
-		final int arrayLayer,
-		final MetalBuffer destination,
-		final long destinationOffset,
-		final long bytesPerRow
-	) {
 		source.validateTransfer(mipLevel, bytesPerRow, destination.size(), destinationOffset);
 		MetalNative.nCopyTextureToBuffer(
 			this.requireEncodingHandle(),
 			source.requireOpenHandle(),
 			mipLevel,
-			arrayLayer,
 			destination.requireOpenHandle(),
 			destinationOffset,
 			bytesPerRow
@@ -183,44 +168,6 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		MetalNative.nWriteCommandTimestamp(this.requireEncodingHandle(), pool.requireOpenHandle(), index);
 	}
 
-	public synchronized MetalComputePass beginComputePass() {
-		return this.beginComputePass(MetalPassCensus.UNTIMED_KIND);
-	}
-
-	/** Begins a compute encoder whose GPU occupancy is charged to one pass-census label. */
-	public synchronized MetalComputePass beginComputePass(final int gpuTimingKind) {
-		if (this.activeRenderPass != null || this.activeComputePass != null) {
-			throw new IllegalStateException("A Metal pass is already active on this command buffer");
-		}
-		long passHandle = MetalNative.nBeginComputePass(this.requireEncodingHandle(), gpuTimingKind);
-		if (passHandle == 0L) {
-			throw new IllegalStateException("Metal did not create a compute command encoder");
-		}
-		MetalComputePass pass = new MetalComputePass(this, passHandle);
-		this.activeComputePass = pass;
-		return pass;
-	}
-
-	void encodeSpatialScale(
-		final MetalSpatialScaler scaler,
-		final MetalTexture input,
-		final MetalTexture output
-	) {
-		MetalNative.nEncodeSpatialScaleToTexture(
-			scaler.requireOpenHandle(), this.requireEncodingHandle(), input.requireOpenHandle(), output.requireOpenHandle()
-		);
-	}
-
-	void encodeSpatialScale(
-		final MetalSpatialScaler scaler,
-		final MetalTexture input,
-		final MetalDrawable output
-	) {
-		MetalNative.nEncodeSpatialScaleToDrawable(
-			scaler.requireOpenHandle(), this.requireEncodingHandle(), input.requireOpenHandle(), output.requireOpenHandle()
-		);
-	}
-
 	public synchronized MetalRenderPass beginRenderPass(final MetalRenderPass.Descriptor descriptor) {
 		return this.beginRenderPass(descriptor, MetalPassCensus.UNTIMED_KIND);
 	}
@@ -236,56 +183,41 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		if (descriptor == null) {
 			throw new NullPointerException("descriptor");
 		}
-		if (this.activeRenderPass != null || this.activeComputePass != null) {
-			throw new IllegalStateException("A Metal pass is already active on this command buffer");
+		if (this.activeRenderPass != null) {
+			throw new IllegalStateException("A Metal render pass is already active on this command buffer");
 		}
 
-		// One flat array per primitive type, strided by attachment index. A zero handle marks an
-		// index the pass leaves empty, which native code turns into an unattached Metal slot rather
-		// than an error, so the arrays stay dense while the layout stays positional.
-		List<MetalRenderPass.ColorAttachment> colors = descriptor.colorAttachments();
-		long[] colorTargetHandles = new long[colors.size()];
-		int[] colorFields = new int[colors.size() * MetalRenderPass.COLOR_FIELDS];
-		double[] colorClearValues = new double[colors.size() * MetalRenderPass.COLOR_CLEAR_COMPONENTS];
-		for (int index = 0; index < colors.size(); index++) {
-			MetalRenderPass.ColorAttachment color = colors.get(index);
-			if (color == null) {
-				continue;
-			}
-			boolean isDrawable = color.target() instanceof MetalDrawable;
+		MetalRenderPass.ColorAttachment color = descriptor.colorAttachment();
+		long colorTargetHandle = 0L;
+		boolean colorTargetIsDrawable = false;
+		if (color != null) {
 			if (color.target() instanceof MetalDrawable drawable) {
-				colorTargetHandles[index] = drawable.requireOpenHandle();
+				colorTargetHandle = drawable.requireOpenHandle();
+				colorTargetIsDrawable = true;
 			} else if (color.target() instanceof MetalTexture texture) {
-				colorTargetHandles[index] = texture.requireOpenHandle();
+				colorTargetHandle = texture.requireOpenHandle();
 			} else {
 				throw new IllegalArgumentException("Unsupported Metal color attachment target");
 			}
-			int field = index * MetalRenderPass.COLOR_FIELDS;
-			colorFields[field + MetalRenderPass.COLOR_FIELD_IS_DRAWABLE] = isDrawable ? 1 : 0;
-			colorFields[field + MetalRenderPass.COLOR_FIELD_MIP_LEVEL] = color.mipLevel();
-			colorFields[field + MetalRenderPass.COLOR_FIELD_LOAD_ACTION] = color.loadAction().ordinal();
-			colorFields[field + MetalRenderPass.COLOR_FIELD_STORE_ACTION] = color.storeAction().ordinal();
-			colorFields[field + MetalRenderPass.COLOR_FIELD_ARRAY_SLICE] = color.arraySlice();
-			int clear = index * MetalRenderPass.COLOR_CLEAR_COMPONENTS;
-			colorClearValues[clear] = color.clearRed();
-			colorClearValues[clear + 1] = color.clearGreen();
-			colorClearValues[clear + 2] = color.clearBlue();
-			colorClearValues[clear + 3] = color.clearAlpha();
 		}
 
 		MetalRenderPass.DepthAttachment depth = descriptor.depthAttachment();
 		long renderPassHandle = MetalNative.nBeginRenderPass(
 			this.requireEncodingHandle(),
-			colorTargetHandles,
-			colorFields,
-			colorClearValues,
+			colorTargetHandle,
+			colorTargetIsDrawable,
+			color == null ? 0 : color.mipLevel(),
+			color == null ? 0 : color.loadAction().ordinal(),
+			color == null ? 0 : color.storeAction().ordinal(),
+			color == null ? 0.0 : color.clearRed(),
+			color == null ? 0.0 : color.clearGreen(),
+			color == null ? 0.0 : color.clearBlue(),
+			color == null ? 0.0 : color.clearAlpha(),
 			depth == null ? 0L : depth.texture().requireOpenHandle(),
 			depth == null ? 0 : depth.mipLevel(),
-			depth == null ? 0 : depth.arraySlice(),
 			depth == null ? 0 : depth.loadAction().ordinal(),
 			depth == null ? 0 : depth.storeAction().ordinal(),
 			depth == null ? 1.0 : depth.clearDepth(),
-			descriptor.renderTargetArrayLength(),
 			gpuTimingKind
 		);
 		if (renderPassHandle == 0L) {
@@ -300,8 +232,8 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		if (this.committed) {
 			throw new IllegalStateException("Metal command buffer is already committed");
 		}
-		if (this.activeRenderPass != null || this.activeComputePass != null) {
-			throw new IllegalStateException("End the active Metal pass before committing its command buffer");
+		if (this.activeRenderPass != null) {
+			throw new IllegalStateException("End the active Metal render pass before committing its command buffer");
 		}
 		MetalNative.nCommitCommandBuffer(this.requireOpenHandle());
 		this.committed = true;
@@ -334,16 +266,11 @@ public final class MetalCommandBuffer implements AutoCloseable {
 	@Override
 	public void close() {
 		MetalRenderPass renderPass;
-		MetalComputePass computePass;
 		synchronized (this) {
 			renderPass = this.activeRenderPass;
-			computePass = this.activeComputePass;
 		}
 		if (renderPass != null) {
 			renderPass.close();
-		}
-		if (computePass != null) {
-			computePass.close();
 		}
 		synchronized (this) {
 			if (this.handle == 0L) {
@@ -361,12 +288,6 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		}
 	}
 
-	synchronized void forget(final MetalComputePass computePass) {
-		if (this.activeComputePass == computePass) {
-			this.activeComputePass = null;
-		}
-	}
-
 	private long requireOpenHandle() {
 		if (this.handle == 0L) {
 			throw new IllegalStateException("Metal command buffer is closed");
@@ -378,8 +299,8 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		if (this.committed) {
 			throw new IllegalStateException("Cannot encode commands after committing a Metal command buffer");
 		}
-		if (this.activeRenderPass != null || this.activeComputePass != null) {
-			throw new IllegalStateException("End the active Metal pass before encoding another command");
+		if (this.activeRenderPass != null) {
+			throw new IllegalStateException("End the active Metal render pass before encoding another command");
 		}
 		return this.requireOpenHandle();
 	}

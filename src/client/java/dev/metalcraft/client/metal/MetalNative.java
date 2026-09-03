@@ -16,7 +16,6 @@ public final class MetalNative {
 	private MetalNative() {
 	}
 
-	@SuppressWarnings("restricted")
 	public static synchronized boolean load() {
 		if (loaded) {
 			return true;
@@ -113,7 +112,7 @@ public final class MetalNative {
 
 	static native void nCopyBufferToTexture(long commandBufferHandle, long sourceHandle, long sourceOffset, long bytesPerRow, long textureHandle, int mipLevel);
 
-	static native void nCopyTextureToBuffer(long commandBufferHandle, long textureHandle, int mipLevel, int arrayLayer, long destinationHandle, long destinationOffset, long bytesPerRow);
+	static native void nCopyTextureToBuffer(long commandBufferHandle, long textureHandle, int mipLevel, long destinationHandle, long destinationOffset, long bytesPerRow);
 
 	static native void nCopyBufferToTextureRegion(
 		long commandBufferHandle,
@@ -179,7 +178,6 @@ public final class MetalNative {
 
 	static native int nCommandBufferRetainedResourceCount(long commandBufferHandle);
 
-	/** @param memoryless whether the texture lives only in tile memory, with no device allocation */
 	static native long nCreateTexture(
 		long deviceHandle,
 		int format,
@@ -188,8 +186,7 @@ public final class MetalNative {
 		int depthOrLayers,
 		int mipLevels,
 		int usage,
-		boolean cubemap,
-		boolean memoryless
+		boolean cubemap
 	);
 
 	static native long nCreateTextureView(long textureHandle, int baseMipLevel, int mipLevels);
@@ -227,95 +224,33 @@ public final class MetalNative {
 		float depthBiasConstant,
 		int cullMode,
 		int fillMode,
-		int topologyClass,
 		int[] attributeLocations,
 		int[] attributeBufferIndices,
 		int[] attributeOffsets,
 		int[] attributeFormats,
 		int[] layoutBufferIndices,
 		int[] layoutStrides,
-		int[] layoutStepRates,
-		String archivePath,
-		boolean archiveWarm
+		int[] layoutStepRates
 	);
 
-	/**
-	 * @param colorTargetHandles one handle per color attachment index; zero leaves that index empty
-	 * @param colorFields {@code MetalRenderPass.COLOR_FIELDS} entries per index
-	 * @param colorClearValues {@code MetalRenderPass.COLOR_CLEAR_COMPONENTS} entries per index
-	 */
 	static native long nBeginRenderPass(
 		long commandBufferHandle,
-		long[] colorTargetHandles,
-		int[] colorFields,
-		double[] colorClearValues,
+		long colorTargetHandle,
+		boolean colorTargetIsDrawable,
+		int colorMipLevel,
+		int colorLoadAction,
+		int colorStoreAction,
+		double clearRed,
+		double clearGreen,
+		double clearBlue,
+		double clearAlpha,
 		long depthTargetHandle,
 		int depthMipLevel,
-		int depthArraySlice,
 		int depthLoadAction,
 		int depthStoreAction,
 		double clearDepth,
-		int renderTargetArrayLength,
 		int gpuTimingKind
 	);
-
-	static native long nCreateComputePipeline(
-		long deviceHandle,
-		String source,
-		String functionName,
-		String archivePath,
-		boolean archiveWarm
-	);
-
-	static native int nComputePipelineMaxThreadsPerThreadgroup(long pipelineHandle);
-
-	static native int nComputePipelineThreadExecutionWidth(long pipelineHandle);
-
-	static native void nReleaseComputePipeline(long pipelineHandle);
-
-	static native long nBeginComputePass(long commandBufferHandle, int gpuTimingKind);
-
-	static native void nSetComputePipeline(long passHandle, long pipelineHandle);
-
-	static native void nSetComputeBuffer(long passHandle, int index, long bufferHandle, long offset);
-
-	static native void nSetComputeTexture(long passHandle, int index, long textureViewHandle);
-
-	static native void nSetComputeSampler(long passHandle, int index, long samplerHandle);
-
-	static native void nDispatchThreadgroups(
-		long passHandle,
-		int groupsX,
-		int groupsY,
-		int groupsZ,
-		int threadsX,
-		int threadsY,
-		int threadsZ
-	);
-
-	static native void nEndComputePass(long passHandle);
-
-	static native boolean nSupportsSpatialScaler(long deviceHandle);
-
-	static native long nCreateSpatialScaler(
-		long deviceHandle,
-		int inputFormat,
-		int inputWidth,
-		int inputHeight,
-		int outputFormat,
-		int outputWidth,
-		int outputHeight
-	);
-
-	static native void nEncodeSpatialScaleToTexture(
-		long scalerHandle, long commandBufferHandle, long inputHandle, long outputHandle
-	);
-
-	static native void nEncodeSpatialScaleToDrawable(
-		long scalerHandle, long commandBufferHandle, long inputHandle, long outputHandle
-	);
-
-	static native void nReleaseSpatialScaler(long scalerHandle);
 
 	static native void nSetRenderPipeline(long renderPassHandle, long pipelineHandle);
 
