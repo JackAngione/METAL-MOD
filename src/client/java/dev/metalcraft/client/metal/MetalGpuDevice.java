@@ -42,7 +42,7 @@ import net.minecraft.client.renderer.ShaderDefines;
 import net.minecraft.resources.Identifier;
 
 /** Deep Blaze3D device adapter owning all direct-Metal implementation details. */
-final class MetalGpuDevice implements GpuDeviceBackend {
+public final class MetalGpuDevice implements GpuDeviceBackend {
 	private static final Logger LOGGER = LogUtils.getLogger();
 	private final ShaderSource defaultShaderSource;
 	private final MetalDevice metal;
@@ -50,6 +50,7 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	private final MetalCommandEncoder commandEncoder;
 	private final DeviceInfo deviceInfo;
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> pipelineCache = new IdentityHashMap<>();
+	private final Map<RenderPipeline, NativeProgram> nativePipelines = new IdentityHashMap<>();
 	private final Map<ShaderKey, String> shaderSourceCache = new HashMap<>();
 	// Triangle-fan indices are a pure function of vertex count, and the pattern for a large fan
 	// contains the pattern for every smaller one as a prefix. One buffer filled once therefore
@@ -77,7 +78,10 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			true,
 			"Metal",
 			1.0F,
-			new DeviceLimits(16, 256, 16384, Math.max(1L, metal.recommendedWorkingSetBytes()), Integer.MAX_VALUE, 1),
+			new DeviceLimits(
+				16, 256, 16384, Math.max(1L, metal.recommendedWorkingSetBytes()),
+				Integer.MAX_VALUE, MetalRenderPass.MAX_COLOR_ATTACHMENTS
+			),
 			new DeviceFeatures(true, true, true, true, true, true, true),
 			Set.of("Metal"),
 			new HintsAndWorkarounds(false, false),
@@ -86,7 +90,7 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		this.commandEncoder = new MetalCommandEncoder(this, this.commandQueue);
 		this.shaderPackRuntime = MetalCraftPlatform.isAppleSilicon()
 			&& !Boolean.getBoolean("metalcraft.shaders.disable")
-			? ShaderPackRuntime.createDefault(metal)
+			? ShaderPackRuntime.createDefault(this)
 			: null;
 	}
 
@@ -94,8 +98,67 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		return this.shaderPackRuntime;
 	}
 
-	MetalDevice metal() {
+	public MetalDevice metal() {
 		return this.metal;
+	}
+
+	public void setDeferredResolve(final @Nullable DeferredResolveHook hook) {
+		this.commandEncoder.setDeferredResolve(hook);
+	}
+
+	/**
+	 * Declares that a Blaze3D pipeline's programs are pack MSL rather than Minecraft's GLSL.
+	 */
+	public void registerNativePipeline(final RenderPipeline pipeline, final NativeProgram program) {
+		if (pipeline == null || program == null) {
+			throw new NullPointerException("A native Metal pipeline needs both a Blaze3D pipeline and a program");
+		}
+		this.nativePipelines.put(pipeline, program);
+	}
+
+	public void forgetNativePipeline(final RenderPipeline pipeline) {
+		this.nativePipelines.remove(pipeline);
+		MetalCompiledRenderPipeline compiled = this.pipelineCache.remove(pipeline);
+		if (compiled != null) {
+			compiled.close();
+		}
+	}
+
+	void forgetNativePipelines() {
+		for (RenderPipeline pipeline : this.nativePipelines.keySet()) {
+			MetalCompiledRenderPipeline compiled = this.pipelineCache.remove(pipeline);
+			if (compiled != null) {
+				compiled.close();
+			}
+		}
+		this.nativePipelines.clear();
+	}
+
+	public void resolveDeferredShaderPass() {
+		this.commandEncoder.flushDeferredResolve();
+	}
+
+	public MetalGpuTextureView wrapAttachment(final MetalTexture texture, final String label) {
+		int usage = texture.isMemoryless()
+			? GpuTexture.USAGE_RENDER_ATTACHMENT
+			: GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING;
+		GpuFormat format = Blaze3DMetalMappings.gpuFormat(texture.descriptor().format());
+		MetalGpuTexture gpu = new MetalGpuTexture(
+			usage, label, format,
+			texture.descriptor().width(), texture.descriptor().height(),
+			texture.descriptor().depthOrLayers(), texture.descriptor().mipLevels(),
+			texture
+		);
+		MetalTextureView view = texture.isMemoryless() ? null : texture.createView();
+		return new MetalGpuTextureView(gpu, 0, texture.descriptor().mipLevels(), view);
+	}
+
+	public record NativeProgram(String source, String vertexFunction, String fragmentFunction) {
+		public NativeProgram {
+			if (source == null || vertexFunction == null || fragmentFunction == null) {
+				throw new NullPointerException("A native Metal program needs a source and both entry points");
+			}
+		}
 	}
 
 	MetalRegionClear regionClear() {
@@ -320,6 +383,10 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	}
 
 	private MetalCompiledRenderPipeline compilePipeline(final RenderPipeline pipeline, final ShaderSource shaderSource) {
+		NativeProgram program = this.nativePipelines.get(pipeline);
+		if (program != null) {
+			return this.compileNativePipeline(pipeline, program);
+		}
 		String vertex = this.resolveShader(pipeline.getVertexShader(), ShaderType.VERTEX, pipeline.getShaderDefines(), shaderSource);
 		String fragment = this.resolveShader(pipeline.getFragmentShader(), ShaderType.FRAGMENT, pipeline.getShaderDefines(), shaderSource);
 		if (vertex == null || fragment == null) {
@@ -352,6 +419,34 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			return new MetalCompiledRenderPipeline(pipeline, withDepth, withoutDepth, shaders);
 		} catch (RuntimeException error) {
 			LOGGER.error("Couldn't compile direct Metal pipeline {}", pipeline.getLocation(), error);
+			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
+		}
+	}
+
+	private MetalCompiledRenderPipeline compileNativePipeline(final RenderPipeline pipeline, final NativeProgram program) {
+		MetalRenderPipeline withoutDepth = null;
+		try {
+			MetalRenderPipeline.Descriptor descriptor = Blaze3DMetalMappings.pipelineDescriptor(
+				pipeline, program.source(), program.vertexFunction(), program.source(), program.fragmentFunction()
+			);
+			withoutDepth = this.metal.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
+				descriptor.colorTargets(), null, descriptor.vertexDescriptor(), MetalRenderPipeline.DepthState.DISABLED,
+				descriptor.rasterState()
+			));
+			MetalRenderPipeline.Descriptor depthDescriptor = pipeline.wantsDepthTexture() ? descriptor : new MetalRenderPipeline.Descriptor(
+				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
+				descriptor.colorTargets(), MetalTexture.Format.DEPTH32_FLOAT, descriptor.vertexDescriptor(), descriptor.depthState(),
+				descriptor.rasterState()
+			);
+			return new MetalCompiledRenderPipeline(
+				pipeline, this.metal.createRenderPipeline(depthDescriptor), withoutDepth, null
+			);
+		} catch (RuntimeException error) {
+			if (withoutDepth != null) {
+				withoutDepth.close();
+			}
+			LOGGER.error("Couldn't compile shader-pack Metal pipeline {}", pipeline.getLocation(), error);
 			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
 		}
 	}

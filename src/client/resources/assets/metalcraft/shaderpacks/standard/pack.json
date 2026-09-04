@@ -3,6 +3,21 @@
   "name": "MetalCraft Standard",
   "includes": ["shared/options.metal"],
   "targets": {
+    "gbuffer_albedo": {
+      "format": "rgba8_unorm",
+      "scale": 1.0,
+      "lifetime": "transient"
+    },
+    "gbuffer_normal": {
+      "format": "rgba8_unorm",
+      "scale": 1.0,
+      "lifetime": "transient"
+    },
+    "gbuffer_light": {
+      "format": "rgba8_unorm",
+      "scale": 1.0,
+      "lifetime": "transient"
+    },
     "post_color": {
       "format": "bgra8_unorm",
       "scale": 1.0,
@@ -10,6 +25,21 @@
     }
   },
   "passes": [
+    {
+      "id": "gbuffer",
+      "kind": "geometry",
+      "source": "gbuffer.metal",
+      "geometry": "terrain,entities,blockentities",
+      "writes": ["scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light", "depth"]
+    },
+    {
+      "id": "resolve",
+      "kind": "fullscreen",
+      "source": "resolve.metal",
+      "merge_with": "gbuffer",
+      "tile_reads": ["scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light"],
+      "writes": ["scene"]
+    },
     {
       "id": "grade",
       "kind": "fullscreen",
@@ -41,7 +71,7 @@
       "id": "debug_view",
       "category": "debug",
       "type": "enum",
-      "values": ["off", "scene"],
+      "values": ["off", "scene", "albedo", "normal", "light"],
       "default": "off",
       "apply": "uniform"
     },

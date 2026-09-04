@@ -1,10 +1,11 @@
 package dev.metalcraft.client.metal;
 
+import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import org.jspecify.annotations.Nullable;
 
 /** Blaze3D texture-view adapter retaining its Metal view until explicitly closed. */
-final class MetalGpuTextureView extends GpuTextureView {
+public final class MetalGpuTextureView extends GpuTextureView {
 	private final @Nullable MetalTextureView metal;
 	private boolean closed;
 
@@ -18,6 +19,14 @@ final class MetalGpuTextureView extends GpuTextureView {
 			throw new IllegalStateException("A memoryless Metal texture cannot be sampled as a shader resource");
 		}
 		return this.metal;
+	}
+
+	public MetalTexture attachment() {
+		return this.texture().metal();
+	}
+
+	public GpuFormat gpuFormat() {
+		return super.texture().getFormat();
 	}
 
 	@Override

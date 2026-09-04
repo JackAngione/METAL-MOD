@@ -4,6 +4,7 @@
   "compatibilityLevel": "JAVA_25",
   "client": [
     "BlockableEventLoopDrainMixin",
+    "ChunkSectionsToRenderMixin",
     "BlockableEventLoopTaskCensusMixin",
     "CreativeModeInventoryScreenInvoker",
     "FramerateLimitBypassMixin",
@@ -13,6 +14,8 @@
     "MinecraftTickPhaseMixin",
     "OptionsSubScreenAccessor",
     "PreferredGraphicsApiMixin",
+    "PreparedFeatureFrameMixin",
+    "PreparedRenderTypeMixin",
     "ShaderManagerMixin",
     "VideoSettingsScreenMixin",
     "WindowFramebufferAccessor",

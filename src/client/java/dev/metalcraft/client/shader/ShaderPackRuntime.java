@@ -3,6 +3,7 @@ package dev.metalcraft.client.shader;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.api.MetalCraftShaderPackInfo;
 import dev.metalcraft.client.metal.MetalDevice;
+import dev.metalcraft.client.metal.MetalGpuDevice;
 import dev.metalcraft.client.metal.MetalTexture;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,7 +18,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-/** Selects, compiles, and allocates a Metal shader pack. Does not encode and has no world types. */
+/** Selects, compiles, and allocates a Metal shader pack. Does not encode. */
 public final class ShaderPackRuntime implements AutoCloseable {
 	public static final String BUILTIN_ID = "metalcraft-standard";
 	public static final String NONE_ID = "none";
@@ -26,6 +27,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 	private static volatile @Nullable ShaderPackRuntime active;
 
 	private final MetalDevice device;
+	private final @Nullable MetalGpuDevice gpuDevice;
 	private final Path shaderpacksRoot;
 	private final Path settingsPath;
 	private final ShaderPackSettings settings;
@@ -34,6 +36,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 	private @Nullable ShaderPack pack;
 	private ShaderGraphCompiler.@Nullable CompiledGraph graph;
 	private @Nullable MetalShaderFrameExecutor executor;
+	private @Nullable WorldGeometryAdapter worldGeometry;
 	private @Nullable String lastError;
 	private int width;
 	private int height;
@@ -45,6 +48,17 @@ public final class ShaderPackRuntime implements AutoCloseable {
 
 	/** @return a runtime, or null when {@code metalcraft.shaders.disable} is true */
 	public static @Nullable ShaderPackRuntime createDefault(final MetalDevice device) {
+		return createDefault(device, null);
+	}
+
+	public static @Nullable ShaderPackRuntime createDefault(final MetalGpuDevice gpuDevice) {
+		return createDefault(gpuDevice.metal(), gpuDevice);
+	}
+
+	private static @Nullable ShaderPackRuntime createDefault(
+		final MetalDevice device,
+		final @Nullable MetalGpuDevice gpuDevice
+	) {
 		if (Boolean.getBoolean("metalcraft.shaders.disable")) {
 			return null;
 		}
@@ -59,15 +73,25 @@ public final class ShaderPackRuntime implements AutoCloseable {
 			shaderpacksRoot = root.resolve("shaderpacks");
 			settingsPath = root.resolve("metalcraft-shaders.json");
 		}
-		return new ShaderPackRuntime(device, shaderpacksRoot, settingsPath);
+		return new ShaderPackRuntime(device, gpuDevice, shaderpacksRoot, settingsPath);
 	}
 
 	public ShaderPackRuntime(final MetalDevice device, final Path shaderpacksRoot, final Path settingsPath) {
+		this(device, null, shaderpacksRoot, settingsPath);
+	}
+
+	public ShaderPackRuntime(
+		final MetalDevice device,
+		final @Nullable MetalGpuDevice gpuDevice,
+		final Path shaderpacksRoot,
+		final Path settingsPath
+	) {
 		this.device = Objects.requireNonNull(device, "device");
+		this.gpuDevice = gpuDevice;
 		this.shaderpacksRoot = Objects.requireNonNull(shaderpacksRoot, "shaderpacksRoot").toAbsolutePath().normalize();
 		this.settingsPath = Objects.requireNonNull(settingsPath, "settingsPath").toAbsolutePath().normalize();
 		this.settings = ShaderPackSettings.load(this.settingsPath);
-		this.allocator = new ShaderTargetAllocator(device);
+		this.allocator = new ShaderTargetAllocator(device, gpuDevice);
 		try {
 			Files.createDirectories(this.shaderpacksRoot);
 		} catch (IOException error) {
@@ -190,7 +214,12 @@ public final class ShaderPackRuntime implements AutoCloseable {
 		this.width = width;
 		this.height = height;
 		if (this.isActive()) {
-			this.allocator.resize(width, height);
+			this.allocator.resize(this.graph, width, height);
+			if (this.worldGeometry != null) {
+				this.worldGeometry.refreshChannels();
+			} else {
+				this.rebuildWorldGeometry();
+			}
 		}
 	}
 
@@ -213,6 +242,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 	public synchronized void markFailed(final String message, final @Nullable Throwable error) {
 		this.lastError = message;
 		this.closeExecutor();
+		this.closeWorldGeometry();
 		this.allocator.release();
 		if (error == null) {
 			LOGGER.error("MetalCraft shader pack '{}': {}", this.settings.selectedPack(), message);
@@ -235,6 +265,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 			this.pack = null;
 			this.graph = null;
 			this.closeExecutor();
+			this.closeWorldGeometry();
 			this.allocator.release();
 			return;
 		}
@@ -258,6 +289,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 			}
 			this.rebuildExecutor();
 			this.allocateIfSized();
+			this.rebuildWorldGeometry();
 			long targetBytes = 0L;
 			MetalTexture post = this.allocator.target("post_color");
 			if (post != null) {
@@ -299,7 +331,74 @@ public final class ShaderPackRuntime implements AutoCloseable {
 
 	private void allocateIfSized() {
 		if (this.executor != null && this.width > 0 && this.height > 0) {
-			this.allocator.resize(this.width, this.height);
+			this.allocator.resize(this.graph, this.width, this.height);
+		}
+	}
+
+	private void rebuildWorldGeometry() {
+		this.closeWorldGeometry();
+		if (this.gpuDevice == null || this.pack == null || this.graph == null
+			|| this.width <= 0 || this.height <= 0) {
+			return;
+		}
+		ShaderGraphCompiler.CompiledPass geometry = null;
+		ShaderGraphCompiler.CompiledPass resolve = null;
+		for (ShaderGraphCompiler.CompiledPass pass : this.graph.passes()) {
+			if (pass.declaration().kind() == ShaderPack.PassKind.GEOMETRY && geometry == null) {
+				geometry = pass;
+			}
+			if (pass.declaration().kind() == ShaderPack.PassKind.FULLSCREEN && pass.declaration().mergeWith() != null) {
+				resolve = pass;
+			}
+		}
+		if (geometry == null || resolve == null) {
+			return;
+		}
+		try {
+			Map<String, Object> values = this.settings.packValues(this.pack.id());
+			String source = ShaderPassCompiler.source(this.pack, geometry.declaration(), values);
+			String resolveSource = ShaderPassCompiler.source(this.pack, resolve.declaration(), values);
+			StringBuilder targetDefines = new StringBuilder();
+			int colorIndex = 0;
+			List<String> channelIds = new ArrayList<>();
+			for (String write : geometry.declaration().writes()) {
+				if ("depth".equals(write)) {
+					continue;
+				}
+				targetDefines.append("#define MC_TARGET_").append(ShaderPassCompiler.symbol(write))
+					.append(' ').append(colorIndex++).append('\n');
+				if (!"scene".equals(write)) {
+					channelIds.add(write);
+				}
+			}
+			this.worldGeometry = new WorldGeometryAdapter(
+				this.gpuDevice,
+				this.allocator,
+				this.pack.id(),
+				geometry.declaration().id(),
+				source,
+				targetDefines.toString(),
+				channelIds,
+				resolve.declaration(),
+				resolveSource,
+				this.pack.manifest().options().stream()
+					.filter(option -> option.apply() == ShaderPack.ApplyMode.UNIFORM)
+					.toList(),
+				this::optionValueUnchecked
+			);
+		} catch (IOException | RuntimeException error) {
+			throw new IllegalStateException("Could not build world geometry adapter: " + error.getMessage(), error);
+		}
+	}
+
+	public @Nullable WorldGeometryAdapter worldGeometry() {
+		return this.worldGeometry;
+	}
+
+	private void closeWorldGeometry() {
+		if (this.worldGeometry != null) {
+			this.worldGeometry.close();
+			this.worldGeometry = null;
 		}
 	}
 
@@ -392,6 +491,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 		}
 		this.closed = true;
 		this.closeExecutor();
+		this.closeWorldGeometry();
 		this.allocator.close();
 		if (active == this) {
 			active = null;

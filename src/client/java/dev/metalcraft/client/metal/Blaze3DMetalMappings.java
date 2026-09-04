@@ -47,12 +47,35 @@ public final class Blaze3DMetalMappings {
 		}
 		MetalShaderTranslator.Translation vertex = shaders.vertex();
 		MetalShaderTranslator.Translation fragment = shaders.fragment();
+		return pipelineDescriptor(
+			pipeline, vertex.metalSource(), vertex.entryPoint(), fragment.metalSource(), fragment.entryPoint()
+		);
+	}
+
+	/**
+	 * The same fixed-function state, over shader sources that were never GLSL.
+	 *
+	 * <p>A shader pack authors its programs in MSL, so there is nothing for the translator to
+	 * produce. Everything else about the pipeline is still described by the Blaze3D pipeline it
+	 * stands in for.
+	 */
+	public static MetalRenderPipeline.Descriptor pipelineDescriptor(
+		final RenderPipeline pipeline,
+		final String vertexSource,
+		final String vertexFunction,
+		final String fragmentSource,
+		final String fragmentFunction
+	) {
+		if (pipeline == null || vertexSource == null || vertexFunction == null
+			|| fragmentSource == null || fragmentFunction == null) {
+			throw new NullPointerException("Blaze3D pipeline and Metal shader sources cannot be null");
+		}
 		DepthStencilState depthStencil = pipeline.getDepthStencilState();
 		return new MetalRenderPipeline.Descriptor(
-			vertex.metalSource(),
-			vertex.entryPoint(),
-			fragment.metalSource(),
-			fragment.entryPoint(),
+			vertexSource,
+			vertexFunction,
+			fragmentSource,
+			fragmentFunction,
 			colorTargets(pipeline.getColorTargetStates()),
 			depthStencil == null ? null : MetalTexture.Format.DEPTH32_FLOAT,
 			vertexDescriptor(pipeline.getVertexFormatBindings()),
@@ -65,6 +88,26 @@ public final class Blaze3DMetalMappings {
 				}
 			)
 		);
+	}
+
+	public static GpuFormat gpuFormat(final MetalTexture.Format format) {
+		if (format == null) {
+			throw new NullPointerException("format");
+		}
+		return switch (format) {
+			case R8_UNORM -> GpuFormat.R8_UNORM;
+			case RGBA8_UNORM -> GpuFormat.RGBA8_UNORM;
+			case BGRA8_UNORM -> GpuFormat.RGBA8_UNORM;
+			case R16_FLOAT -> GpuFormat.R16_FLOAT;
+			case RGBA16_FLOAT -> GpuFormat.RGBA16_FLOAT;
+			case R32_FLOAT -> GpuFormat.R32_FLOAT;
+			case DEPTH32_FLOAT -> GpuFormat.D32_FLOAT;
+			case DEPTH16_UNORM -> GpuFormat.D16_UNORM;
+			case DEPTH24_UNORM_STENCIL8 -> GpuFormat.D24_UNORM_S8_UINT;
+			case DEPTH32_FLOAT_STENCIL8 -> GpuFormat.D32_FLOAT_S8_UINT;
+			case STENCIL8 -> GpuFormat.S8_UINT;
+			default -> throw new IllegalArgumentException("No Blaze3D format for Metal " + format);
+		};
 	}
 
 	public static MetalTexture.Format textureFormat(final GpuFormat format) {

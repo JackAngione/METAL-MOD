@@ -66,7 +66,8 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			Map<String, Object> values = pack.manifest().options().stream()
 				.collect(java.util.stream.Collectors.toMap(ShaderPack.Option::id, option -> optionValue.apply(option.id())));
 			for (ShaderGraphCompiler.CompiledPass pass : graph.passes()) {
-				if (pass.declaration().kind() != ShaderPack.PassKind.FULLSCREEN) {
+				if (pass.declaration().kind() != ShaderPack.PassKind.FULLSCREEN
+					|| pass.declaration().mergeWith() != null) {
 					continue;
 				}
 				compiled.add(new FullscreenPass(

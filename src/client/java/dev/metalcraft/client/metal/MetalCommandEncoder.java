@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 import org.joml.Vector4fc;
 
 /** Persistent Blaze3D encoder that rotates owned Metal command buffers on submit. */
@@ -55,6 +56,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	 */
 	private MetalRenderPass deferredRenderPass;
 	private MetalRenderPass.Descriptor deferredDescriptor;
+	private @Nullable DeferredResolveHook deferredResolve;
 	/** Reused across passes; only one pass can be active on an encoder at a time. */
 	private MetalRenderPassBackend renderPassBackend;
 	private boolean closed;
@@ -215,10 +217,24 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 			&& openDepth.storeAction() == MetalRenderPass.StoreAction.STORE;
 	}
 
+	void setDeferredResolve(final @Nullable DeferredResolveHook hook) {
+		this.deferredResolve = hook;
+	}
+
+	/** Encodes a pending merged resolve without ending the deferred pass. */
+	void flushDeferredResolve() {
+		MetalRenderPass deferred = this.deferredRenderPass;
+		DeferredResolveHook hook = this.deferredResolve;
+		if (deferred != null && hook != null) {
+			hook.encodeMergedResolve(deferred);
+		}
+	}
+
 	/** Ends the pass left open by {@link #submitRenderPass}, resolving its attachments. */
 	private void endDeferredRenderPass() {
 		MetalRenderPass deferred = this.deferredRenderPass;
 		if (deferred != null) {
+			this.flushDeferredResolve();
 			this.deferredRenderPass = null;
 			this.deferredDescriptor = null;
 			deferred.close();

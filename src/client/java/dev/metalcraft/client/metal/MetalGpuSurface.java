@@ -7,6 +7,7 @@ import com.mojang.blaze3d.systems.SurfaceException;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.MetalCraftConfig;
+import dev.metalcraft.client.shader.WorldGeometryAdapter;
 import dev.metalcraft.client.shader.FrameBindings;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.util.Collection;
@@ -79,6 +80,10 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		long acquireStartedNs = MetalStallProbe.begin();
 		this.drawable = this.metal.acquireDrawable().orElseThrow(() -> new SurfaceException("Metal did not provide a drawable"));
 		MetalStallProbe.end(MetalStallProbe.Source.ACQUIRE, acquireStartedNs);
+		WorldGeometryAdapter adapter = WorldGeometryAdapter.active();
+		if (adapter != null) {
+			adapter.beginFrame();
+		}
 	}
 
 	@Override

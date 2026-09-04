@@ -36,6 +36,7 @@ import dev.metalcraft.api.MetalCraftShaderContext;
 import dev.metalcraft.api.MetalCraftShaderExtension;
 import dev.metalcraft.api.MetalCraftShaders;
 import dev.metalcraft.client.MetalCraftClient;
+import dev.metalcraft.client.shader.WorldGeometryAdapter;
 import dev.metalcraft.client.shader.ShaderFrameExecutor;
 import dev.metalcraft.client.shader.ShaderGraphCompiler;
 import dev.metalcraft.client.shader.ShaderPack;
@@ -229,6 +230,7 @@ public final class MetalShaderTranslationSmoke {
 
 	public static void main(final String[] arguments) {
 		assertExtensionIsolation();
+		assertWorldGeometryRules();
 		assertTransientArenaSuballocation();
 		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
 			VERTEX_GLSL,
@@ -327,6 +329,16 @@ public final class MetalShaderTranslationSmoke {
 			if (!expected.getMessage().contains("smoke/broken.vert")) {
 				throw new AssertionError("Shader diagnostic omitted its source name", expected);
 			}
+		}
+	}
+
+	private static void assertWorldGeometryRules() {
+		RenderPipeline blended = mappedPipeline();
+		if (!WorldGeometryAdapter.isBlended(blended)) {
+			throw new AssertionError("A translucent color target must decline G-buffer substitution");
+		}
+		if (WorldGeometryAdapter.programFor(blended) != null) {
+			throw new AssertionError("A non-world vertex shader must not select a G-buffer program");
 		}
 	}
 
@@ -1193,6 +1205,38 @@ public final class MetalShaderTranslationSmoke {
 
 			assertFailedMsl(device, runtime, root.resolve("shaderpacks"));
 		}
+		assertGbufferAllocation();
+	}
+
+	private static void assertGbufferAllocation() {
+		MetalDevice extra = MetalNative.openDefaultDevice().orElseThrow();
+		MetalGpuDevice gpu = new MetalGpuDevice(extra, (identifier, type) -> null);
+		Path root;
+		try {
+			root = Files.createTempDirectory("metalcraft-gbuffer-smoke-");
+		} catch (IOException error) {
+			gpu.close();
+			throw new AssertionError("Could not create G-buffer smoke directory", error);
+		}
+		try (ShaderPackRuntime runtime = new ShaderPackRuntime(
+			extra, gpu, root.resolve("shaderpacks"), root.resolve("metalcraft-shaders.json")
+		)) {
+			runtime.selectPack(ShaderPackRuntime.BUILTIN_ID);
+			runtime.resize(32, 32);
+			MetalTexture albedo = runtime.target("gbuffer_albedo");
+			MetalTexture post = runtime.target("post_color");
+			if (albedo == null || !albedo.isMemoryless()) {
+				throw new AssertionError("gbuffer_albedo must be allocated memoryless");
+			}
+			if (post == null || post.isMemoryless()) {
+				throw new AssertionError("post_color must stay in device memory");
+			}
+			if (runtime.worldGeometry() == null) {
+				throw new AssertionError("A geometry pack must construct WorldGeometryAdapter after resize");
+			}
+		} finally {
+			gpu.close();
+		}
 	}
 
 	private static void assertBundledGradeGraph() {
@@ -1203,8 +1247,22 @@ public final class MetalShaderTranslationSmoke {
 				"assets/metalcraft/shaderpacks/standard"
 			);
 			ShaderGraphCompiler.CompiledGraph graph = ShaderGraphCompiler.compile(pack);
-			if (graph.passes().size() != 1 || !"grade".equals(graph.passes().getFirst().declaration().id())) {
-				throw new AssertionError("Built-in pack did not compile to a single grade pass: " + graph.passes());
+			List<String> order = graph.passes().stream().map(pass -> pass.declaration().id()).toList();
+			if (!order.equals(List.of("gbuffer", "resolve", "grade"))) {
+				throw new AssertionError("Built-in pack pass order was " + order);
+			}
+			ShaderPack.Pass gbuffer = graph.passes().getFirst().declaration();
+			if (!gbuffer.writes().containsAll(List.of("scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light", "depth"))) {
+				throw new AssertionError("G-buffer writes were " + gbuffer.writes());
+			}
+			if (!"gbuffer".equals(graph.passes().get(1).declaration().mergeWith())) {
+				throw new AssertionError("Resolve must merge_with gbuffer");
+			}
+			for (String id : List.of("gbuffer_albedo", "gbuffer_normal", "gbuffer_light")) {
+				ShaderGraphCompiler.TargetInfo info = graph.targets().get(id);
+				if (info == null || !info.memoryless()) {
+					throw new AssertionError(id + " must be memoryless");
+				}
 			}
 			ShaderGraphCompiler.TargetInfo post = graph.targets().get("post_color");
 			if (post == null || post.memoryless()) {
