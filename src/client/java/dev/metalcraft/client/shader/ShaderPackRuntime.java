@@ -177,7 +177,10 @@ public final class ShaderPackRuntime implements AutoCloseable {
 						this.executor.writeUniforms();
 					}
 				}
-				case RECOMPILE -> this.rebuildExecutor();
+				case RECOMPILE -> {
+					this.rebuildExecutor();
+					this.rebuildWorldGeometry();
+				}
 				case RELOAD -> this.allocateIfSized();
 			}
 			this.settings.save(this.settingsPath);
@@ -380,7 +383,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 				targetDefines.toString(),
 				channelIds,
 				resolve.declaration(),
-				resolveSource,
+				targetDefines + resolveSource,
 				this.pack.manifest().options().stream()
 					.filter(option -> option.apply() == ShaderPack.ApplyMode.UNIFORM)
 					.toList(),

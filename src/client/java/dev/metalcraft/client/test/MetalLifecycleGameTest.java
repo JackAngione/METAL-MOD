@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.MetalCraftRenderResolution;
+import dev.metalcraft.client.shader.ShaderPackRuntime;
 import dev.metalcraft.client.metal.MetalSurfaceProbe;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
@@ -89,7 +90,8 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			return;
 		}
 
-		try (TestSingleplayerContext world = context.worldBuilder().create()) {
+		try (ShaderLifecycleSelection selection = new ShaderLifecycleSelection(context);
+			TestSingleplayerContext world = context.worldBuilder().create()) {
 			context.waitFor(client -> client.level != null && client.player != null);
 			context.waitTicks(10);
 			context.getInput().lookAt(0.0F, 30.0F);
@@ -119,6 +121,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			context.waitFor(client -> client.gui.overlay() == null);
 			context.waitTicks(POST_RELOAD_SETTLE_TICKS);
 			LOGGER.info("Metal lifecycle validation: resource reload completed");
+			selection.assertActive();
 
 			Path screenshot = context.takeScreenshot("metalcraft-world-" + backend.toLowerCase(Locale.ROOT));
 			if (!Files.isRegularFile(screenshot) || fileSize(screenshot) == 0L) {
@@ -126,6 +129,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			}
 			assertScreenshotVaries(screenshot);
 			LOGGER.info("Metal lifecycle validation: screenshot written to {}", screenshot.toAbsolutePath());
+			selection.assertFailureRecovery();
 
 			context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
 			// Known tasks through the real queue, so the census is proved to be recording rather than
@@ -171,6 +175,63 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		LOGGER.info("Metal lifecycle validation: world closed; clean client shutdown requested");
 
 		new MetalCreativeSearchGameTest(context).run();
+	}
+
+	/** Opt-in pack coverage; always restores the user's original selection. */
+	private static final class ShaderLifecycleSelection implements AutoCloseable {
+		private final ClientGameTestContext context;
+		private final String original;
+
+		ShaderLifecycleSelection(final ClientGameTestContext context) {
+			this.context = context;
+			this.original = Boolean.getBoolean("metalcraft.lifecycleShaders")
+				? context.computeOnClient(client -> {
+					ShaderPackRuntime runtime = ShaderPackRuntime.active();
+					if (runtime == null) throw new AssertionError("Shader runtime unavailable");
+					String previous = runtime.selectedPackId();
+					runtime.selectPack(ShaderPackRuntime.BUILTIN_ID);
+					return previous;
+				}) : null;
+		}
+
+		void assertActive() {
+			if (this.original == null) return;
+			this.context.runOnClient(client -> {
+				ShaderPackRuntime runtime = ShaderPackRuntime.active();
+				if (runtime == null || !runtime.isActive() || runtime.lastError().isPresent()
+					|| runtime.worldGeometry() == null || runtime.target("post_color") == null) {
+					throw new AssertionError("Shader pack did not survive world reload/resize");
+				}
+				if (runtime.target("post_color").descriptor().width() != runtime.frameWidth()
+					|| runtime.target("post_color").descriptor().height() != runtime.frameHeight()) {
+					throw new AssertionError("Shader post target does not match configured surface");
+				}
+			});
+		}
+
+		void assertFailureRecovery() {
+			if (this.original == null) return;
+			this.context.runOnClient(client -> {
+				ShaderPackRuntime runtime = ShaderPackRuntime.active();
+				// Deterministic load failure without modifying any installed pack.
+				runtime.selectPack("metalcraft-lifecycle-missing-pack");
+				if (runtime.isActive() || runtime.lastError().isEmpty() || runtime.worldGeometry() != null) {
+					throw new AssertionError("Failed pack did not fall back to vanilla");
+				}
+			});
+			this.context.waitTicks(10);
+			this.context.runOnClient(client -> ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID));
+			this.context.waitTicks(10);
+			this.assertActive();
+			LOGGER.info("Metal shader lifecycle validation: reload, resize, failure fallback and recovery passed");
+		}
+
+		@Override
+		public void close() {
+			if (this.original != null) {
+				this.context.runOnClient(client -> ShaderPackRuntime.active().selectPack(this.original));
+			}
+		}
 	}
 
 	/**

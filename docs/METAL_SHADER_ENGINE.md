@@ -5,10 +5,68 @@
 | **Title** | Metal-Native Shader Engine |
 | **Author** | MetalCraft contributors |
 | **Date** | 2026-09-03 |
-| **Status** | Draft |
+| **Status** | In progress; PR 0–4 complete; PR 5 cascade fitting in progress |
 | **Target** | Minecraft Java 26.2, Fabric, macOS arm64, direct Metal backend |
 | **Parent commit of deleted engine** | `a7c274a` |
 | **Deletion commit** | `0eb8833 Remove the shader pack engine and leave the Metal backend` |
+
+---
+
+## Implementation review — 2026-09-04
+
+Git checkpoint: `f695385` implemented the foundation (PR 0–2); `fe99c7c`
+added the world adapter and memoryless resolve (PR 4). PR 3 is optional.
+The capability table below describes the deletion checkpoint, not current HEAD.
+
+Completed PR 4 correctness work (working tree, following `fe99c7c`):
+
+- [x] The merged resolve needs the **geometry attachment indices**, not just its own
+  `writes` list. The runtime now supplies those indices to its compile unit.
+- [x] Normal rendering must preserve geometry's shaded `scene` until the lighting module
+  handles RGB lightmap sampling, fog, overlays, and emissive surfaces. Taking the maximum
+  of the two UV2 levels loses all of these. Debug views still exercise framebuffer fetch.
+- [x] Geometry PSOs must successfully compile **before** routing a pass into the G-buffer.
+  Resolve compilation failure falls back to forward geometry until reload. Recompile
+  options rebuild the world adapter, and resize releases its old resolve PSO.
+- [x] Allocation-only coverage is insufficient. The smoke now compiles/substitutes real
+  terrain, draws deterministic MRT pixels through the adapter, runs the production
+  deferred hook, and checks both shaded-scene preservation and albedo debug readback.
+  It uses a standalone public pass wrapper because no global RenderSystem is initialized.
+  Consecutive half-screen draws now also verify that resolve resets the geometry scissor.
+  Both `-PmetalPassMerging=true` and `false` pass the GPU readback checks.
+
+Plan corrections for the remaining work:
+
+1. **PR 5 needs the binding contract originally postponed to PR 7.** Cascade matrices,
+   camera transforms, and the depth-array sampler must reach resolve before shadows can
+   be sampled. Define and test these named bindings in PR 5; PR 7 consumes them. Verify
+   coordinate spaces, depth reconstruction, and off-camera caster coverage before GGX.
+2. **A disabled compute node must write a defined result.** An early return without writing
+   leaves downstream reads undefined. Keep dispatches in the graph but write the neutral
+   value (AO = 1, additive bloom = 0) or copy the input, according to the node's contract.
+   PR 6 also needs executor dispatch/binding support; the current executor only runs
+   non-merged fullscreen passes.
+3. **Resolve scene lifetime and post-processing placement explicitly.** Depth effects need
+   a stored/sampleable depth binding; memoryless G-buffer channels cannot survive into a
+   compute encoder. Present-time grading also affects the GUI, so define a world-only
+   insertion point before shipping effects that should exclude HUD/text.
+
+- [x] Merged versus forced-split world passes, with identical expected GPU pixels.
+- [x] In-game reload/resize/pack-failure run — passed on 2026-09-04; the harness restores
+  the original pack selection. The captured world screenshot was visually inspected.
+  Creative inventory/search validation also passed.
+- [x] Full `gradle build --offline` including shader and cascade smoke tests.
+
+Validation commands:
+
+```sh
+gradle shaderTranslationSmoke --offline
+gradle shaderTranslationSmoke --offline -PmetalPassMerging=false
+gradle runClient --offline -PmetalLifecycleTest -PmetalShaderLifecycleTest=true
+```
+
+Continue PR 5's binding and caster-rendering work, then PR 7 lighting;
+PR 6 effects can follow once their depth inputs and neutral outputs are defined.
 
 ---
 
@@ -1145,6 +1203,8 @@ Per-extension try/catch is **not** in this PR (see PR 0).
 
 ### PR 0 — Per-extension shader error isolation
 
+- [x] **Done** — implemented in `f695385`; foundation smoke coverage passes.
+
 - **Title:** Isolate `metalcraft-shaders` entrypoint failures
 - **Depends on:** none
 - **Files:** `MetalCraftClient.java`
@@ -1152,6 +1212,8 @@ Per-extension try/catch is **not** in this PR (see PR 0).
 - **Description:** Milestone 3 item. Try/catch around each `registerShaders`. Independent of packs. Land before a selectable pack exists.
 
 ### PR 1 — Native ABI + JNI smokes
+
+- [x] **Done** — implemented in `f695385`; foundation smoke coverage passes.
 
 - **Title:** Restore compute, MRT, memoryless, and 2D-array Metal ABI
 - **Depends on:** none (can parallel PR 0)
@@ -1162,6 +1224,8 @@ Per-extension try/catch is **not** in this PR (see PR 0).
 
 ### PR 2 — Graph, executor, identity/grade pack, default off
 
+- [x] **Done** — implemented in `f695385`; foundation smoke coverage passes.
+
 - **Title:** Ship a selectable Metal pack that grades `scene` into `post_color`
 - **Depends on:** PR 1 (allocator may use restored `Descriptor`; pack itself is 1-color)
 - **Files:** `dev.metalcraft.client.shader.*` (no `world`; includes `ShaderTargetAllocator`), `MetalCraftShaderPacks.java`, `MetalGpuDevice` runtime construction (`Boolean.getBoolean("metalcraft.shaders.disable")`), `MetalGpuSurface.configure` + `blitFromTexture`, `MetalPassCensus.internedNames()`, `ShaderManagerMixin` reload, `MetalCraftOptionsScreen` pack+option widgets, `assets/metalcraft/shaderpacks/standard/**`, smoke graph + `encodeForTesting`
@@ -1170,11 +1234,17 @@ Per-extension try/catch is **not** in this PR (see PR 0).
 
 ### PR 3 — GUI polish only if PR 2 widgets were minimal
 
+- [x] **Skipped as optional** — PR 2 already provides pack and option widgets; presets remain deferred until declared.
+
 - **Title:** Preset widgets and pack-error presentation
 - **Depends on:** PR 2
 - **Description:** Skip if PR 2 already cycles packs and options. Add preset cycle when a later pack declares `presets`. Failed packs listed with `lastError()`.
 
 ### PR 4 — G-buffer geometry adapter and merged tile-memory resolve
+
+- [x] Implementation and GPU merge/split validation complete.
+- [x] **Done** — in-game resize/fullscreen/reload/failure recovery and creative search passed
+  on 2026-09-04; fixes remain in the working tree following `fe99c7c`.
 
 - **Title:** Intercept 26.2 world draws into a memoryless G-buffer
 - **Depends on:** PR 1 (MRT, memoryless, `canMerge`), PR 2 (runtime/executor)
@@ -1184,6 +1254,19 @@ Per-extension try/catch is **not** in this PR (see PR 0).
 
 ### PR 5 — Cascaded sun shadows (layered depth)
 
+- [x] **Cascade fitting foundation done** — `shader/world/ShadowCascades.java` computes
+  configurable splits, a rotation-invariant footprint, double-precision world texel snapping,
+  and camera-relative Metal [0,1] depth matrices. The fit extends toward the sun by an
+  explicit caster distance; caster collection must use that same volume.
+- [x] Geometry smoke checks cover all frustum corners, extended casters, overhead sun,
+  rotated cameras, large world coordinates, subtexel translation, and invalid sun input.
+- [ ] Allocate the layered depth map and define named frame buffer/texture bindings.
+- [ ] Integrate terrain caster collection and layered shadow draws.
+- [ ] Sample the shadow map in resolve and validate actual world shadows.
+
+**Status: in progress.** The tested fitting code does not yet draw shadows or change the
+selected pack's appearance. Do not mark PR 5 complete until the world sampling test passes.
+
 - **Title:** Layered shadow map in one encoder
 - **Depends on:** PR 4
 - **Files:** `WorldShadowModule`, `LevelRendererShadowMixin`, `ProjectionMatrixBufferMixin`, `CommandEncoderMixin` (`getDepthOrLayers` exception for the module-owned texture), `ViewAreaAccessor`, `shadow.metal`
@@ -1192,20 +1275,26 @@ Per-extension try/catch is **not** in this PR (see PR 0).
 
 ### PR 6 — Compute nodes (SSAO, bloom, volumetrics)
 
+- [ ] **Not started**.
+
 - **Title:** Optional compute pack nodes
 - **Depends on:** PR 1 compute ABI, PR 2 executor, visually PR 4 (depth)
 - **Files:** `ssao.metal`, `bloom.metal`, `volumetrics.metal`, pack.json options (`apply: uniform`); `enabled_by` may be present for documentation but is **name-checked only**
-- **Tests:** dispatchCovering overflow throws when threadgroup exceeds `maxThreadsPerThreadgroup`; kernel no-op when its uniform is 0; toggling bloom off does **not** disable the pack; interned census names (smoke dump, not `take()`) still include the kernel label
-- **Description:** Compute passes always remain in the graph and always encode (Decision 14: executor does not skip). MSL no-ops when the corresponding uniform is 0. Do not use encode-time skip; that would orphan `grade` reads and disable the pack.
+- **Tests:** dispatchCovering overflow throws when threadgroup exceeds `maxThreadsPerThreadgroup`; kernel writes neutral output or copies input when its uniform is 0; toggling bloom off does **not** disable the pack; interned census names (smoke dump, not `take()`) still include the kernel label
+- **Description:** Compute passes always remain in the graph and always encode (Decision 14: executor does not skip). MSL writes a defined neutral output or copies its input when the corresponding uniform is 0. Do not use encode-time skip; that would orphan `grade` reads and disable the pack.
 
 ### PR 7 — Lighting module (vanilla lightmap + GGX)
 
+- [ ] **Not started**.
+
 - **Title:** Deferred GGX consumed by `resolve.metal`
 - **Depends on:** PR 4, PR 5
-- **Files:** `WorldLightingModule` **without** `occupancyBuffer`; named buffer reads added to format 2 in this PR for sun/shadow matrices only; `shared/brdf.metal`
+- **Files:** `WorldLightingModule` **without** `occupancyBuffer`; named sun/shadow bindings established in PR 5 and consumed here; `shared/brdf.metal`
 - **Description:** G-buffer stores vanilla lightmap (`UV2` / `lmcoord`, same contract as Iris `texture(lightmap, lmcoord)`). Resolve runs GGX with cascaded sun shadows. No occupancy volume, no point-light list, no `extraBuffers` bag. Occupancy is not this PR.
 
 ### PR 8 — PSO binary archives
+
+- [ ] **Not started**.
 
 - **Title:** Persistent Metal binary archives for pack PSOs
 - **Depends on:** PR 2
@@ -1214,11 +1303,15 @@ Per-extension try/catch is **not** in this PR (see PR 0).
 
 ### PR 9 — SMAA (after geometry, before TAA)
 
+- [ ] **Not started**.
+
 - **Title:** SMAA as a pack node on the graded scene
 - **Depends on:** PR 4 (geometry exists so depth/`scene` are stable)
 - **Files:** `smaa.metal` (or split edge/blend/neighborhood passes), pack.json compute or fullscreen nodes, `apply: uniform` toggle
 - **Description:** First anti-aliasing node. No history, no motion vectors, no TAA. TAA is a later experiment and is not this PR. Never MetalFX.
 
 ### PR 10 (unscheduled) — OptiFine adapter
+
+- [ ] **Not started**.
 
 Emits `ShaderPack`. Does not modify executor, native TBDR, or first-party MSL.

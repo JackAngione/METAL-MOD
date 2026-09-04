@@ -45,8 +45,9 @@ fragment ResolveTargets resolve_fragment(
         out.scene = float4(previous.light.rg, 0.0, 1.0);
         return out;
     }
-    float shade = max(previous.light.r, previous.light.g);
-    out.scene = float4(previous.albedo.rgb * max(shade, 0.04), 1.0);
+    // Geometry already wrote the sampled RGB lightmap, overlays, emissive treatment and fog
+    // into scene. UV2 levels are metadata, not a replacement for that lighting. Preserve the
+    // shaded seed until the lighting module can also reconstruct and apply those effects.
     return out;
 }
 

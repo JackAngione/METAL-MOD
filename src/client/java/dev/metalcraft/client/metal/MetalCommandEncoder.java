@@ -168,6 +168,9 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.renderPass = null;
 		this.renderPassDescriptor = null;
 		if (this.renderPassBackend != null) this.renderPassBackend.finish();
+		// A forced split must resolve memoryless attachments before the next world descriptor
+		// is built, so its adapter knows to clear a fresh G-buffer rather than continue one.
+		if (!PASS_MERGING) this.endDeferredRenderPass();
 	}
 
 	/**

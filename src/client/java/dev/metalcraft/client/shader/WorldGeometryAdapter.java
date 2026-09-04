@@ -102,9 +102,12 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final Set<String> declined = new LinkedHashSet<>();
 	private List<Channel> channels;
 	private @Nullable RenderPass gbufferPass;
+	private @Nullable GpuTextureView sceneAttachment;
+	private @Nullable GpuTextureView depthAttachment;
 	private @Nullable MetalRenderPipeline resolvePipeline;
 	private MetalTexture.@Nullable Format resolveSceneFormat;
 	private boolean pendingResolve;
+	private boolean resolveUnavailable;
 	private boolean closed;
 
 	WorldGeometryAdapter(
@@ -195,6 +198,9 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 
 	void refreshChannels() {
 		this.channels = this.captureChannels();
+		if (this.resolvePipeline != null) {
+			this.resolvePipeline.close();
+		}
 		this.resolvePipeline = null;
 		this.resolveSceneFormat = null;
 	}
@@ -228,7 +234,21 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		final GpuTextureView depth,
 		final OptionalDouble clearDepth
 	) {
-		this.ensureResolvePipeline(color);
+		if (this.pendingResolve && (color != this.sceneAttachment || depth != this.depthAttachment
+			|| clearColor.isPresent() || clearDepth.isPresent())) {
+			resolveOpaque();
+		}
+		if (this.resolveUnavailable) {
+			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
+		}
+		try {
+			this.ensureResolvePipeline(color);
+		} catch (RuntimeException error) {
+			this.resolveUnavailable = true;
+			LOGGER.error("Shader pack '{}' could not compile its resolve; using vanilla geometry until reload", this.packId, error);
+			resolveOpaque();
+			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
+		}
 		RenderPassDescriptor descriptor = RenderPassDescriptor.create(label)
 			.withColorAttachment(color, clearColor);
 		for (Channel channel : this.channels) {
@@ -239,6 +259,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		descriptor = descriptor.withDepthAttachment(depth, clearDepth)
 			.withRenderArea(new RenderPass.RenderArea(0, 0, color.getWidth(0), color.getHeight(0)));
 		RenderPass pass = encoder.createRenderPass(descriptor);
+		this.sceneAttachment = color;
+		this.depthAttachment = depth;
 		this.pendingResolve = true;
 		this.gbufferPass = pass;
 		return pass;
@@ -250,6 +272,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 		try {
 			this.writeUniforms();
+			openPass.setScissor(0, 0, this.sceneAttachment.getWidth(0), this.sceneAttachment.getHeight(0));
 			openPass.setPipeline(this.resolvePipeline);
 			openPass.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
 			openPass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
@@ -271,15 +294,12 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		if (this.resolvePipeline != null && this.resolveSceneFormat == sceneFormat) {
 			return;
 		}
-		if (this.resolvePipeline != null) {
-			this.resolvePipeline.close();
-		}
 		List<MetalRenderPipeline.ColorTarget> targets = new ArrayList<>();
 		targets.add(MetalRenderPipeline.ColorTarget.opaque(sceneFormat));
 		for (Channel channel : this.channels) {
 			targets.add(MetalRenderPipeline.ColorTarget.opaque(channel.view().attachment().descriptor().format()));
 		}
-		this.resolvePipeline = this.device.metal().createRenderPipeline(new MetalRenderPipeline.Descriptor(
+		MetalRenderPipeline replacement = this.device.metal().createRenderPipeline(new MetalRenderPipeline.Descriptor(
 			this.resolveSource,
 			"resolve_vertex",
 			this.resolveSource,
@@ -290,6 +310,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			MetalRenderPipeline.DepthState.DISABLED,
 			MetalRenderPipeline.RasterState.DEFAULT
 		));
+		if (this.resolvePipeline != null) {
+			this.resolvePipeline.close();
+		}
+		this.resolvePipeline = replacement;
 		this.resolveSceneFormat = sceneFormat;
 		MetalPassCensus.kindFor("MetalCraft shader: " + this.resolvePass.id());
 	}
@@ -349,6 +373,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 				program.entryPoint(this.passId, "vertex"),
 				program.entryPoint(this.passId, "fragment")
 			));
+			if (!this.device.precompilePipeline(stand, null).isValid()) {
+				this.device.forgetNativePipeline(stand);
+				return Optional.empty();
+			}
 			return Optional.of(new Substitution(stand, program, material));
 		} catch (RuntimeException error) {
 			LOGGER.error("Shader pack '{}' could not stand in for pipeline {}", this.packId, pipeline.getLocation(), error);

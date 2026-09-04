@@ -10,6 +10,7 @@ import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.CompareOp;
 import com.mojang.blaze3d.platform.PolygonMode;
+import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderPassDescriptor;
 import com.mojang.blaze3d.textures.GpuTexture;
@@ -28,6 +29,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.OptionalDouble;
+import org.joml.Vector4f;
+import net.minecraft.client.renderer.RenderPipelines;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -307,6 +311,7 @@ public final class MetalShaderTranslationSmoke {
 			assertMultipleRenderTargets(device);
 			assertMemorylessAbi(device);
 			assertTextureArrayPass(device);
+			dev.metalcraft.client.shader.world.ShadowCascadesSmoke.run();
 			assertMemorylessPassMerge();
 			assertIdentityGradePack(device);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(
@@ -1111,9 +1116,10 @@ public final class MetalShaderTranslationSmoke {
 			MetalStallProbe.takeFrame(probe, 0);
 			int mergeIndex = MetalStallProbe.Source.RENDER_PASS_MERGE.ordinal() * MetalStallProbe.FIELDS
 				+ MetalStallProbe.FIELD_COUNT;
-			if (probe[mergeIndex] < 1L) {
+			boolean merging = Boolean.parseBoolean(System.getProperty("metalcraft.passMerging", "true"));
+			if (merging ? probe[mergeIndex] < 1L : probe[mergeIndex] != 0L) {
 				throw new AssertionError(
-					"Memoryless two-color DONT_CARE passes did not merge; RENDER_PASS_MERGE count=" + probe[mergeIndex]
+					"Unexpected memoryless merge count (enabled=" + merging + "): " + probe[mergeIndex]
 				);
 			}
 		} finally {
@@ -1234,8 +1240,98 @@ public final class MetalShaderTranslationSmoke {
 			if (runtime.worldGeometry() == null) {
 				throw new AssertionError("A geometry pack must construct WorldGeometryAdapter after resize");
 			}
+			assertWorldResolve(gpu, runtime);
 		} finally {
 			gpu.close();
+		}
+	}
+
+	/** Exercises the production adapter and deferred hook, with deterministic MRT seed pixels. */
+	private static void assertWorldResolve(final MetalGpuDevice gpu, final ShaderPackRuntime runtime) {
+		String seedSource = """
+			#include <metal_stdlib>
+			using namespace metal;
+			vertex float4 seed_vertex(uint id [[vertex_id]]) {
+			    const float2 p[3] = {float2(-1,-1), float2(3,-1), float2(-1,3)};
+			    return float4(p[id], 0, 1);
+			}
+			struct Targets {
+			    float4 scene [[color(0)]];
+			    float4 albedo [[color(1)]];
+			    float4 normal [[color(2)]];
+			    float4 light [[color(3)]];
+			};
+			fragment Targets seed_fragment() {
+			    return {float4(144.0/255,96.0/255,48.0/255,1), float4(0.2,0.4,0.6,1),
+			            float4(0.5,0.5,0.8,0), float4(0,0,0,0)};
+			}
+			""";
+		RenderPipeline.Builder builder = RenderPipeline.builder()
+			.withLocation(Identifier.parse("metalcraft:smoke/resolve_seed"))
+			.withVertexShader(Identifier.parse("metalcraft:seed"))
+			.withFragmentShader(Identifier.parse("metalcraft:seed"))
+			.withCull(false).withPrimitiveTopology(PrimitiveTopology.TRIANGLES);
+		for (int index = 0; index < 4; index++) {
+			builder.withColorTargetState(index, new ColorTargetState(Optional.empty(),
+				GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL));
+		}
+		RenderPipeline seed = builder.build();
+		gpu.registerNativePipeline(seed, new MetalGpuDevice.NativeProgram(seedSource, "seed_vertex", "seed_fragment"));
+		try (
+			MetalTexture scene = gpu.metal().createTexture(new MetalTexture.Descriptor(
+				MetalTexture.Format.RGBA8_UNORM, 32, 32, 1, MetalTexture.USAGE_RENDER_TARGET | MetalTexture.USAGE_SHADER_READ));
+			MetalTexture depth = gpu.metal().createTexture(new MetalTexture.Descriptor(
+				MetalTexture.Format.DEPTH32_FLOAT, 32, 32, 1, MetalTexture.USAGE_RENDER_TARGET));
+			MetalGpuTextureView sceneView = gpu.wrapAttachment(scene, "resolve-scene");
+			MetalGpuTextureView depthView = gpu.wrapAttachment(depth, "resolve-depth");
+			MetalCommandQueue queue = gpu.metal().createCommandQueue()
+		) {
+			// The standalone smoke has no global RenderSystem device. Use the public pass wrapper
+			// over the real backend without CommandEncoder's global-device validation.
+			MetalCommandEncoder backend = (MetalCommandEncoder)gpu.createCommandEncoder();
+			CommandEncoder encoder = new CommandEncoder(null, gpu, backend) {
+				@Override
+				public RenderPass createRenderPass(final RenderPassDescriptor descriptor) {
+					return new RenderPass(backend.createRenderPass(descriptor), gpu, descriptor.colorAttachments(),
+						backend::submitRenderPass, descriptor.renderArea);
+				}
+			};
+			for (String debug : List.of("off", "albedo")) {
+				runtime.setOption("debug_view", debug);
+				runtime.worldGeometry().beginFrame();
+				for (int half = 0; half < 2; half++) {
+					try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-resolve-smoke",
+						sceneView, half == 0 ? Optional.of(new Vector4f(0, 0, 0, 1)) : Optional.empty(),
+						depthView, half == 0 ? OptionalDouble.of(1) : OptionalDouble.empty(),
+						List.of(RenderPipelines.SOLID_TERRAIN))) {
+						RenderPipeline terrain = WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+						if (terrain == RenderPipelines.SOLID_TERRAIN || !gpu.precompilePipeline(terrain, null).isValid()) {
+							throw new AssertionError("Terrain must compile and be substituted before entering the G-buffer");
+						}
+						if (WorldGeometryAdapter.isBlended(RenderPipelines.SOLID_TERRAIN)
+							|| !WorldGeometryAdapter.isBlended(RenderPipelines.TRANSLUCENT_TERRAIN)) {
+							throw new AssertionError("Translucent terrain must remain forward rendered");
+						}
+						pass.enableScissor(half * 16, 0, 16, 32);
+						pass.setPipeline(seed);
+						pass.draw(3, 1, 0, 0);
+					}
+				}
+				WorldGeometryAdapter.resolveOpaque();
+				try (var fence = encoder.createFence()) {
+					encoder.submit();
+					if (!fence.awaitCompletion(5_000_000_000L)) {
+						throw new AssertionError("World resolve GPU submission timed out");
+					}
+				}
+				if (debug.equals("off")) {
+					assertBgraDelta(scene.readback(queue, 0), (byte)144, (byte)96, (byte)48, 2, "world shaded seed");
+				} else {
+					assertBgraDelta(scene.readback(queue, 0), (byte)51, (byte)102, (byte)153, 2, "world tile resolve");
+				}
+			}
+		} finally {
+			gpu.forgetNativePipeline(seed);
 		}
 	}
 

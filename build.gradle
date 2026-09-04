@@ -68,6 +68,7 @@ tasks.register('shaderTranslationSmoke', JavaExec) {
 	onlyIf { isAppleSiliconBuild }
 	classpath = sourceSets.shaderSmoke.runtimeClasspath
 	mainClass = 'dev.metalcraft.client.metal.MetalShaderTranslationSmoke'
+	systemProperty 'metalcraft.passMerging', providers.gradleProperty('metalPassMerging').getOrElse('true')
 }
 
 tasks.named('check') {
@@ -105,6 +106,7 @@ tasks.named('runClient') {
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')
+		systemProperty 'metalcraft.lifecycleShaders', providers.gradleProperty('metalShaderLifecycleTest').getOrElse('false')
 		systemProperty 'metalcraft.lifecycleCreativeSearch', providers.gradleProperty('metalCreativeSearchTest').getOrElse('false')
 
 		benchmarkProperties.each { gradleProperty, systemPropertyName ->
