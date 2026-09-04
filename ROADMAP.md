@@ -51,9 +51,9 @@ This milestone proved that Minecraft 26.2's backend abstraction is usable, but i
 - [x] Precompile registered pipelines against the active Blaze3D device.
 - [x] Recompile extension pipelines after shader resource reloads.
 - [x] Document GLSL resource locations and a minimal add-on example.
-- [ ] Add an example shader add-on module that renders a simple full-screen pass.
-- [ ] Add graceful per-extension error isolation and failed-pipeline diagnostics.
-- [ ] Define a versioned post-processing graph API (color, depth, history, and resize lifecycle).
+- [x] Add an example shader add-on module that renders a simple full-screen pass.
+- [x] Add graceful per-extension error isolation and failed-pipeline diagnostics.
+- [x] Define a versioned post-processing graph API (color, depth, history, and resize lifecycle).
 
 ## Milestone 4 — measurable Apple silicon optimization
 

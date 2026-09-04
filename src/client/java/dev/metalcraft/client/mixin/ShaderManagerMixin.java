@@ -22,5 +22,6 @@ abstract class ShaderManagerMixin {
 		final CallbackInfo callback
 	) {
 		MetalCraftClient.precompileRegisteredShaders();
+		MetalCraftClient.reloadShaderPackRuntime();
 	}
 }

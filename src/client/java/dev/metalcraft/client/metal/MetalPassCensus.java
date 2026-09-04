@@ -112,6 +112,11 @@ public final class MetalPassCensus {
 		return kind;
 	}
 
+	/** Interned kind names in slot order; does not truncate to the reporter's 12-cap. */
+	static List<String> internedNames() {
+		return List.copyOf(NAMES);
+	}
+
 	/** Folds the GPU time of passes whose command buffers completed since the last call. */
 	public static void drainCompleted() {
 		if (!MetalStallProbe.isEnabled() || !MetalNative.isLoaded() || drained.length == 0) {

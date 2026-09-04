@@ -1,12 +1,19 @@
 package dev.metalcraft.client.gui;
 
 import com.mojang.blaze3d.platform.Window;
+import dev.metalcraft.api.MetalCraftShaderPackInfo;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.MetalCraftPlatform;
 import dev.metalcraft.client.MetalCraftRenderResolution;
+import dev.metalcraft.client.shader.ShaderPack;
+import dev.metalcraft.client.shader.ShaderPackRuntime;
+import java.util.ArrayList;
+import java.util.List;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.MultiLineTextWidget;
+import net.minecraft.client.gui.components.ScrollableLayout;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.layouts.HeaderAndFooterLayout;
@@ -39,6 +46,7 @@ public final class MetalCraftOptionsScreen extends Screen {
 			.setCentered(true);
 		contents.addChild(description);
 
+		boolean appleSilicon = MetalCraftPlatform.isAppleSilicon();
 		CycleButton<Boolean> halfResolution = CycleButton.onOffBuilder(MetalCraftConfig.halfResolution())
 			.withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.half_resolution.tooltip")))
 			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.half_resolution"), (button, enabled) -> {
@@ -46,7 +54,7 @@ public final class MetalCraftOptionsScreen extends Screen {
 				MetalCraftRenderResolution.apply(this.minecraft);
 				this.updateResolutionStatus();
 			});
-		halfResolution.active = MetalCraftPlatform.isAppleSilicon();
+		halfResolution.active = appleSilicon;
 		contents.addChild(halfResolution);
 
 		CycleButton<Boolean> unlockedFrameRate = CycleButton.onOffBuilder(MetalCraftConfig.unlockedFrameRate())
@@ -59,13 +67,128 @@ public final class MetalCraftOptionsScreen extends Screen {
 			});
 		contents.addChild(unlockedFrameRate);
 
+		this.addShaderPackControls(contents, appleSilicon);
+
 		this.resolutionStatus = new StringWidget(Component.empty(), this.font);
 		contents.addChild(this.resolutionStatus);
 		this.updateResolutionStatus();
-		this.layout.addToContents(contents, LayoutSettings::alignHorizontallyCenter);
+		ScrollableLayout scrolling = new ScrollableLayout(this.minecraft, contents, Math.max(40, this.height - 70));
+		scrolling.setMinWidth(330);
+		this.layout.addToContents(scrolling, LayoutSettings::alignHorizontallyCenter);
 		this.layout.addToFooter(Button.builder(CommonComponents.GUI_DONE, button -> this.onClose()).width(200).build());
 		this.layout.visitWidgets(this::addRenderableWidget);
 		this.repositionElements();
+	}
+
+	private void addShaderPackControls(final LinearLayout contents, final boolean appleSilicon) {
+		contents.addChild(new StringWidget(Component.translatable("metalcraft.options.shader_pack_header"), this.font));
+		ShaderPackRuntime runtime = ShaderPackRuntime.active();
+		Button packButton = Button.builder(packMessage(runtime), button -> {
+			if (runtime == null) {
+				return;
+			}
+			List<MetalCraftShaderPackInfo> packs = packChoices(runtime);
+			int selected = 0;
+			for (int index = 0; index < packs.size(); index++) {
+				if (packs.get(index).id().equals(runtime.selectedPackId())) {
+					selected = index;
+					break;
+				}
+			}
+			MetalCraftShaderPackInfo next = packs.get((selected + 1) % packs.size());
+			try {
+				runtime.selectPack(next.id());
+				this.minecraft.gui.setScreen(new MetalCraftOptionsScreen(this.lastScreen));
+			} catch (RuntimeException error) {
+				button.setMessage(Component.translatable("metalcraft.options.shader_pack_failed", next.name()));
+				button.setTooltip(Tooltip.create(Component.literal(error.getMessage() == null ? error.toString() : error.getMessage())));
+			}
+		}).width(310).build();
+		packButton.active = appleSilicon && runtime != null;
+		contents.addChild(packButton);
+
+		if (runtime == null || !appleSilicon) {
+			return;
+		}
+		for (ShaderPack.Option option : runtime.options()) {
+			var optionWidget = option.type() == ShaderPack.OptionType.INT || option.type() == ShaderPack.OptionType.FLOAT
+				? numericSlider(runtime, option)
+				: Button.builder(optionMessage(runtime, option), button -> {
+					runtime.setOption(option.id(), nextValue(runtime.optionValue(option.id()), option));
+					button.setMessage(optionMessage(runtime, option));
+				}).width(310).build();
+			optionWidget.setTooltip(Tooltip.create(Component.translatable(
+				"metalcraft.options.shader_option.tooltip", option.category(), option.apply().name().toLowerCase()
+			)));
+			contents.addChild(optionWidget);
+		}
+	}
+
+	private static List<MetalCraftShaderPackInfo> packChoices(final ShaderPackRuntime runtime) {
+		List<MetalCraftShaderPackInfo> packs = new ArrayList<>();
+		packs.add(new MetalCraftShaderPackInfo(ShaderPackRuntime.NONE_ID, "None"));
+		packs.addAll(runtime.availablePacks());
+		return packs;
+	}
+
+	private static AbstractSliderButton numericSlider(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		double minimum = option.min().orElseThrow();
+		double maximum = option.max().orElseThrow();
+		double current = ((Number)runtime.optionValue(option.id())).doubleValue();
+		return new AbstractSliderButton(0, 0, 310, 20, optionMessage(runtime, option), (current - minimum) / (maximum - minimum)) {
+			@Override
+			protected void updateMessage() {
+				this.setMessage(optionMessage(runtime, option));
+			}
+
+			@Override
+			protected void applyValue() {
+				double raw = minimum + this.value * (maximum - minimum);
+				double step = option.step().orElse((maximum - minimum) / 100.0);
+				double stepped = minimum + Math.round((raw - minimum) / step) * step;
+				Object value = option.type() == ShaderPack.OptionType.INT ? (int)Math.round(stepped) : stepped;
+				runtime.setOption(option.id(), value);
+			}
+		};
+	}
+
+	private static Component packMessage(final ShaderPackRuntime runtime) {
+		if (runtime == null || ShaderPackRuntime.NONE_ID.equals(runtime.selectedPackId())) {
+			return Component.translatable(
+				"metalcraft.options.shader_pack",
+				Component.translatable("metalcraft.options.shader_pack_none")
+			);
+		}
+		return Component.translatable("metalcraft.options.shader_pack", runtime.selectedPackName());
+	}
+
+	private static Component optionMessage(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		String name = option.id().replace('_', ' ');
+		return Component.literal(name + ": " + runtime.optionValue(option.id()));
+	}
+
+	private static Object nextValue(final Object current, final ShaderPack.Option option) {
+		return switch (option.type()) {
+			case BOOL -> !((Boolean)current);
+			case ENUM -> {
+				int index = option.values().indexOf(current);
+				yield option.values().get((index + 1) % option.values().size());
+			}
+			case INT -> {
+				int minimum = (int)option.min().orElseThrow();
+				int maximum = (int)option.max().orElseThrow();
+				int step = (int)option.step().orElse(1.0);
+				int next = ((Number)current).intValue() + step;
+				yield next > maximum ? minimum : next;
+			}
+			case FLOAT -> {
+				double minimum = option.min().orElseThrow();
+				double maximum = option.max().orElseThrow();
+				double step = option.step().orElse((maximum - minimum) / 10.0);
+				double next = ((Number)current).doubleValue() + step;
+				yield next > maximum + 0.000001 ? minimum : next;
+			}
+		};
 	}
 
 	private void updateResolutionStatus() {

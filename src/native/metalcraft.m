@@ -94,7 +94,9 @@ typedef NS_ENUM(NSUInteger, MCObjectType) {
 	MCObjectTypeFence = 11,
 	MCObjectTypeRenderPipeline = 12,
 	MCObjectTypeRenderPass = 13,
-	MCObjectTypeTimestampQueryPool = 14
+	MCObjectTypeTimestampQueryPool = 14,
+	MCObjectTypeComputePipeline = 15,
+	MCObjectTypeComputePass = 16
 };
 
 /**
@@ -738,6 +740,40 @@ static _Atomic uint64_t mc_gpu_command_buffers;
 
 @end
 
+
+@interface MCMetalComputePass : NSObject
+
+@property(nonatomic, strong, readonly) id<MTLComputeCommandEncoder> encoder;
+@property(nonatomic, strong, readonly) MCMetalCommandBuffer *commandBuffer;
+@property(nonatomic, readonly) BOOL ended;
+
+- (instancetype)initWithEncoder:(id<MTLComputeCommandEncoder>)encoder commandBuffer:(MCMetalCommandBuffer *)commandBuffer;
+- (void)end;
+
+@end
+
+
+@implementation MCMetalComputePass
+
+- (instancetype)initWithEncoder:(id<MTLComputeCommandEncoder>)encoder commandBuffer:(MCMetalCommandBuffer *)commandBuffer {
+	self = [super init];
+	if (self != nil) {
+		_encoder = encoder;
+		_commandBuffer = commandBuffer;
+		_ended = NO;
+	}
+	return self;
+}
+
+- (void)end {
+	if (!self.ended) {
+		[self.encoder endEncoding];
+		_ended = YES;
+	}
+}
+
+@end
+
 /**
  * The registry mapping Java handles to the Metal objects they name.
  *
@@ -860,6 +896,10 @@ static NSString *mc_type_name(MCObjectType type) {
 			return @"Metal render pass";
 		case MCObjectTypeTimestampQueryPool:
 			return @"Metal timestamp query pool";
+		case MCObjectTypeComputePipeline:
+			return @"Metal compute pipeline";
+		case MCObjectTypeComputePass:
+			return @"Metal compute pass";
 	}
 	return @"Metal object";
 }
@@ -1181,6 +1221,11 @@ static MTLColorWriteMask mc_color_write_mask(JNIEnv *env, jint mask) {
 	return result;
 }
 
+/** @return the slices a texture addresses: a cubemap's six faces, or its array length. */
+static NSUInteger mc_texture_slice_count(id<MTLTexture> texture) {
+	return texture.textureType == MTLTextureTypeCube ? 6 : texture.arrayLength;
+}
+
 static BOOL mc_read_int_array(
 	JNIEnv *env,
 	jintArray array,
@@ -1495,6 +1540,8 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
 		[(MCMetalSurface *)object detach];
 	} else if (expectedType == MCObjectTypeRenderPass) {
 		[(MCMetalRenderPass *)object end];
+	} else if (expectedType == MCObjectTypeComputePass) {
+		[(MCMetalComputePass *)object end];
 	}
 }
 
@@ -1937,7 +1984,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyBufferToTextureRegion(
 		MCMetalCommandBuffer *commandBuffer = objects[0];
 		id<MTLBuffer> source = objects[1];
 		id<MTLTexture> texture = objects[2];
-		NSUInteger sliceCount = texture.textureType == MTLTextureTypeCube ? 6 : 1;
+		NSUInteger sliceCount = mc_texture_slice_count(texture);
 		if (mipLevel < 0 || (NSUInteger)mipLevel >= texture.mipmapLevelCount
 			|| arrayLayer < 0 || (NSUInteger)arrayLayer >= sliceCount
 			|| destinationX < 0 || destinationY < 0 || width <= 0 || height <= 0) {
@@ -2409,13 +2456,19 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 	jint depthOrLayers,
 	jint mipLevels,
 	jint usage,
-	jboolean cubemap
+	jboolean cubemap,
+	jboolean memoryless
 ) {
 	@autoreleasepool {
 		BOOL isCubemap = cubemap == JNI_TRUE;
-		BOOL validShape = isCubemap ? width == height && depthOrLayers == 6 : depthOrLayers == 1;
+		BOOL isMemoryless = memoryless == JNI_TRUE;
+		BOOL validShape = isCubemap ? width == height && depthOrLayers == 6 : depthOrLayers >= 1;
 		if (width <= 0 || height <= 0 || mipLevels <= 0 || !validShape || (usage & ~7) != 0) {
 			mc_throw_state(env, @"A Metal texture requires positive dimensions, mip levels, and valid usage bits");
+			return 0;
+		}
+		if (isMemoryless && (usage != 4 || mipLevels != 1 || isCubemap || depthOrLayers != 1)) {
+			mc_throw_state(env, @"A memoryless Metal texture must be a single-level two-dimensional render target");
 			return 0;
 		}
 		MTLPixelFormat pixelFormat = mc_pixel_format(env, format);
@@ -2426,16 +2479,21 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 		if (device == nil) {
 			return 0;
 		}
+		if (isMemoryless && ![device supportsFamily:MTLGPUFamilyApple1]) {
+			mc_throw_state(env, @"This Metal device has no tile memory, so it cannot allocate a memoryless texture");
+			return 0;
+		}
+		BOOL isArray = !isCubemap && depthOrLayers > 1;
 		MTLTextureDescriptor *descriptor = [[MTLTextureDescriptor alloc] init];
-		descriptor.textureType = isCubemap ? MTLTextureTypeCube : MTLTextureType2D;
+		descriptor.textureType = isCubemap ? MTLTextureTypeCube : (isArray ? MTLTextureType2DArray : MTLTextureType2D);
 		descriptor.pixelFormat = pixelFormat;
 		descriptor.width = (NSUInteger)width;
 		descriptor.height = (NSUInteger)height;
 		descriptor.depth = 1;
 		descriptor.mipmapLevelCount = (NSUInteger)mipLevels;
-		descriptor.arrayLength = 1;
+		descriptor.arrayLength = isCubemap ? 1 : (NSUInteger)depthOrLayers;
 		descriptor.sampleCount = 1;
-		descriptor.storageMode = MTLStorageModePrivate;
+		descriptor.storageMode = isMemoryless ? MTLStorageModeMemoryless : MTLStorageModePrivate;
 		descriptor.usage = MTLTextureUsageUnknown;
 		if ((usage & 1) != 0) descriptor.usage |= MTLTextureUsageShaderRead;
 		if ((usage & 2) != 0) descriptor.usage |= MTLTextureUsageShaderWrite;
@@ -2468,7 +2526,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTextureView(
 			mc_throw_state(env, @"Metal texture-view mip range is out of bounds");
 			return 0;
 		}
-		NSUInteger sliceCount = texture.textureType == MTLTextureTypeCube ? 6 : 1;
+		NSUInteger sliceCount = texture.textureType == MTLTextureTypeCube ? 6 : texture.arrayLength;
 		id<MTLTexture> textureView = [texture
 			newTextureViewWithPixelFormat:texture.pixelFormat
 			textureType:texture.textureType
@@ -2786,48 +2844,85 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 	}
 }
 
+// Attachment-array layout, mirrored by MetalRenderPass.COLOR_FIELD_* on the Java side.
+#define MC_MAX_COLOR_ATTACHMENTS 8
+#define MC_COLOR_FIELDS 5
+#define MC_COLOR_FIELD_IS_DRAWABLE 0
+#define MC_COLOR_FIELD_MIP_LEVEL 1
+#define MC_COLOR_FIELD_LOAD_ACTION 2
+#define MC_COLOR_FIELD_STORE_ACTION 3
+#define MC_COLOR_FIELD_ARRAY_SLICE 4
+#define MC_COLOR_CLEAR_COMPONENTS 4
+#define MC_MAX_PASS_OBJECTS (1 + MC_MAX_COLOR_ATTACHMENTS + 1)
+
 MC_EXPORT JNIEXPORT jlong JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 	JNIEnv *env,
 	jclass type,
 	jlong commandBufferHandle,
-	jlong colorTargetHandle,
-	jboolean colorTargetIsDrawable,
-	jint colorMipLevel,
-	jint colorLoadAction,
-	jint colorStoreAction,
-	jdouble clearRed,
-	jdouble clearGreen,
-	jdouble clearBlue,
-	jdouble clearAlpha,
+	jlongArray colorTargetHandlesValue,
+	jintArray colorFieldsValue,
+	jdoubleArray colorClearValuesValue,
 	jlong depthTargetHandle,
 	jint depthMipLevel,
+	jint depthArraySlice,
 	jint depthLoadAction,
 	jint depthStoreAction,
 	jdouble clearDepth,
+	jint renderTargetArrayLength,
 	jint gpuTimingKind
 ) {
 	@autoreleasepool {
-		// A pass may omit either attachment. A depth-only pass is how a depth clear is expressed
-		// without inventing a full-size colour target for the encoder to ignore.
-		if (colorTargetHandle == 0 && depthTargetHandle == 0) {
-			mc_throw_state(env, @"A Metal render pass requires at least one attachment");
+		if (colorTargetHandlesValue == NULL || colorFieldsValue == NULL || colorClearValuesValue == NULL) {
+			mc_throw_state(env, @"Metal render-pass attachment arrays cannot be null");
 			return 0;
 		}
-		jlong handles[3];
-		MCObjectType types[3];
-		id objects[3];
+		jsize colorCount = (*env)->GetArrayLength(env, colorTargetHandlesValue);
+		if (colorCount < 0 || colorCount > MC_MAX_COLOR_ATTACHMENTS
+			|| (*env)->GetArrayLength(env, colorFieldsValue) != colorCount * MC_COLOR_FIELDS
+			|| (*env)->GetArrayLength(env, colorClearValuesValue) != colorCount * MC_COLOR_CLEAR_COMPONENTS) {
+			mc_throw_state(env, @"Metal render-pass attachment arrays have an invalid length");
+			return 0;
+		}
+
+		jlong colorTargetHandles[MC_MAX_COLOR_ATTACHMENTS];
+		jint colorFields[MC_MAX_COLOR_ATTACHMENTS * MC_COLOR_FIELDS];
+		jdouble colorClearValues[MC_MAX_COLOR_ATTACHMENTS * MC_COLOR_CLEAR_COMPONENTS];
+		if (colorCount > 0) {
+			(*env)->GetLongArrayRegion(env, colorTargetHandlesValue, 0, colorCount, colorTargetHandles);
+			(*env)->GetIntArrayRegion(env, colorFieldsValue, 0, colorCount * MC_COLOR_FIELDS, colorFields);
+			(*env)->GetDoubleArrayRegion(env, colorClearValuesValue, 0, colorCount * MC_COLOR_CLEAR_COMPONENTS, colorClearValues);
+			if ((*env)->ExceptionCheck(env)) {
+				return 0;
+			}
+		}
+
+		jlong handles[MC_MAX_PASS_OBJECTS];
+		MCObjectType types[MC_MAX_PASS_OBJECTS];
+		id objects[MC_MAX_PASS_OBJECTS];
+		NSInteger colorObjectIndex[MC_MAX_COLOR_ATTACHMENTS];
 		NSUInteger objectCount = 0;
-		NSInteger colorIndex = -1;
 		NSInteger depthIndex = -1;
+		NSUInteger attachedColorCount = 0;
 		handles[objectCount] = commandBufferHandle;
 		types[objectCount] = MCObjectTypeCommandBuffer;
 		objectCount++;
-		if (colorTargetHandle != 0) {
-			colorIndex = (NSInteger)objectCount;
-			handles[objectCount] = colorTargetHandle;
-			types[objectCount] = colorTargetIsDrawable ? MCObjectTypeDrawable : MCObjectTypeTexture;
+		for (jsize index = 0; index < colorCount; index++) {
+			if (colorTargetHandles[index] == 0) {
+				colorObjectIndex[index] = -1;
+				continue;
+			}
+			colorObjectIndex[index] = (NSInteger)objectCount;
+			handles[objectCount] = colorTargetHandles[index];
+			types[objectCount] = colorFields[index * MC_COLOR_FIELDS + MC_COLOR_FIELD_IS_DRAWABLE] != 0
+				? MCObjectTypeDrawable
+				: MCObjectTypeTexture;
 			objectCount++;
+			attachedColorCount++;
+		}
+		if (attachedColorCount == 0 && depthTargetHandle == 0) {
+			mc_throw_state(env, @"A Metal render pass requires at least one attachment");
+			return 0;
 		}
 		if (depthTargetHandle != 0) {
 			depthIndex = (NSInteger)objectCount;
@@ -2841,82 +2936,140 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 
 		MCMetalCommandBuffer *commandBuffer = objects[0];
 		[commandBuffer endBlitEncoding];
-		id<MTLTexture> colorTexture = nil;
-		if (colorIndex >= 0) {
-			colorTexture = colorTargetIsDrawable
-				? [(id<CAMetalDrawable>)objects[colorIndex] texture]
-				: (id<MTLTexture>)objects[colorIndex];
-		}
 		id<MTLTexture> depthTexture = depthIndex < 0 ? nil : (id<MTLTexture>)objects[depthIndex];
-		if (colorTexture != nil
-			&& (colorMipLevel < 0 || (NSUInteger)colorMipLevel >= colorTexture.mipmapLevelCount
-				|| colorTargetIsDrawable && colorMipLevel != 0)) {
-			mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
-			return 0;
-		}
 		if (depthTexture != nil && (depthMipLevel < 0 || (NSUInteger)depthMipLevel >= depthTexture.mipmapLevelCount)) {
 			mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
-			return 0;
-		}
-		if (colorTexture != nil
-			&& (mc_pixel_format_has_depth(colorTexture.pixelFormat) || mc_pixel_format_has_stencil(colorTexture.pixelFormat))) {
-			mc_throw_state(env, @"A depth/stencil texture cannot be used as a Metal color attachment");
 			return 0;
 		}
 		if (depthTexture != nil && !mc_pixel_format_has_depth(depthTexture.pixelFormat)) {
 			mc_throw_state(env, @"A Metal depth attachment requires a depth texture");
 			return 0;
 		}
-		NSUInteger colorWidth = colorTexture == nil ? 0 : MAX((NSUInteger)1, colorTexture.width >> colorMipLevel);
-		NSUInteger colorHeight = colorTexture == nil ? 0 : MAX((NSUInteger)1, colorTexture.height >> colorMipLevel);
-		NSUInteger depthWidth = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.width >> depthMipLevel);
-		NSUInteger depthHeight = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.height >> depthMipLevel);
-		if (colorTexture != nil && depthTexture != nil && (depthWidth != colorWidth || depthHeight != colorHeight)) {
-			mc_throw_state(env, @"Metal render-pass attachments must have matching dimensions");
+		if (depthTexture != nil && (depthArraySlice < 0 || (NSUInteger)depthArraySlice >= mc_texture_slice_count(depthTexture))) {
+			mc_throw_state(env, @"Metal render-pass attachment array slice is out of bounds");
 			return 0;
 		}
-		if (colorTexture == nil) {
-			colorWidth = depthWidth;
-			colorHeight = depthHeight;
+		if (renderTargetArrayLength < 0) {
+			mc_throw_state(env, @"A layered Metal render pass cannot have a negative layer count");
+			return 0;
 		}
 
-		MTLLoadAction nativeColorLoadAction = colorTexture == nil ? MTLLoadActionDontCare : mc_load_action(env, colorLoadAction);
-		MTLStoreAction nativeColorStoreAction = colorTexture == nil ? MTLStoreActionDontCare : mc_store_action(env, colorStoreAction);
-		MTLLoadAction nativeDepthLoadAction = depthTexture == nil ? MTLLoadActionDontCare : mc_load_action(env, depthLoadAction);
-		MTLStoreAction nativeDepthStoreAction = depthTexture == nil ? MTLStoreActionDontCare : mc_store_action(env, depthStoreAction);
-		if ((*env)->ExceptionCheck(env)) {
-			return 0;
+		NSUInteger targetWidth = 0;
+		NSUInteger targetHeight = 0;
+		id<MTLTexture> colorTextures[MC_MAX_COLOR_ATTACHMENTS];
+		for (jsize index = 0; index < colorCount; index++) {
+			colorTextures[index] = nil;
+			if (colorObjectIndex[index] < 0) {
+				continue;
+			}
+			const jint *fields = &colorFields[index * MC_COLOR_FIELDS];
+			BOOL isDrawable = fields[MC_COLOR_FIELD_IS_DRAWABLE] != 0;
+			id<MTLTexture> texture = isDrawable
+				? [(id<CAMetalDrawable>)objects[colorObjectIndex[index]] texture]
+				: (id<MTLTexture>)objects[colorObjectIndex[index]];
+			jint mipLevel = fields[MC_COLOR_FIELD_MIP_LEVEL];
+			if (mipLevel < 0 || (NSUInteger)mipLevel >= texture.mipmapLevelCount || (isDrawable && mipLevel != 0)) {
+				mc_throw_state(env, @"Metal render-pass attachment mip level is out of bounds");
+				return 0;
+			}
+			jint arraySlice = fields[MC_COLOR_FIELD_ARRAY_SLICE];
+			if (arraySlice < 0 || (NSUInteger)arraySlice >= mc_texture_slice_count(texture)) {
+				mc_throw_state(env, @"Metal render-pass attachment array slice is out of bounds");
+				return 0;
+			}
+			if (mc_pixel_format_has_depth(texture.pixelFormat) || mc_pixel_format_has_stencil(texture.pixelFormat)) {
+				mc_throw_state(env, @"A depth/stencil texture cannot be used as a Metal color attachment");
+				return 0;
+			}
+			if (texture.storageMode == MTLStorageModeMemoryless) {
+				jint loadAction = fields[MC_COLOR_FIELD_LOAD_ACTION];
+				jint storeAction = fields[MC_COLOR_FIELD_STORE_ACTION];
+				if (loadAction == 0 || storeAction != 1) {
+					mc_throw_state(env, @"A memoryless Metal attachment cannot load or store");
+					return 0;
+				}
+			}
+			NSUInteger width = MAX((NSUInteger)1, texture.width >> mipLevel);
+			NSUInteger height = MAX((NSUInteger)1, texture.height >> mipLevel);
+			if (targetWidth == 0) {
+				targetWidth = width;
+				targetHeight = height;
+			} else if (width != targetWidth || height != targetHeight) {
+				mc_throw_state(env, @"Metal render-pass attachments must have matching dimensions");
+				return 0;
+			}
+			colorTextures[index] = texture;
+		}
+
+		NSUInteger depthWidth = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.width >> depthMipLevel);
+		NSUInteger depthHeight = depthTexture == nil ? 0 : MAX((NSUInteger)1, depthTexture.height >> depthMipLevel);
+		if (depthTexture != nil) {
+			if (targetWidth == 0) {
+				targetWidth = depthWidth;
+				targetHeight = depthHeight;
+			} else if (depthWidth != targetWidth || depthHeight != targetHeight) {
+				mc_throw_state(env, @"Metal render-pass attachments must have matching dimensions");
+				return 0;
+			}
+			if (depthTexture.storageMode == MTLStorageModeMemoryless && (depthLoadAction == 0 || depthStoreAction != 1)) {
+				mc_throw_state(env, @"A memoryless Metal attachment cannot load or store");
+				return 0;
+			}
 		}
 
 		MTLRenderPassDescriptor *descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-		if (colorTexture != nil) {
-			descriptor.colorAttachments[0].texture = colorTexture;
-			descriptor.colorAttachments[0].level = (NSUInteger)colorMipLevel;
-			descriptor.colorAttachments[0].loadAction = nativeColorLoadAction;
-			descriptor.colorAttachments[0].storeAction = nativeColorStoreAction;
-			descriptor.colorAttachments[0].clearColor = MTLClearColorMake(clearRed, clearGreen, clearBlue, clearAlpha);
-		} else {
-			// Without a colour attachment Metal cannot infer the pass dimensions from one.
-			descriptor.renderTargetWidth = colorWidth;
-			descriptor.renderTargetHeight = colorHeight;
+		for (jsize index = 0; index < colorCount; index++) {
+			if (colorTextures[index] == nil) {
+				continue;
+			}
+			const jint *fields = &colorFields[index * MC_COLOR_FIELDS];
+			const jdouble *clear = &colorClearValues[index * MC_COLOR_CLEAR_COMPONENTS];
+			MTLLoadAction loadAction = mc_load_action(env, fields[MC_COLOR_FIELD_LOAD_ACTION]);
+			MTLStoreAction storeAction = mc_store_action(env, fields[MC_COLOR_FIELD_STORE_ACTION]);
+			if ((*env)->ExceptionCheck(env)) {
+				return 0;
+			}
+			NSUInteger colorIndex = (NSUInteger)index;
+			descriptor.colorAttachments[colorIndex].texture = colorTextures[index];
+			descriptor.colorAttachments[colorIndex].level = (NSUInteger)fields[MC_COLOR_FIELD_MIP_LEVEL];
+			descriptor.colorAttachments[colorIndex].slice = (NSUInteger)fields[MC_COLOR_FIELD_ARRAY_SLICE];
+			descriptor.colorAttachments[colorIndex].loadAction = loadAction;
+			descriptor.colorAttachments[colorIndex].storeAction = storeAction;
+			descriptor.colorAttachments[colorIndex].clearColor = MTLClearColorMake(clear[0], clear[1], clear[2], clear[3]);
+		}
+		if (attachedColorCount == 0) {
+			descriptor.renderTargetWidth = targetWidth;
+			descriptor.renderTargetHeight = targetHeight;
+		}
+		if (renderTargetArrayLength > 0) {
+			descriptor.renderTargetArrayLength = (NSUInteger)renderTargetArrayLength;
 		}
 		if (depthTexture != nil) {
+			MTLLoadAction nativeDepthLoadAction = mc_load_action(env, depthLoadAction);
+			MTLStoreAction nativeDepthStoreAction = mc_store_action(env, depthStoreAction);
+			if ((*env)->ExceptionCheck(env)) {
+				return 0;
+			}
 			descriptor.depthAttachment.texture = depthTexture;
 			descriptor.depthAttachment.level = (NSUInteger)depthMipLevel;
+			descriptor.depthAttachment.slice = (NSUInteger)depthArraySlice;
 			descriptor.depthAttachment.loadAction = nativeDepthLoadAction;
 			descriptor.depthAttachment.storeAction = nativeDepthStoreAction;
 			descriptor.depthAttachment.clearDepth = clearDepth;
 			if (mc_pixel_format_has_stencil(depthTexture.pixelFormat)) {
 				descriptor.stencilAttachment.texture = depthTexture;
 				descriptor.stencilAttachment.level = (NSUInteger)depthMipLevel;
+				descriptor.stencilAttachment.slice = (NSUInteger)depthArraySlice;
 				descriptor.stencilAttachment.loadAction = nativeDepthLoadAction;
 				descriptor.stencilAttachment.storeAction = nativeDepthStoreAction;
 				descriptor.stencilAttachment.clearStencil = 0;
 			}
 		}
 
-		if (colorIndex >= 0) {
-			[commandBuffer pin:objects[colorIndex]];
+		for (jsize index = 0; index < colorCount; index++) {
+			if (colorObjectIndex[index] >= 0) {
+				[commandBuffer pin:objects[colorObjectIndex[index]]];
+			}
 		}
 		if (depthTexture != nil) {
 			[commandBuffer pin:depthTexture];
@@ -2928,9 +3081,6 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 				NSUInteger slot = (NSUInteger)(sequence % MC_GPU_PASS_SLOTS);
 				MTLRenderPassSampleBufferAttachmentDescriptor *samplePoints = descriptor.sampleBufferAttachments[0];
 				samplePoints.sampleBuffer = samples;
-				// The pass's own span: the first thing its vertex stage does and the last thing its
-				// fragment stage does. The two inner boundaries are left unsampled because the gap
-				// between them is scheduling rather than this pass's work.
 				samplePoints.startOfVertexSampleIndex = slot * 2;
 				samplePoints.endOfVertexSampleIndex = MTLCounterDontSample;
 				samplePoints.startOfFragmentSampleIndex = MTLCounterDontSample;
@@ -2944,13 +3094,13 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			return 0;
 		}
 		encoder.label = @"MetalCraft render pass";
-		[encoder setViewport:(MTLViewport){0.0, 0.0, colorWidth, colorHeight, 0.0, 1.0}];
-		[encoder setScissorRect:(MTLScissorRect){0, 0, colorWidth, colorHeight}];
+		[encoder setViewport:(MTLViewport){0.0, 0.0, (double)targetWidth, (double)targetHeight, 0.0, 1.0}];
+		[encoder setScissorRect:(MTLScissorRect){0, 0, targetWidth, targetHeight}];
 		MCMetalRenderPass *renderPass = [[MCMetalRenderPass alloc]
 			initWithEncoder:encoder
 			commandBuffer:commandBuffer
-			width:colorWidth
-			height:colorHeight
+			width:targetWidth
+			height:targetHeight
 		];
 		return mc_register_object(renderPass, MCObjectTypeRenderPass, commandBufferHandle);
 	}
@@ -3888,6 +4038,232 @@ MC_EXPORT JNIEXPORT void JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nEndRenderPass(JNIEnv *env, jclass type, jlong handle) {
 	@autoreleasepool {
 		mc_release_object(env, handle, MCObjectTypeRenderPass);
+	}
+}
+
+MC_EXPORT JNIEXPORT jlong JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nCreateComputePipeline(
+	JNIEnv *env,
+	jclass type,
+	jlong deviceHandle,
+	jstring sourceValue,
+	jstring functionValue
+) {
+	@autoreleasepool {
+		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, deviceHandle, MCObjectTypeDevice);
+		if (device == nil) {
+			return 0;
+		}
+		if (sourceValue == NULL || functionValue == NULL) {
+			mc_throw_state(env, @"A Metal compute pipeline requires MSL source and a kernel function name");
+			return 0;
+		}
+		const char *sourceCharacters = (*env)->GetStringUTFChars(env, sourceValue, NULL);
+		const char *functionCharacters = (*env)->GetStringUTFChars(env, functionValue, NULL);
+		if (sourceCharacters == NULL || functionCharacters == NULL) {
+			if (sourceCharacters != NULL) {
+				(*env)->ReleaseStringUTFChars(env, sourceValue, sourceCharacters);
+			}
+			if (functionCharacters != NULL) {
+				(*env)->ReleaseStringUTFChars(env, functionValue, functionCharacters);
+			}
+			return 0;
+		}
+		NSString *source = [NSString stringWithUTF8String:sourceCharacters];
+		NSString *functionName = [NSString stringWithUTF8String:functionCharacters];
+		(*env)->ReleaseStringUTFChars(env, sourceValue, sourceCharacters);
+		(*env)->ReleaseStringUTFChars(env, functionValue, functionCharacters);
+
+		NSError *libraryError = nil;
+		id<MTLLibrary> library = [device newLibraryWithSource:source options:nil error:&libraryError];
+		if (library == nil) {
+			mc_throw_state(env, [NSString stringWithFormat:@"Metal compute-shader compilation failed: %@", libraryError.localizedDescription]);
+			return 0;
+		}
+		id<MTLFunction> function = [library newFunctionWithName:functionName];
+		if (function == nil) {
+			mc_throw_state(env, [NSString stringWithFormat:
+				@"Metal shader library does not contain the requested compute function %@; available functions %@",
+				functionName,
+				library.functionNames
+			]);
+			return 0;
+		}
+		NSError *pipelineError = nil;
+		id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithFunction:function error:&pipelineError];
+		if (pipeline == nil) {
+			mc_throw_state(env, [NSString stringWithFormat:@"Metal compute-pipeline creation failed: %@", pipelineError.localizedDescription]);
+			return 0;
+		}
+		return mc_register_object(pipeline, MCObjectTypeComputePipeline, deviceHandle);
+	}
+}
+
+MC_EXPORT JNIEXPORT jint JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nComputePipelineMaxThreadsPerThreadgroup(JNIEnv *env, jclass type, jlong handle) {
+	@autoreleasepool {
+		id<MTLComputePipelineState> pipeline = (id<MTLComputePipelineState>)mc_get_object(env, handle, MCObjectTypeComputePipeline);
+		return pipeline == nil ? 0 : (jint)pipeline.maxTotalThreadsPerThreadgroup;
+	}
+}
+
+MC_EXPORT JNIEXPORT jint JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nComputePipelineThreadExecutionWidth(JNIEnv *env, jclass type, jlong handle) {
+	@autoreleasepool {
+		id<MTLComputePipelineState> pipeline = (id<MTLComputePipelineState>)mc_get_object(env, handle, MCObjectTypeComputePipeline);
+		return pipeline == nil ? 0 : (jint)pipeline.threadExecutionWidth;
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nReleaseComputePipeline(JNIEnv *env, jclass type, jlong handle) {
+	@autoreleasepool {
+		mc_release_object(env, handle, MCObjectTypeComputePipeline);
+	}
+}
+
+MC_EXPORT JNIEXPORT jlong JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nBeginComputePass(
+	JNIEnv *env, jclass type, jlong commandBufferHandle, jint gpuTimingKind
+) {
+	@autoreleasepool {
+		MCMetalCommandBuffer *commandBuffer = (MCMetalCommandBuffer *)mc_get_object(env, commandBufferHandle, MCObjectTypeCommandBuffer);
+		if (commandBuffer == nil) {
+			return 0;
+		}
+		[commandBuffer endBlitEncoding];
+		MTLComputePassDescriptor *descriptor = [MTLComputePassDescriptor computePassDescriptor];
+		descriptor.dispatchType = MTLDispatchTypeSerial;
+		if (gpuTimingKind >= 0 && gpuTimingKind < MC_GPU_PASS_KINDS) {
+			id<MTLCounterSampleBuffer> samples = mc_gpu_pass_sample_buffer(commandBuffer.commandBuffer.device);
+			if (samples != nil) {
+				uint64_t sequence = atomic_fetch_add_explicit(&mc_gpu_pass_next_slot, 1, memory_order_relaxed);
+				NSUInteger slot = (NSUInteger)(sequence % MC_GPU_PASS_SLOTS);
+				MTLComputePassSampleBufferAttachmentDescriptor *samplePoints = descriptor.sampleBufferAttachments[0];
+				samplePoints.sampleBuffer = samples;
+				samplePoints.startOfEncoderSampleIndex = slot * 2;
+				samplePoints.endOfEncoderSampleIndex = slot * 2 + 1;
+				[commandBuffer addTimedPassKind:(uint32_t)gpuTimingKind sequence:sequence sampleBuffer:samples];
+			}
+		}
+		id<MTLComputeCommandEncoder> encoder = [commandBuffer.commandBuffer
+			computeCommandEncoderWithDescriptor:descriptor];
+		if (encoder == nil) {
+			mc_throw_state(env, @"Metal did not create a compute command encoder");
+			return 0;
+		}
+		encoder.label = @"MetalCraft compute pass";
+		MCMetalComputePass *pass = [[MCMetalComputePass alloc] initWithEncoder:encoder commandBuffer:commandBuffer];
+		return mc_register_object(pass, MCObjectTypeComputePass, commandBufferHandle);
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nSetComputePipeline(JNIEnv *env, jclass type, jlong passHandle, jlong pipelineHandle) {
+	@autoreleasepool {
+		jlong handles[] = {passHandle, pipelineHandle};
+		MCObjectType types[] = {MCObjectTypeComputePass, MCObjectTypeComputePipeline};
+		id objects[2];
+		if (!mc_get_objects_same_device(env, handles, types, objects, 2)) return;
+		MCMetalComputePass *pass = objects[0];
+		id<MTLComputePipelineState> pipeline = objects[1];
+		[pass.commandBuffer pin:pipeline];
+		[pass.encoder setComputePipelineState:pipeline];
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nSetComputeBuffer(
+	JNIEnv *env,
+	jclass type,
+	jlong passHandle,
+	jint index,
+	jlong bufferHandle,
+	jlong offset
+) {
+	@autoreleasepool {
+		jlong handles[] = {passHandle, bufferHandle};
+		MCObjectType types[] = {MCObjectTypeComputePass, MCObjectTypeBuffer};
+		id objects[2];
+		if (!mc_get_objects_same_device(env, handles, types, objects, 2)) return;
+		MCMetalComputePass *pass = objects[0];
+		id<MTLBuffer> buffer = objects[1];
+		if (index < 0 || index >= 16 || offset < 0 || (NSUInteger)offset >= buffer.length) {
+			mc_throw_state(env, @"Metal compute buffer binding index or offset is invalid");
+			return;
+		}
+		[pass.commandBuffer pin:buffer];
+		[pass.encoder setBuffer:buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index];
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nSetComputeTexture(JNIEnv *env, jclass type, jlong passHandle, jint index, jlong textureViewHandle) {
+	@autoreleasepool {
+		jlong handles[] = {passHandle, textureViewHandle};
+		MCObjectType types[] = {MCObjectTypeComputePass, MCObjectTypeTextureView};
+		id objects[2];
+		if (!mc_get_objects_same_device(env, handles, types, objects, 2)) return;
+		if (index < 0 || index >= 16) {
+			mc_throw_state(env, @"Metal compute texture binding index is invalid");
+			return;
+		}
+		MCMetalComputePass *pass = objects[0];
+		id<MTLTexture> texture = objects[1];
+		[pass.commandBuffer pin:texture];
+		[pass.encoder setTexture:texture atIndex:(NSUInteger)index];
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nSetComputeSampler(JNIEnv *env, jclass type, jlong passHandle, jint index, jlong samplerHandle) {
+	@autoreleasepool {
+		jlong handles[] = {passHandle, samplerHandle};
+		MCObjectType types[] = {MCObjectTypeComputePass, MCObjectTypeSampler};
+		id objects[2];
+		if (!mc_get_objects_same_device(env, handles, types, objects, 2)) return;
+		if (index < 0 || index >= 16) {
+			mc_throw_state(env, @"Metal compute sampler binding index is invalid");
+			return;
+		}
+		MCMetalComputePass *pass = objects[0];
+		id<MTLSamplerState> sampler = objects[1];
+		[pass.commandBuffer pin:sampler];
+		[pass.encoder setSamplerState:sampler atIndex:(NSUInteger)index];
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nDispatchThreadgroups(
+	JNIEnv *env,
+	jclass type,
+	jlong passHandle,
+	jint groupsX,
+	jint groupsY,
+	jint groupsZ,
+	jint threadsX,
+	jint threadsY,
+	jint threadsZ
+) {
+	@autoreleasepool {
+		MCMetalComputePass *pass = (MCMetalComputePass *)mc_get_object(env, passHandle, MCObjectTypeComputePass);
+		if (pass == nil) {
+			return;
+		}
+		if (groupsX <= 0 || groupsY <= 0 || groupsZ <= 0 || threadsX <= 0 || threadsY <= 0 || threadsZ <= 0) {
+			mc_throw_state(env, @"A Metal dispatch requires positive threadgroup and thread counts");
+			return;
+		}
+		[pass.encoder
+			dispatchThreadgroups:MTLSizeMake((NSUInteger)groupsX, (NSUInteger)groupsY, (NSUInteger)groupsZ)
+			threadsPerThreadgroup:MTLSizeMake((NSUInteger)threadsX, (NSUInteger)threadsY, (NSUInteger)threadsZ)];
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nEndComputePass(JNIEnv *env, jclass type, jlong handle) {
+	@autoreleasepool {
+		mc_release_object(env, handle, MCObjectTypeComputePass);
 	}
 }
 

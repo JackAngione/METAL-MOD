@@ -8,6 +8,7 @@ import dev.metalcraft.api.MetalCraftShaderContext;
 import dev.metalcraft.api.MetalCraftShaderExtension;
 import dev.metalcraft.api.MetalCraftShaderRegistry;
 import dev.metalcraft.api.MetalCraftShaders;
+import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.util.List;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -36,11 +37,27 @@ public final class MetalCraftClient implements ClientModInitializer {
 		MetalCraftShaderRegistry registry = MetalCraftShaders.registry();
 		MetalCraftShaderContext context = new MetalCraftShaderContext(info, registry);
 		List<MetalCraftShaderExtension> extensions = FabricLoader.getInstance().getEntrypoints(SHADER_ENTRYPOINT, MetalCraftShaderExtension.class);
-		for (MetalCraftShaderExtension extension : extensions) {
-			extension.registerShaders(context);
-		}
+		registerExtensions(context, extensions);
 
 		precompileRegisteredShaders();
+	}
+
+	/**
+	 * Registers each {@code metalcraft-shaders} extension independently. One implementation's
+	 * exception or error skips that extension and leaves the rest of the list to load.
+	 */
+	public static void registerExtensions(final MetalCraftShaderContext context, final List<MetalCraftShaderExtension> extensions) {
+		for (MetalCraftShaderExtension extension : extensions) {
+			try {
+				extension.registerShaders(context);
+			} catch (RuntimeException | Error error) {
+				LOGGER.error(
+					"MetalCraft shader extension {} failed to register; other extensions will still load",
+					extension.getClass().getName(),
+					error
+				);
+			}
+		}
 	}
 
 	public static void precompileRegisteredShaders() {
@@ -54,6 +71,14 @@ public final class MetalCraftClient implements ClientModInitializer {
 		int valid = registry.precompileAll(device);
 		if (total > 0) {
 			LOGGER.info("Precompiled {}/{} MetalCraft shader pipelines for the {} backend", valid, total, device.getDeviceInfo().backendName());
+		}
+	}
+
+	/** Re-reads the selected pack after a resource reload. No-ops when no runtime exists. */
+	public static void reloadShaderPackRuntime() {
+		ShaderPackRuntime runtime = ShaderPackRuntime.active();
+		if (runtime != null) {
+			runtime.reload();
 		}
 	}
 }

@@ -10,15 +10,37 @@ import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.CompareOp;
 import com.mojang.blaze3d.platform.PolygonMode;
+import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.blaze3d.systems.RenderPassDescriptor;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.VertexFormat;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import net.minecraft.resources.Identifier;
+import dev.metalcraft.api.MetalCraftShaderContext;
+import dev.metalcraft.api.MetalCraftShaderExtension;
+import dev.metalcraft.api.MetalCraftShaders;
+import dev.metalcraft.client.MetalCraftClient;
+import dev.metalcraft.client.shader.ShaderFrameExecutor;
+import dev.metalcraft.client.shader.ShaderGraphCompiler;
+import dev.metalcraft.client.shader.ShaderPack;
+import dev.metalcraft.client.shader.ShaderPackLoader;
+import dev.metalcraft.client.shader.ShaderPackRuntime;
 
 public final class MetalShaderTranslationSmoke {
 	private static final int SPIRV_MAGIC = 0x07230203;
@@ -166,11 +188,47 @@ public final class MetalShaderTranslationSmoke {
 		layout(location = 0) out vec4 color;
 		void main() { color = textureLod(Source, vec2(0.5), 2.0); }
 		""";
+	private static final String MRT_VERTEX_GLSL = """
+		#version 450
+		void main() {
+		    vec2 positions[3] = vec2[](
+		        vec2(-1.0, -1.0),
+		        vec2( 3.0, -1.0),
+		        vec2(-1.0,  3.0)
+		    );
+		    gl_Position = vec4(positions[gl_VertexID % 3], 0.0, 1.0);
+		}
+		""";
+	private static final String MRT_FRAGMENT_GLSL = """
+		#version 450
+		layout(location = 0) out vec4 target0;
+		layout(location = 1) out vec4 target1;
+
+		void main() {
+		    target0 = vec4(1.0, 0.0, 0.0, 1.0);
+		    target1 = vec4(0.0, 1.0, 0.0, 1.0);
+		}
+		""";
+	private static final String COMPUTE_FILL_MSL = """
+		#include <metal_stdlib>
+		using namespace metal;
+
+		kernel void fill_one(
+		    texture2d<float, access::write> output [[texture(0)]],
+		    uint2 pixel [[thread_position_in_grid]]
+		) {
+		    if (pixel.x >= output.get_width() || pixel.y >= output.get_height()) {
+		        return;
+		    }
+		    output.write(float4(1.0), pixel);
+		}
+		""";
 
 	private MetalShaderTranslationSmoke() {
 	}
 
 	public static void main(final String[] arguments) {
+		assertExtensionIsolation();
 		assertTransientArenaSuballocation();
 		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
 			VERTEX_GLSL,
@@ -243,6 +301,12 @@ public final class MetalShaderTranslationSmoke {
 			assertBatchedResourceBindings(device);
 			assertQueriesAndLifetime(device, pipeline);
 			assertPassGpuTiming(device, pipeline);
+			assertComputeFill(device);
+			assertMultipleRenderTargets(device);
+			assertMemorylessAbi(device);
+			assertTextureArrayPass(device);
+			assertMemorylessPassMerge();
+			assertIdentityGradePack(device);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(
 				mappedDescriptor.vertexSource(), mappedDescriptor.vertexFunction(), mappedDescriptor.fragmentSource(), mappedDescriptor.fragmentFunction(),
 				mappedDescriptor.colorTargets(), null, mappedDescriptor.vertexDescriptor(), MetalRenderPipeline.DepthState.DISABLED,
@@ -263,6 +327,19 @@ public final class MetalShaderTranslationSmoke {
 			if (!expected.getMessage().contains("smoke/broken.vert")) {
 				throw new AssertionError("Shader diagnostic omitted its source name", expected);
 			}
+		}
+	}
+
+	private static void assertExtensionIsolation() {
+		java.util.concurrent.atomic.AtomicInteger ran = new java.util.concurrent.atomic.AtomicInteger();
+		MetalCraftShaderContext context = new MetalCraftShaderContext(null, MetalCraftShaders.registry());
+		MetalCraftShaderExtension throwing = ignored -> {
+			throw new IllegalStateException("intentional extension failure");
+		};
+		MetalCraftShaderExtension counting = ignored -> ran.incrementAndGet();
+		MetalCraftClient.registerExtensions(context, java.util.List.of(throwing, counting));
+		if (ran.get() != 1) {
+			throw new AssertionError("A throwing metalcraft-shaders extension aborted later extensions");
 		}
 	}
 
@@ -827,6 +904,586 @@ public final class MetalShaderTranslationSmoke {
 		}
 		if (!translation.metalSource().contains("#include <metal_stdlib>")) {
 			throw new AssertionError(translation.sourceName() + " did not produce Metal source");
+		}
+	}
+
+	private static void assertComputeFill(final MetalDevice device) {
+		int size = 8;
+		try (MetalComputePipeline kernel = device.createComputePipeline(
+				new MetalComputePipeline.Descriptor(COMPUTE_FILL_MSL, "fill_one"));
+			 MetalCommandQueue queue = device.createCommandQueue();
+			 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(
+				 MetalTexture.Format.R8_UNORM, size, size, 1,
+				 MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_SHADER_WRITE
+			 ));
+			 MetalTextureView outputView = output.createView()) {
+			if (kernel.maxThreadsPerThreadgroup() < 64 || kernel.threadExecutionWidth() <= 0) {
+				throw new AssertionError(
+					"Metal reported an unusable threadgroup size for a compiled kernel: "
+						+ kernel.maxThreadsPerThreadgroup() + " threads, width " + kernel.threadExecutionWidth()
+				);
+			}
+			try (MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalComputePass compute = commands.beginComputePass()) {
+				compute.setPipeline(kernel);
+				compute.setTexture(0, outputView);
+				compute.dispatchCovering(size, size, 8, 8);
+				compute.close();
+				commands.commitAndWait();
+			}
+			ByteBuffer pixels = output.readback(queue, 0);
+			int value = Byte.toUnsignedInt(pixels.get(0));
+			if (value != 255) {
+				throw new AssertionError("Compute kernel wrote " + value + " to an R8 texture, expected 255");
+			}
+		}
+	}
+
+	private static void assertMultipleRenderTargets(final MetalDevice device) {
+		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
+			MRT_VERTEX_GLSL, "smoke/mrt.vert", MRT_FRAGMENT_GLSL, "smoke/mrt.frag"
+		);
+		List<MetalRenderPipeline.ColorTarget> targets = List.of(
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM),
+			MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA8_UNORM)
+		);
+		List<MetalTexture> written = new ArrayList<>();
+		try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 translated.vertex().metalSource(), translated.vertex().entryPoint(),
+				 translated.fragment().metalSource(), translated.fragment().entryPoint(),
+				 targets, null, MetalRenderPipeline.VertexDescriptor.EMPTY,
+				 MetalRenderPipeline.DepthState.DISABLED, MetalRenderPipeline.RasterState.DEFAULT
+			 ));
+			 MetalCommandQueue queue = device.createCommandQueue()) {
+			for (int index = 0; index < 2; index++) {
+				written.add(device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 4, 4, 1)));
+			}
+			List<MetalRenderPass.ColorAttachment> attachments = List.of(
+				new MetalRenderPass.ColorAttachment(
+					written.get(0), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.0, 0.0, 0.0, 1.0
+				),
+				new MetalRenderPass.ColorAttachment(
+					written.get(1), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 0.0, 0.0, 0.0, 1.0
+				)
+			);
+			try (MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(attachments, null))) {
+				pass.setPipeline(pipeline);
+				pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				pass.close();
+				commands.commitAndWait();
+			}
+			int[] expected = {0xFF0000, 0x00FF00};
+			for (int index = 0; index < expected.length; index++) {
+				ByteBuffer pixels = written.get(index).readback(queue, 0);
+				int actual = Byte.toUnsignedInt(pixels.get(0)) << 16
+					| Byte.toUnsignedInt(pixels.get(1)) << 8
+					| Byte.toUnsignedInt(pixels.get(2));
+				if (actual != expected[index]) {
+					throw new AssertionError(String.format(
+						"Metal color target %d holds %06X but its shader wrote %06X", index, actual, expected[index]
+					));
+				}
+			}
+		} finally {
+			written.forEach(MetalTexture::close);
+		}
+	}
+
+	private static void assertMemorylessAbi(final MetalDevice device) {
+		try {
+			MetalNative.nCreateTexture(
+				device.requireOpenHandle(),
+				MetalTexture.Format.RGBA8_UNORM.nativeCode(),
+				8,
+				8,
+				1,
+				1,
+				MetalTexture.USAGE_SHADER_READ,
+				false,
+				true
+			);
+			throw new AssertionError("nCreateTexture accepted a memoryless texture whose usage is not render-target only");
+		} catch (IllegalStateException expected) {
+			if (expected.getMessage() == null || !expected.getMessage().contains("memoryless")) {
+				throw new AssertionError("Memoryless usage rejection did not name memoryless storage", expected);
+			}
+		}
+
+		try (MetalTexture memoryless = device.createTexture(
+			MetalTexture.Descriptor.memoryless(MetalTexture.Format.RGBA8_UNORM, 8, 8)
+		)) {
+			if (!memoryless.isMemoryless() || memoryless.descriptor().byteSize() != 0L) {
+				throw new AssertionError("A memoryless Metal texture did not report memoryless storage");
+			}
+			try {
+				new MetalRenderPass.ColorAttachment(
+					memoryless, MetalRenderPass.LoadAction.LOAD, MetalRenderPass.StoreAction.DONT_CARE, 0.0, 0.0, 0.0, 1.0
+				);
+				throw new AssertionError("A memoryless Metal color attachment accepted LOAD");
+			} catch (IllegalArgumentException expected) {
+				if (expected.getMessage() == null || !expected.getMessage().contains("memoryless")) {
+					throw new AssertionError("Memoryless LOAD rejection did not name memoryless storage", expected);
+				}
+			}
+			try (MetalCommandQueue queue = device.createCommandQueue();
+				 MetalCommandBuffer commands = queue.createCommandBuffer();
+				 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+					 new MetalRenderPass.ColorAttachment(
+						 memoryless, MetalRenderPass.LoadAction.DONT_CARE, MetalRenderPass.StoreAction.DONT_CARE, 0.0, 0.0, 0.0, 1.0
+					 )
+				 ))) {
+				pass.close();
+				commands.commitAndWait();
+			}
+		}
+	}
+
+	private static void assertTextureArrayPass(final MetalDevice device) {
+		try (MetalTexture depth = device.createTexture(MetalTexture.Descriptor.array(
+				 MetalTexture.Format.DEPTH32_FLOAT, 64, 64, 4, MetalTexture.USAGE_RENDER_TARGET
+			 ));
+			 MetalTextureView view = depth.createView();
+			 MetalCommandQueue queue = device.createCommandQueue();
+			 MetalCommandBuffer commands = queue.createCommandBuffer();
+			 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+				 List.of(),
+				 new MetalRenderPass.DepthAttachment(
+					 depth, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 1.0
+				 ),
+				 4
+			 ))) {
+			if (depth.descriptor().sliceCount() != 4 || view.sliceCount() != 4) {
+				throw new AssertionError(
+					"A 4-layer Metal texture view covered " + view.sliceCount() + " slices"
+				);
+			}
+			pass.close();
+			commands.commitAndWait();
+		}
+	}
+
+	private static void assertMemorylessPassMerge() {
+		MetalDevice metal = MetalNative.openDefaultDevice().orElseThrow();
+		MetalGpuDevice device = new MetalGpuDevice(metal, (identifier, type) -> null);
+		try {
+			MetalTexture color0 = metal.createTexture(MetalTexture.Descriptor.memoryless(MetalTexture.Format.RGBA8_UNORM, 8, 8));
+			MetalTexture color1 = metal.createTexture(MetalTexture.Descriptor.memoryless(MetalTexture.Format.RGBA8_UNORM, 8, 8));
+			MetalGpuTexture gpu0 = new MetalGpuTexture(
+				GpuTexture.USAGE_RENDER_ATTACHMENT, "memoryless-0", GpuFormat.RGBA8_UNORM, 8, 8, 1, 1, color0
+			);
+			MetalGpuTexture gpu1 = new MetalGpuTexture(
+				GpuTexture.USAGE_RENDER_ATTACHMENT, "memoryless-1", GpuFormat.RGBA8_UNORM, 8, 8, 1, 1, color1
+			);
+			MetalGpuTextureView view0 = (MetalGpuTextureView)device.createTextureView(gpu0);
+			MetalGpuTextureView view1 = (MetalGpuTextureView)device.createTextureView(gpu1);
+			MetalCommandEncoder encoder = (MetalCommandEncoder)device.createCommandEncoder();
+			long[] probe = new long[MetalStallProbe.slots()];
+			MetalStallProbe.takeFrame(probe, 0);
+			RenderPass.RenderArea area = new RenderPass.RenderArea(0, 0, 8, 8);
+			encoder.createRenderPass(
+				RenderPassDescriptor.create(() -> "memoryless-mrt-a")
+					.withColorAttachment(view0)
+					.withColorAttachment(view1)
+					.withRenderArea(area)
+			);
+			encoder.submitRenderPass();
+			encoder.createRenderPass(
+				RenderPassDescriptor.create(() -> "memoryless-mrt-b")
+					.withColorAttachment(view0)
+					.withColorAttachment(view1)
+					.withRenderArea(area)
+			);
+			encoder.submitRenderPass();
+			encoder.submit();
+			MetalStallProbe.takeFrame(probe, 0);
+			int mergeIndex = MetalStallProbe.Source.RENDER_PASS_MERGE.ordinal() * MetalStallProbe.FIELDS
+				+ MetalStallProbe.FIELD_COUNT;
+			if (probe[mergeIndex] < 1L) {
+				throw new AssertionError(
+					"Memoryless two-color DONT_CARE passes did not merge; RENDER_PASS_MERGE count=" + probe[mergeIndex]
+				);
+			}
+		} finally {
+			device.close();
+		}
+	}
+
+	private static final String GRAPH_MSL = """
+		#include <metal_stdlib>
+		using namespace metal;
+		""";
+
+	private static void assertIdentityGradePack(final MetalDevice device) {
+		assertDeclaredShaderGraph();
+		assertInvalidPackJson();
+		assertIncludeCycle();
+		assertBundledGradeGraph();
+		assertDefaultSelectedNone(device);
+		assertShadersDisableProperty(device);
+		Path root;
+		Path settings;
+		try {
+			root = Files.createTempDirectory("metalcraft-grade-smoke-");
+			settings = root.resolve("metalcraft-shaders.json");
+		} catch (IOException error) {
+			throw new AssertionError("Could not create shader runtime smoke directories", error);
+		}
+		try (ShaderPackRuntime runtime = new ShaderPackRuntime(device, root.resolve("shaderpacks"), settings)) {
+			if (!ShaderPackRuntime.NONE_ID.equals(runtime.selectedPackId()) || runtime.isActive()) {
+				throw new AssertionError("A new shader runtime must start with selectedPack none and isActive false");
+			}
+			runtime.selectPack(ShaderPackRuntime.BUILTIN_ID);
+			if (!runtime.isActive() || runtime.executor().isEmpty()) {
+				throw new AssertionError("Selecting metalcraft-standard did not activate the pack: " + runtime.lastError());
+			}
+
+			try (MetalCommandQueue queue = device.createCommandQueue();
+				 MetalTexture scene = device.createTexture(new MetalTexture.Descriptor(
+					 MetalTexture.Format.BGRA8_UNORM, 64, 64, 1
+				 ));
+				 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(
+					 MetalTexture.Format.BGRA8_UNORM, 64, 64, 1
+				 ))) {
+				ShaderFrameExecutor executor = runtime.executor().orElseThrow();
+				try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+					if (executor.encodeForTesting(commands, scene, output)) {
+						throw new AssertionError("encodeForTesting before resize returned true");
+					}
+				}
+
+				runtime.resize(64, 64);
+				MetalTexture post = runtime.target("post_color");
+				if (post == null || post.descriptor().width() != 64 || post.descriptor().height() != 64) {
+					throw new AssertionError("resize did not allocate post_color at 64x64");
+				}
+				if (post.isMemoryless()) {
+					throw new AssertionError("post_color must not be memoryless");
+				}
+
+				fillSolidBgra(scene, queue, (byte)0x30, (byte)0x60, (byte)0x90, (byte)0xFF);
+				MetalStallProbe.setEnabled(true);
+				try {
+					MetalPassCensus.reset();
+					encodeGrade(queue, executor, scene, output);
+					if (!MetalPassCensus.internedNames().contains("MetalCraft shader: grade")) {
+						throw new AssertionError(
+							"Interned census names omitted MetalCraft shader: grade: " + MetalPassCensus.internedNames()
+						);
+					}
+				} finally {
+					MetalStallProbe.setEnabled(false);
+				}
+				assertBgraDelta(output.readback(queue, 0), (byte)0x30, (byte)0x60, (byte)0x90, 2, "identity grade");
+
+				runtime.setOption("invert", true);
+				if (!runtime.isActive()) {
+					throw new AssertionError("Toggling invert disabled the pack: " + runtime.lastError());
+				}
+				encodeGrade(queue, runtime.executor().orElseThrow(), scene, output);
+				assertBgraDelta(
+					output.readback(queue, 0),
+					(byte)(0xFF - 0x30),
+					(byte)(0xFF - 0x60),
+					(byte)(0xFF - 0x90),
+					2,
+					"invert grade"
+				);
+			}
+
+			assertFailedMsl(device, runtime, root.resolve("shaderpacks"));
+		}
+	}
+
+	private static void assertBundledGradeGraph() {
+		try {
+			ShaderPack pack = ShaderPackLoader.loadBundled(
+				ShaderPackRuntime.class.getClassLoader(),
+				ShaderPackRuntime.BUILTIN_ID,
+				"assets/metalcraft/shaderpacks/standard"
+			);
+			ShaderGraphCompiler.CompiledGraph graph = ShaderGraphCompiler.compile(pack);
+			if (graph.passes().size() != 1 || !"grade".equals(graph.passes().getFirst().declaration().id())) {
+				throw new AssertionError("Built-in pack did not compile to a single grade pass: " + graph.passes());
+			}
+			ShaderGraphCompiler.TargetInfo post = graph.targets().get("post_color");
+			if (post == null || post.memoryless()) {
+				throw new AssertionError("Built-in post_color must exist and not be memoryless");
+			}
+		} catch (IOException error) {
+			throw new AssertionError("Could not load the bundled MetalCraft Standard pack", error);
+		}
+	}
+
+	private static void assertDefaultSelectedNone(final MetalDevice device) {
+		try {
+			Path root = Files.createTempDirectory("metalcraft-default-none-");
+			try (ShaderPackRuntime runtime = new ShaderPackRuntime(
+				device, root.resolve("shaderpacks"), root.resolve("metalcraft-shaders.json")
+			)) {
+				if (!ShaderPackRuntime.NONE_ID.equals(runtime.selectedPackId()) || runtime.isActive()) {
+					throw new AssertionError(
+						"Default selectedPackId is " + runtime.selectedPackId() + ", isActive=" + runtime.isActive()
+					);
+				}
+			}
+		} catch (IOException error) {
+			throw new AssertionError("Could not construct a default shader runtime", error);
+		}
+	}
+
+	private static void assertShadersDisableProperty(final MetalDevice device) {
+		String previous = System.getProperty("metalcraft.shaders.disable");
+		System.setProperty("metalcraft.shaders.disable", "true");
+		try {
+			if (ShaderPackRuntime.createDefault(device) != null) {
+				throw new AssertionError("createDefault must return null when metalcraft.shaders.disable is true");
+			}
+		} finally {
+			if (previous == null) {
+				System.clearProperty("metalcraft.shaders.disable");
+			} else {
+				System.setProperty("metalcraft.shaders.disable", previous);
+			}
+		}
+	}
+
+	private static void assertFailedMsl(final MetalDevice device, final ShaderPackRuntime runtime, final Path shaderpacks) {
+		try {
+			Path broken = shaderpacks.resolve("broken");
+			Files.createDirectories(broken);
+			Files.writeString(broken.resolve("pack.json"), """
+				{
+				  "format": 2,
+				  "name": "Broken",
+				  "targets": {
+				    "post_color": { "format": "bgra8_unorm", "scale": 1.0, "lifetime": "frame" }
+				  },
+				  "passes": [
+				    {
+				      "id": "grade",
+				      "kind": "fullscreen",
+				      "source": "grade.metal",
+				      "reads": ["scene"],
+				      "writes": ["post_color"]
+				    }
+				  ]
+				}
+				""", StandardCharsets.UTF_8);
+			Files.writeString(broken.resolve("grade.metal"), "this is not valid MSL\n", StandardCharsets.UTF_8);
+			runtime.selectPack("broken");
+			if (runtime.lastError().isEmpty() || runtime.isActive()) {
+				throw new AssertionError(
+					"Failed MSL must set lastError and isActive false, lastError=" + runtime.lastError()
+						+ " isActive=" + runtime.isActive()
+				);
+			}
+			try (MetalCommandQueue queue = device.createCommandQueue();
+				 MetalTexture scene = device.createTexture(new MetalTexture.Descriptor(
+					 MetalTexture.Format.BGRA8_UNORM, 8, 8, 1
+				 ));
+				 MetalTexture output = device.createTexture(new MetalTexture.Descriptor(
+					 MetalTexture.Format.BGRA8_UNORM, 8, 8, 1
+				 ));
+				 MetalCommandBuffer commands = queue.createCommandBuffer()) {
+				if (runtime.executor().isPresent()) {
+					runtime.executor().orElseThrow().encodeForTesting(commands, scene, output);
+				}
+			}
+		} catch (IOException error) {
+			throw new AssertionError("Could not build the failed-MSL fixture", error);
+		}
+	}
+
+	private static void assertDeclaredShaderGraph() {
+		Path root = Path.of("build", "shader-graph-smoke");
+		deleteTree(root);
+		String manifest = """
+			{
+			  "format": 1,
+			  "name": "Declared Graph",
+			  "targets": {
+			    "g": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "transient"},
+			    "lit": {"format": "rgba8_unorm", "scale": 1.0, "lifetime": "frame"}
+			  },
+			  "passes": [
+			    {"id": "resolve", "kind": "fullscreen", "tile_reads": ["g"], "merge_with": "gbuffer", "writes": ["lit"]},
+			    {"id": "final", "kind": "fullscreen", "reads": ["lit"], "writes": ["drawable"]},
+			    {"id": "gbuffer", "kind": "geometry", "geometry": "terrain", "writes": ["g"]}
+			  ],
+			  "options": []
+			}
+			""";
+		try {
+			Files.createDirectories(root);
+			Path zipPath = root.resolve("declared.zip");
+			try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(zipPath))) {
+				writeZipText(zip, "pack.json", manifest);
+				writeZipText(zip, "graph.metal", GRAPH_MSL);
+			}
+			List<ShaderPackLoader.PackRef> discovered = ShaderPackLoader.discover(root);
+			if (discovered.size() != 1 || discovered.getFirst().kind() != ShaderPackLoader.Kind.ZIP) {
+				throw new AssertionError("Shader-pack zip discovery did not return the declared pack");
+			}
+			ShaderGraphCompiler.CompiledGraph graph = ShaderGraphCompiler.compile(ShaderPackLoader.load(discovered.getFirst()));
+			List<String> order = graph.passes().stream().map(pass -> pass.declaration().id()).toList();
+			if (!order.equals(List.of("gbuffer", "resolve", "final")) || !graph.targets().get("g").memoryless()) {
+				throw new AssertionError("Declared shader graph did not derive ordering and memoryless promotion: " + order);
+			}
+			if (graph.passes().getFirst().writes().getFirst().storeAction() != ShaderGraphCompiler.StoreAction.DONT_CARE
+				|| graph.passes().get(1).writes().getFirst().storeAction() != ShaderGraphCompiler.StoreAction.STORE) {
+				throw new AssertionError("Declared shader graph did not derive attachment store actions");
+			}
+
+			Path invalid = root.resolve("invalid");
+			Files.createDirectories(invalid);
+			String invalidManifest = manifest.replace(
+				"\"tile_reads\": [\"g\"], \"merge_with\": \"gbuffer\"", "\"reads\": [\"g\"]"
+			);
+			Files.writeString(invalid.resolve("pack.json"), invalidManifest, StandardCharsets.UTF_8);
+			Files.writeString(invalid.resolve("graph.metal"), GRAPH_MSL, StandardCharsets.UTF_8);
+			try {
+				ShaderGraphCompiler.compile(ShaderPackLoader.load(invalid));
+				throw new AssertionError("A transient target sampled by an unmerged pass was accepted");
+			} catch (ShaderGraphCompiler.CompileException expected) {
+				if (!expected.getMessage().contains("gbuffer") || !expected.getMessage().contains("resolve")) {
+					throw new AssertionError("Transient-read diagnostic omitted the offending passes", expected);
+				}
+			}
+		} catch (IOException error) {
+			throw new AssertionError("Could not build the declared shader graph fixture", error);
+		}
+	}
+
+	private static void assertInvalidPackJson() {
+		try {
+			Path root = Files.createTempDirectory("metalcraft-invalid-pack-");
+			Files.writeString(root.resolve("pack.json"), "{not json", StandardCharsets.UTF_8);
+			try {
+				ShaderPackLoader.load(root);
+				throw new AssertionError("Invalid pack.json was accepted");
+			} catch (ShaderPackLoader.LoadException expected) {
+				if (expected.getMessage() == null || expected.getMessage().isBlank()) {
+					throw new AssertionError("Invalid pack.json diagnostic was blank", expected);
+				}
+			}
+		} catch (IOException error) {
+			throw new AssertionError("Could not build the invalid pack.json fixture", error);
+		}
+	}
+
+	private static void assertIncludeCycle() {
+		ShaderPack.Target post = new ShaderPack.Target(
+			ShaderPack.PixelFormat.BGRA8_UNORM, new ShaderPack.Scale(1.0), ShaderPack.Lifetime.FRAME, 1
+		);
+		ShaderPack.Pass pass = new ShaderPack.Pass(
+			"grade",
+			ShaderPack.PassKind.FULLSCREEN,
+			"grade.metal",
+			List.of(),
+			List.of("scene"),
+			List.of("post_color"),
+			List.of(),
+			null,
+			null
+		);
+		ShaderPack pack = new ShaderPack(
+			"cycle",
+			new ShaderPack.Manifest(
+				2,
+				"Cycle",
+				List.of(),
+				Map.of("post_color", post),
+				List.of(pass),
+				List.of(),
+				Map.of()
+			),
+			Map.of(
+				"a.metal", "#include \"b.metal\"\n",
+				"b.metal", "#include \"a.metal\"\n",
+				"grade.metal", "#include \"a.metal\"\n"
+			)
+		);
+		try {
+			ShaderPackLoader.expandPassSource(pack, pass);
+			throw new AssertionError("An include cycle was accepted");
+		} catch (ShaderPackLoader.LoadException expected) {
+			if (expected.getMessage() == null || !expected.getMessage().contains("Include cycle")) {
+				throw new AssertionError("Include-cycle diagnostic omitted the cycle", expected);
+			}
+		}
+	}
+
+	private static void encodeGrade(
+		final MetalCommandQueue queue,
+		final ShaderFrameExecutor executor,
+		final MetalTexture scene,
+		final MetalTexture output
+	) {
+		try (MetalCommandBuffer commands = queue.createCommandBuffer()) {
+			if (!executor.encodeForTesting(commands, scene, output)) {
+				throw new AssertionError("encodeForTesting declined a resized grade pass");
+			}
+			commands.commitAndWait();
+		}
+	}
+
+	private static void fillSolidBgra(
+		final MetalTexture texture,
+		final MetalCommandQueue queue,
+		final byte blue,
+		final byte green,
+		final byte red,
+		final byte alpha
+	) {
+		int pixels = texture.descriptor().width() * texture.descriptor().height();
+		ByteBuffer bytes = ByteBuffer.allocateDirect(pixels * 4).order(ByteOrder.nativeOrder());
+		for (int pixel = 0; pixel < pixels; pixel++) {
+			bytes.put(blue).put(green).put(red).put(alpha);
+		}
+		texture.upload(queue, 0, bytes.flip());
+	}
+
+	private static void assertBgraDelta(
+		final ByteBuffer pixels,
+		final byte blue,
+		final byte green,
+		final byte red,
+		final int delta,
+		final String description
+	) {
+		int actualB = Byte.toUnsignedInt(pixels.get(0));
+		int actualG = Byte.toUnsignedInt(pixels.get(1));
+		int actualR = Byte.toUnsignedInt(pixels.get(2));
+		if (Math.abs(actualB - Byte.toUnsignedInt(blue)) > delta
+			|| Math.abs(actualG - Byte.toUnsignedInt(green)) > delta
+			|| Math.abs(actualR - Byte.toUnsignedInt(red)) > delta) {
+			throw new AssertionError(description + " RGB delta exceeded " + delta + ": got BGRA="
+				+ actualB + "," + actualG + "," + actualR
+				+ " expected " + Byte.toUnsignedInt(blue) + "," + Byte.toUnsignedInt(green) + "," + Byte.toUnsignedInt(red));
+		}
+	}
+
+	private static void writeZipText(final ZipOutputStream zip, final String path, final String text) throws IOException {
+		zip.putNextEntry(new ZipEntry(path));
+		zip.write(text.getBytes(StandardCharsets.UTF_8));
+		zip.closeEntry();
+	}
+
+	private static void deleteTree(final Path root) {
+		if (Files.notExists(root)) {
+			return;
+		}
+		try (Stream<Path> walk = Files.walk(root)) {
+			walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+				try {
+					Files.deleteIfExists(path);
+				} catch (IOException error) {
+					throw new UncheckedIOException(error);
+				}
+			});
+		} catch (IOException error) {
+			throw new AssertionError("Could not delete " + root, error);
 		}
 	}
 }

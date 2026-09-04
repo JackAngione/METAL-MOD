@@ -178,6 +178,7 @@ public final class MetalNative {
 
 	static native int nCommandBufferRetainedResourceCount(long commandBufferHandle);
 
+	/** @param memoryless whether the texture lives only in tile memory, with no device allocation */
 	static native long nCreateTexture(
 		long deviceHandle,
 		int format,
@@ -186,7 +187,8 @@ public final class MetalNative {
 		int depthOrLayers,
 		int mipLevels,
 		int usage,
-		boolean cubemap
+		boolean cubemap,
+		boolean memoryless
 	);
 
 	static native long nCreateTextureView(long textureHandle, int baseMipLevel, int mipLevels);
@@ -233,24 +235,55 @@ public final class MetalNative {
 		int[] layoutStepRates
 	);
 
+	/**
+	 * @param colorTargetHandles one handle per color attachment index; zero leaves that index empty
+	 * @param colorFields {@code MetalRenderPass.COLOR_FIELDS} entries per index
+	 * @param colorClearValues {@code MetalRenderPass.COLOR_CLEAR_COMPONENTS} entries per index
+	 */
 	static native long nBeginRenderPass(
 		long commandBufferHandle,
-		long colorTargetHandle,
-		boolean colorTargetIsDrawable,
-		int colorMipLevel,
-		int colorLoadAction,
-		int colorStoreAction,
-		double clearRed,
-		double clearGreen,
-		double clearBlue,
-		double clearAlpha,
+		long[] colorTargetHandles,
+		int[] colorFields,
+		double[] colorClearValues,
 		long depthTargetHandle,
 		int depthMipLevel,
+		int depthArraySlice,
 		int depthLoadAction,
 		int depthStoreAction,
 		double clearDepth,
+		int renderTargetArrayLength,
 		int gpuTimingKind
 	);
+
+	static native long nCreateComputePipeline(long deviceHandle, String source, String functionName);
+
+	static native int nComputePipelineMaxThreadsPerThreadgroup(long pipelineHandle);
+
+	static native int nComputePipelineThreadExecutionWidth(long pipelineHandle);
+
+	static native void nReleaseComputePipeline(long pipelineHandle);
+
+	static native long nBeginComputePass(long commandBufferHandle, int gpuTimingKind);
+
+	static native void nSetComputePipeline(long passHandle, long pipelineHandle);
+
+	static native void nSetComputeBuffer(long passHandle, int index, long bufferHandle, long offset);
+
+	static native void nSetComputeTexture(long passHandle, int index, long textureViewHandle);
+
+	static native void nSetComputeSampler(long passHandle, int index, long samplerHandle);
+
+	static native void nDispatchThreadgroups(
+		long passHandle,
+		int groupsX,
+		int groupsY,
+		int groupsZ,
+		int threadsX,
+		int threadsY,
+		int threadsZ
+	);
+
+	static native void nEndComputePass(long passHandle);
 
 	static native void nSetRenderPipeline(long renderPassHandle, long pipelineHandle);
 

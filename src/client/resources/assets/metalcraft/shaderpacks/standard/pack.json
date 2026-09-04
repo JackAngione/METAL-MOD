@@ -1,0 +1,56 @@
+{
+  "format": 2,
+  "name": "MetalCraft Standard",
+  "includes": ["shared/options.metal"],
+  "targets": {
+    "post_color": {
+      "format": "bgra8_unorm",
+      "scale": 1.0,
+      "lifetime": "frame"
+    }
+  },
+  "passes": [
+    {
+      "id": "grade",
+      "kind": "fullscreen",
+      "source": "grade.metal",
+      "reads": ["scene"],
+      "writes": ["post_color"]
+    }
+  ],
+  "options": [
+    {
+      "id": "exposure",
+      "category": "tonemap",
+      "type": "float",
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.25,
+      "default": 1.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "tonemap",
+      "category": "tonemap",
+      "type": "enum",
+      "values": ["none", "aces"],
+      "default": "none",
+      "apply": "uniform"
+    },
+    {
+      "id": "debug_view",
+      "category": "debug",
+      "type": "enum",
+      "values": ["off", "scene"],
+      "default": "off",
+      "apply": "uniform"
+    },
+    {
+      "id": "invert",
+      "category": "tonemap",
+      "type": "bool",
+      "default": false,
+      "apply": "recompile"
+    }
+  ]
+}

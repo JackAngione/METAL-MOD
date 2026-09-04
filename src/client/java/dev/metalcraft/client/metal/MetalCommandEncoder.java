@@ -84,26 +84,43 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (this.renderPass != null) {
 			throw new IllegalStateException("A direct Metal render pass is already active");
 		}
-		if (descriptor.colorAttachments().size() != 1 || descriptor.colorAttachments().getFirst() == null) {
-			throw new UnsupportedOperationException("Direct Metal currently requires exactly one color attachment");
+		List<RenderPassDescriptor.Attachment<Optional<Vector4fc>>> colors = descriptor.colorAttachments();
+		if (colors.size() > MetalRenderPass.MAX_COLOR_ATTACHMENTS) {
+			throw new UnsupportedOperationException(
+				"Direct Metal accepts at most " + MetalRenderPass.MAX_COLOR_ATTACHMENTS
+					+ " color attachments, not " + colors.size()
+			);
 		}
-		RenderPassDescriptor.Attachment<Optional<Vector4fc>> color = descriptor.colorAttachments().getFirst();
-		MetalGpuTextureView colorView = requireTextureView(color.textureView());
-		Optional<Vector4fc> colorClear = color.clearValue();
-		MetalRenderPass.ColorAttachment colorAttachment = new MetalRenderPass.ColorAttachment(
-			colorView.texture().metal(),
-			colorView.baseMipLevel(),
-			colorClear.isPresent() ? MetalRenderPass.LoadAction.CLEAR : MetalRenderPass.LoadAction.LOAD,
-			MetalRenderPass.StoreAction.STORE,
-			colorClear.map(Vector4fc::x).orElse(0.0F),
-			colorClear.map(Vector4fc::y).orElse(0.0F),
-			colorClear.map(Vector4fc::z).orElse(0.0F),
-			colorClear.map(Vector4fc::w).orElse(0.0F)
-		);
+		List<MetalRenderPass.ColorAttachment> colorAttachments = new ArrayList<>(colors.size());
+		MetalGpuTextureView firstColorView = null;
+		for (RenderPassDescriptor.Attachment<Optional<Vector4fc>> color : colors) {
+			if (color == null) {
+				colorAttachments.add(null);
+				continue;
+			}
+			MetalGpuTextureView colorView = requireTextureView(color.textureView());
+			if (firstColorView == null) {
+				firstColorView = colorView;
+			}
+			Optional<Vector4fc> colorClear = color.clearValue();
+			boolean memoryless = colorView.texture().metal().isMemoryless();
+			colorAttachments.add(new MetalRenderPass.ColorAttachment(
+				colorView.texture().metal(),
+				colorView.baseMipLevel(),
+				colorClear.isPresent() ? MetalRenderPass.LoadAction.CLEAR
+					: memoryless ? MetalRenderPass.LoadAction.DONT_CARE : MetalRenderPass.LoadAction.LOAD,
+				memoryless ? MetalRenderPass.StoreAction.DONT_CARE : MetalRenderPass.StoreAction.STORE,
+				colorClear.map(Vector4fc::x).orElse(0.0F),
+				colorClear.map(Vector4fc::y).orElse(0.0F),
+				colorClear.map(Vector4fc::z).orElse(0.0F),
+				colorClear.map(Vector4fc::w).orElse(0.0F)
+			));
+		}
 		MetalRenderPass.DepthAttachment depthAttachment = null;
+		MetalGpuTextureView depthView = null;
 		if (descriptor.depthAttachment() != null) {
 			RenderPassDescriptor.Attachment<OptionalDouble> depth = descriptor.depthAttachment();
-			MetalGpuTextureView depthView = requireTextureView(depth.textureView());
+			depthView = requireTextureView(depth.textureView());
 			depthAttachment = new MetalRenderPass.DepthAttachment(
 				depthView.texture().metal(),
 				depthView.baseMipLevel(),
@@ -112,7 +129,10 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 				depth.clearValue().orElse(1.0)
 			);
 		}
-		MetalRenderPass.Descriptor next = new MetalRenderPass.Descriptor(colorAttachment, depthAttachment);
+		if (firstColorView == null && depthView == null) {
+			throw new UnsupportedOperationException("Direct Metal requires at least one render attachment");
+		}
+		MetalRenderPass.Descriptor next = new MetalRenderPass.Descriptor(colorAttachments, depthAttachment, 0);
 		if (PASS_MERGING && this.deferredRenderPass != null && canMerge(this.deferredDescriptor, next)) {
 			// Continue into the encoder the previous pass left open, so its attachments are never
 			// resolved out and loaded back in.
@@ -129,7 +149,8 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		RenderPass.RenderArea area = descriptor.renderArea;
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
 		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
-		this.renderPassBackend.reset(this.renderPass, area, colorView.getWidth(0), colorView.getHeight(0), depthAttachment != null);
+		MetalGpuTextureView sizeView = firstColorView != null ? firstColorView : depthView;
+		this.renderPassBackend.reset(this.renderPass, area, sizeView.getWidth(0), sizeView.getHeight(0), depthAttachment != null);
 		return this.renderPassBackend;
 	}
 
@@ -159,15 +180,29 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (open == null || next == null) {
 			return false;
 		}
-		MetalRenderPass.ColorAttachment openColor = open.colorAttachment();
-		MetalRenderPass.ColorAttachment nextColor = next.colorAttachment();
-		if (openColor == null || nextColor == null) {
-			return openColor == nextColor;
-		}
-		if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel()
-			|| nextColor.loadAction() != MetalRenderPass.LoadAction.LOAD
-			|| openColor.storeAction() != MetalRenderPass.StoreAction.STORE) {
+		if (open.colorAttachments().size() != next.colorAttachments().size()) {
 			return false;
+		}
+		for (int index = 0; index < open.colorAttachments().size(); index++) {
+			MetalRenderPass.ColorAttachment openColor = open.colorAttachments().get(index);
+			MetalRenderPass.ColorAttachment nextColor = next.colorAttachments().get(index);
+			if (openColor == null || nextColor == null) {
+				if (openColor != nextColor) {
+					return false;
+				}
+				continue;
+			}
+			// Memoryless attachments continue only with DONT_CARE; they cannot LOAD or STORE.
+			boolean memoryless = openColor.target() instanceof MetalTexture texture && texture.isMemoryless();
+			MetalRenderPass.LoadAction continuingLoad = memoryless
+				? MetalRenderPass.LoadAction.DONT_CARE : MetalRenderPass.LoadAction.LOAD;
+			MetalRenderPass.StoreAction continuingStore = memoryless
+				? MetalRenderPass.StoreAction.DONT_CARE : MetalRenderPass.StoreAction.STORE;
+			if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel()
+				|| nextColor.loadAction() != continuingLoad
+				|| openColor.storeAction() != continuingStore) {
+				return false;
+			}
 		}
 		MetalRenderPass.DepthAttachment openDepth = open.depthAttachment();
 		MetalRenderPass.DepthAttachment nextDepth = next.depthAttachment();
@@ -411,6 +446,10 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.commands().present(drawable);
 	}
 
+	MetalComputePass beginComputePass(final int gpuTimingKind) {
+		return this.commands().beginComputePass(gpuTimingKind);
+	}
+
 	void finishPendingWork() {
 		this.finishSubmission(true);
 	}
@@ -445,7 +484,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	 * ahead of the passes already recorded into it. {@code createRenderPass} is the one caller that
 	 * may skip this, and only when {@link #canMerge} says the work continues in the same encoder.
 	 */
-	private MetalCommandBuffer commands() {
+	MetalCommandBuffer commands() {
 		if (this.closed) throw new IllegalStateException("Metal command encoder is closed");
 		this.endDeferredRenderPass();
 		if (this.commands == null) this.commands = this.commandQueue.createCommandBuffer();

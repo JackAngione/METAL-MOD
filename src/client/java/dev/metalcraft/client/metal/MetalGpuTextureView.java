@@ -1,28 +1,36 @@
 package dev.metalcraft.client.metal;
 
 import com.mojang.blaze3d.textures.GpuTextureView;
+import org.jspecify.annotations.Nullable;
 
 /** Blaze3D texture-view adapter retaining its Metal view until explicitly closed. */
 final class MetalGpuTextureView extends GpuTextureView {
-	private final MetalTextureView metal;
+	private final @Nullable MetalTextureView metal;
+	private boolean closed;
 
-	MetalGpuTextureView(final MetalGpuTexture texture, final int baseMipLevel, final int mipLevels, final MetalTextureView metal) {
+	MetalGpuTextureView(final MetalGpuTexture texture, final int baseMipLevel, final int mipLevels, final @Nullable MetalTextureView metal) {
 		super(texture, baseMipLevel, mipLevels);
 		this.metal = metal;
 	}
 
 	MetalTextureView metal() {
+		if (this.metal == null) {
+			throw new IllegalStateException("A memoryless Metal texture cannot be sampled as a shader resource");
+		}
 		return this.metal;
 	}
 
 	@Override
 	public void close() {
-		this.metal.close();
+		this.closed = true;
+		if (this.metal != null) {
+			this.metal.close();
+		}
 	}
 
 	@Override
 	public boolean isClosed() {
-		return this.metal.isClosed();
+		return this.closed || (this.metal != null && this.metal.isClosed());
 	}
 
 	@Override

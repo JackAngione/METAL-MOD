@@ -17,6 +17,11 @@ public final class MetalTextureView implements AutoCloseable {
 		return this.texture;
 	}
 
+	/** @return the slices this view covers: array layers, or a cubemap's six faces */
+	public int sliceCount() {
+		return this.texture.descriptor().sliceCount();
+	}
+
 	public synchronized boolean isClosed() {
 		return this.handle == 0L;
 	}

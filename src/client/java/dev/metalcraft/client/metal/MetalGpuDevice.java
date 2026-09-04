@@ -22,6 +22,8 @@ import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
+import dev.metalcraft.client.MetalCraftPlatform;
+import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
@@ -62,6 +64,7 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	private boolean closed;
 	/** Built on first use; most sessions that never recycle an item-atlas slot never compile it. */
 	private MetalRegionClear regionClear;
+	private final @Nullable ShaderPackRuntime shaderPackRuntime;
 
 	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource) {
 		this.metal = metal;
@@ -81,6 +84,14 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 			DeviceType.INTEGRATED
 		);
 		this.commandEncoder = new MetalCommandEncoder(this, this.commandQueue);
+		this.shaderPackRuntime = MetalCraftPlatform.isAppleSilicon()
+			&& !Boolean.getBoolean("metalcraft.shaders.disable")
+			? ShaderPackRuntime.createDefault(metal)
+			: null;
+	}
+
+	@Nullable ShaderPackRuntime shaderPackRuntime() {
+		return this.shaderPackRuntime;
 	}
 
 	MetalDevice metal() {
@@ -164,7 +175,9 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 	@Override
 	public GpuTextureView createTextureView(final GpuTexture texture, final int baseMipLevel, final int mipLevels) {
 		MetalGpuTexture metalTexture = requireTexture(texture);
-		return new MetalGpuTextureView(metalTexture, baseMipLevel, mipLevels, metalTexture.metal().createView(baseMipLevel, mipLevels));
+		MetalTexture metal = metalTexture.metal();
+		MetalTextureView view = metal.isMemoryless() ? null : metal.createView(baseMipLevel, mipLevels);
+		return new MetalGpuTextureView(metalTexture, baseMipLevel, mipLevels, view);
 	}
 
 	@Override
@@ -206,6 +219,12 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		this.commandEncoder.finishPendingWork();
 		this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 		this.pipelineCache.clear();
+		if (this.shaderPackRuntime != null) {
+			this.shaderPackRuntime.reload();
+			if (this.shaderPackRuntime.frameWidth() > 0 && this.shaderPackRuntime.frameHeight() > 0) {
+				this.shaderPackRuntime.resize(this.shaderPackRuntime.frameWidth(), this.shaderPackRuntime.frameHeight());
+			}
+		}
 	}
 
 	@Override
@@ -213,6 +232,9 @@ final class MetalGpuDevice implements GpuDeviceBackend {
 		if (!this.closed) {
 			this.closed = true;
 			this.commandEncoder.close();
+			if (this.shaderPackRuntime != null) {
+				this.shaderPackRuntime.close();
+			}
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.pipelineCache.clear();
 			if (this.regionClear != null) {

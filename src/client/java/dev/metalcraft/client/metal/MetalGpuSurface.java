@@ -7,6 +7,8 @@ import com.mojang.blaze3d.systems.SurfaceException;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.MetalCraftConfig;
+import dev.metalcraft.client.shader.FrameBindings;
+import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.util.Collection;
 import java.util.List;
 import org.slf4j.Logger;
@@ -48,6 +50,10 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 				config.width(), config.height(), config.presentMode(), this.displaySyncEnabled,
 				MetalCraftConfig.unlockedFrameRate());
 			MetalSurfaceProbe.configured(config.width(), config.height());
+			ShaderPackRuntime runtime = this.device.shaderPackRuntime();
+			if (runtime != null) {
+				runtime.resize(config.width(), config.height());
+			}
 			this.configured = true;
 		} catch (RuntimeException error) {
 			throw new SurfaceException("Metal could not configure the window surface: " + error.getMessage());
@@ -86,7 +92,27 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		if (this.drawable == null) {
 			throw new IllegalStateException("Metal surface has no acquired drawable");
 		}
-		metalEncoder.blitToDrawable(metalView.texture().metal(), this.drawable);
+		MetalTexture scene = metalView.texture().metal();
+		ShaderPackRuntime runtime = this.device.shaderPackRuntime();
+		if (runtime != null && runtime.isActive()) {
+			try {
+				MetalCommandBuffer commands = metalEncoder.commands();
+				FrameBindings bindings = new FrameBindings(
+					scene, metalView.metal(), runtime.frameWidth(), runtime.frameHeight()
+				);
+				if (runtime.executor().orElseThrow().encode(commands, bindings)) {
+					MetalTexture post = runtime.target("post_color");
+					if (post != null) {
+						metalEncoder.blitToDrawable(post, this.drawable);
+						return;
+					}
+				}
+			} catch (RuntimeException error) {
+				LOGGER.error("MetalCraft shader pack failed to encode; presenting vanilla scene", error);
+				runtime.markFailed(error.getMessage() == null ? error.toString() : error.getMessage(), error);
+			}
+		}
+		metalEncoder.blitToDrawable(scene, this.drawable);
 	}
 
 	@Override
