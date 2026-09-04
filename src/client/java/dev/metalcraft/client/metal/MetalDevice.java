@@ -242,7 +242,8 @@ public final class MetalDevice implements AutoCloseable {
 			attributeFormats,
 			layoutBufferIndices,
 			layoutStrides,
-			layoutStepRates
+			layoutStepRates,
+			descriptor.inputPrimitiveTopology().ordinal()
 		);
 		MetalStallProbe.end(MetalStallProbe.Source.PIPELINE_CREATE, startedNs);
 		if (pipelineHandle == 0L) {

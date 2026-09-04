@@ -102,6 +102,34 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		return this.metal;
 	}
 
+	/** Encodes a scoped native pass on the world's queue, after any deferred Blaze3D pass. */
+	public void encodeNativePass(final MetalRenderPass.Descriptor descriptor, final String label,
+		final java.util.function.Consumer<MetalRenderPass> encode) {
+		this.commandEncoder.encodeNativePass(descriptor, MetalPassCensus.kindFor(label), encode);
+	}
+
+	/** Borrowed native resources for world modules; ownership stays with Blaze3D. */
+	public MetalBuffer nativeBuffer(final com.mojang.blaze3d.buffers.GpuBuffer buffer) {
+		if (!(buffer instanceof MetalGpuBuffer metal) || metal.metal().device() != this.metal) {
+			throw new IllegalArgumentException("Buffer does not belong to this Metal device");
+		}
+		return metal.metal();
+	}
+
+	public MetalTextureView nativeTextureView(final com.mojang.blaze3d.textures.GpuTextureView view) {
+		if (!(view instanceof MetalGpuTextureView metal) || metal.attachment().device() != this.metal) {
+			throw new IllegalArgumentException("Texture view does not belong to this Metal device");
+		}
+		return metal.metal();
+	}
+
+	public MetalSampler nativeSampler(final com.mojang.blaze3d.textures.GpuSampler sampler) {
+		if (!(sampler instanceof MetalGpuSampler metal) || metal.metal().device() != this.metal) {
+			throw new IllegalArgumentException("Sampler does not belong to this Metal device");
+		}
+		return metal.metal();
+	}
+
 	public void setDeferredResolve(final @Nullable DeferredResolveHook hook) {
 		this.commandEncoder.setDeferredResolve(hook);
 	}

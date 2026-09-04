@@ -494,6 +494,15 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		}
 	}
 
+	void encodeNativePass(final MetalRenderPass.Descriptor descriptor, final int kind,
+		final java.util.function.Consumer<MetalRenderPass> encode) {
+		if (this.renderPass != null) throw new IllegalStateException("Cannot encode a native pass inside a Blaze3D pass");
+		try (MetalRenderPass pass = this.commands().beginRenderPass(descriptor, kind)) {
+			encode.accept(pass);
+		}
+	}
+
+
 	/**
 	 * The command buffer, with any deferred render pass ended first.
 	 *
@@ -503,6 +512,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	 * ahead of the passes already recorded into it. {@code createRenderPass} is the one caller that
 	 * may skip this, and only when {@link #canMerge} says the work continues in the same encoder.
 	 */
+
 	MetalCommandBuffer commands() {
 		if (this.closed) throw new IllegalStateException("Metal command encoder is closed");
 		this.endDeferredRenderPass();

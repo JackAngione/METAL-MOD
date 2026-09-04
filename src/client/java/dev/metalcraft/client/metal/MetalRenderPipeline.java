@@ -229,6 +229,9 @@ public final class MetalRenderPipeline implements AutoCloseable {
 		}
 	}
 
+	/** Required by Metal when a vertex shader selects render-target array layers. */
+	public enum InputPrimitiveTopology { UNSPECIFIED, POINT, LINE, TRIANGLE }
+
 	public record Descriptor(
 		String vertexSource,
 		String vertexFunction,
@@ -238,8 +241,16 @@ public final class MetalRenderPipeline implements AutoCloseable {
 		MetalTexture.@Nullable Format depthStencilFormat,
 		VertexDescriptor vertexDescriptor,
 		DepthState depthState,
-		RasterState rasterState
+		RasterState rasterState,
+		InputPrimitiveTopology inputPrimitiveTopology
 	) {
+		public Descriptor(final String vertexSource, final String vertexFunction, final String fragmentSource,
+			final String fragmentFunction, final List<ColorTarget> colorTargets, final MetalTexture.Format depthStencilFormat,
+			final VertexDescriptor vertexDescriptor, final DepthState depthState, final RasterState rasterState) {
+			this(vertexSource, vertexFunction, fragmentSource, fragmentFunction, colorTargets, depthStencilFormat,
+				vertexDescriptor, depthState, rasterState, InputPrimitiveTopology.UNSPECIFIED);
+		}
+
 		public Descriptor(
 			final String vertexSource,
 			final String vertexFunction,
@@ -286,7 +297,7 @@ public final class MetalRenderPipeline implements AutoCloseable {
 			if (depthStencilFormat != null && !depthStencilFormat.hasDepthAspect() && !depthStencilFormat.hasStencilAspect()) {
 				throw new IllegalArgumentException("The Metal depth-stencil format has no depth or stencil aspect");
 			}
-			if (vertexDescriptor == null || depthState == null || rasterState == null) {
+			if (vertexDescriptor == null || depthState == null || rasterState == null || inputPrimitiveTopology == null) {
 				throw new NullPointerException("Metal pipeline descriptor state cannot be null");
 			}
 			if (depthState.testEnabled() && (depthStencilFormat == null || !depthStencilFormat.hasDepthAspect())) {

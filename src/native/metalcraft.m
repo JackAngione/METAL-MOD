@@ -2622,7 +2622,8 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 	jintArray attributeFormatsValue,
 	jintArray layoutBufferIndicesValue,
 	jintArray layoutStridesValue,
-	jintArray layoutStepRatesValue
+	jintArray layoutStepRatesValue,
+	jint inputPrimitiveTopology
 ) {
 	@autoreleasepool {
 		if (vertexSourceValue == NULL || vertexFunctionValue == NULL || fragmentSourceValue == NULL || fragmentFunctionValue == NULL) {
@@ -2759,6 +2760,15 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 		}
 
 		MTLRenderPipelineDescriptor *descriptor = [[MTLRenderPipelineDescriptor alloc] init];
+		switch (inputPrimitiveTopology) {
+			case 0: descriptor.inputPrimitiveTopology = MTLPrimitiveTopologyClassUnspecified; break;
+			case 1: descriptor.inputPrimitiveTopology = MTLPrimitiveTopologyClassPoint; break;
+			case 2: descriptor.inputPrimitiveTopology = MTLPrimitiveTopologyClassLine; break;
+			case 3: descriptor.inputPrimitiveTopology = MTLPrimitiveTopologyClassTriangle; break;
+			default:
+				mc_throw_state(env, @"Unknown Metal pipeline input primitive topology");
+				return 0;
+		}
 		descriptor.label = @"MetalCraft render pipeline";
 		descriptor.vertexFunction = vertexFunction;
 		descriptor.fragmentFunction = fragmentFunction;

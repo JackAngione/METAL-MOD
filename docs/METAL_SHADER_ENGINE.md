@@ -5,7 +5,7 @@
 | **Title** | Metal-Native Shader Engine |
 | **Author** | MetalCraft contributors |
 | **Date** | 2026-09-03 |
-| **Status** | In progress; PR 0–4 complete; PR 5 cascade fitting in progress |
+| **Status** | In progress; PR 0–4 complete; PR 5 terrain depth rendering implemented; resolve sampling pending |
 | **Target** | Minecraft Java 26.2, Fabric, macOS arm64, direct Metal backend |
 | **Parent commit of deleted engine** | `a7c274a` |
 | **Deletion commit** | `0eb8833 Remove the shader pack engine and leave the Metal backend` |
@@ -65,7 +65,7 @@ gradle shaderTranslationSmoke --offline -PmetalPassMerging=false
 gradle runClient --offline -PmetalLifecycleTest -PmetalShaderLifecycleTest=true
 ```
 
-Continue PR 5's binding and caster-rendering work, then PR 7 lighting;
+Continue PR 5's resolve sampling and actual world shadow validation, then PR 7 lighting;
 PR 6 effects can follow once their depth inputs and neutral outputs are defined.
 
 ---
@@ -153,7 +153,7 @@ This repo's `docs/APPLE_SILICON_PERFORMANCE.md` already records the local conseq
 
 `MetalShaderEngine` (1,387 lines) loaded packs, compiled graphs, allocated targets, encoded geometry/shadow/post, owned `MetalWorldGeometry` / `MetalWorldLighting` / `MetalWorldShadow`, wrote `config/metalcraft-shaders.json`, and exposed a dozen statics (`active()`, `resolveOpaque()`, `publishLocalLights()`, `isLayeredShadowAttachment()`, …) that mixins called. That is a shallow mega-module.
 
-Do **not** `git checkout a7c274a` the engine, mixins, lighting, occupancy, MetalFX, or `topologyClass` on `nCreateRenderPipeline`. Copy only the capabilities listed in the ABI appendix, with the denylist in Key Decision 11.
+Do **not** `git checkout a7c274a` the engine, mixins, lighting, occupancy, MetalFX, or the old pipeline cache. PR 5 adds only the typed input topology required by layered vertex output. Copy only the capabilities listed in the ABI appendix, with the denylist in Key Decision 11.
 
 The deletion test on `ShaderGraphCompiler`: if we deleted it, every caller would re-implement producer/consumer analysis, `merge_with` grouping, memoryless eligibility, and load/store. It earns its keep. The deletion test on `MetalShaderEngine`: callers already *were* the engine. It does not.
 
@@ -181,7 +181,7 @@ The deletion test on `ShaderGraphCompiler`: if we deleted it, every caller would
 - Do not restore `MetalShaderEngine` as-is.
 - Do not restore occupancy-volume lighting or local cube shadows in the lighting PR (vanilla lightmap + GGX only). Occupancy is a later optional experiment, not the Iris-aligned path.
 - **Never MetalFX.** Do not restore `nSupportsSpatialScaler` / `nCreateSpatialScaler` / `nEncodeSpatialScaleToTexture` in any PR. Half-resolution keeps the existing linear present upscale.
-- Do not add `topologyClass` or `archivePath` to `nCreateRenderPipeline` until the PSO-cache PR.
+- Render-pipeline archives remain in the PSO-cache PR. PR 5 needs typed input topology for layered vertex output (see the validation correction below).
 - Do not introduce a second graphics backend. The only backend is Metal.
 - Do not change the first-launch picture. Default pack is `none`; ACES is opt-in.
 
@@ -209,7 +209,7 @@ The deletion test on `ShaderGraphCompiler`: if we deleted it, every caller would
 
 10. **Present path for the identity/grade pack is option A, and only option A.** Grade writes pack target `post_color`. The host then calls the existing `MetalCommandEncoder.blitToDrawable(post_color, drawable)`, which already blits and `nPresentDrawable`s. Minecraft's `MetalGpuSurface.present()` still only closes the drawable. The executor never writes `drawable`, never calls `present`, and never calls `nPresentDrawable`. **Screenshots in this pack PR capture ungraded `scene`.** `MetalLifecycleGameTest.takeScreenshot` / `assertNoColorInversion` continue to inspect vanilla color. A pack-on smoke readbacks `post_color` instead.
 
-11. **JNI denylist.** Do not copy from `a7c274a`: `topologyClass` on `nCreateRenderPipeline`; `archivePath` / `archiveWarm` on `nCreateRenderPipeline` (PSO-cache PR); MetalFX (`nSupportsSpatialScaler`, `nCreateSpatialScaler`, `nEncodeSpatialScaleToTexture`) — **never in any PR**; `MetalShaderEngine`; occupancy; local cube shadows. **Do** copy `COLOR_FIELDS` order: `IS_DRAWABLE=0`, `MIP_LEVEL=1`, `LOAD_ACTION=2`, `STORE_ACTION=3`, `ARRAY_SLICE=4`.
+11. **JNI denylist.** Do not copy from `a7c274a`: `archivePath` / `archiveWarm` on `nCreateRenderPipeline` (PSO-cache PR); MetalFX (`nSupportsSpatialScaler`, `nCreateSpatialScaler`, `nEncodeSpatialScaleToTexture`) — **never in any PR**; `MetalShaderEngine`; occupancy; local cube shadows. **Do** copy `COLOR_FIELDS` order: `IS_DRAWABLE=0`, `MIP_LEVEL=1`, `LOAD_ACTION=2`, `STORE_ACTION=3`, `ARRAY_SLICE=4`.
 
 12. **Default pack is `none`.** First launch does not change the picture. Builtin pack `tonemap` default is `none`; ACES is opt-in. Skip runtime construction when `Boolean.getBoolean("metalcraft.shaders.disable")` is true (`-Dmetalcraft.shaders.disable=true`), mirroring existing `-Dmetalcraft.disable=true`. Do **not** use `Boolean.getBoolean("metalcraft.shaders")`.
 
@@ -1260,17 +1260,73 @@ Per-extension try/catch is **not** in this PR (see PR 0).
   explicit caster distance; caster collection must use that same volume.
 - [x] Geometry smoke checks cover all frustum corners, extended casters, overhead sun,
   rotated cameras, large world coordinates, subtexel translation, and invalid sun input.
-- [ ] Allocate the layered depth map and define named frame buffer/texture bindings.
-- [ ] Integrate terrain caster collection and layered shadow draws.
+- [x] **Shadow resource and binding foundation done** — `WorldShadowModule` allocates
+  stored/sampleable `DEPTH32_FLOAT` arrays and produces immutable per-frame uploads.
+  Named `shadow_frame` / `shadow_map` bindings and `shared/shadows.metal` define the
+  Java/MSL contract. GPU smoke covers 1–4 cascades, every cleared physical layer,
+  matrix/split/sun layout, camera reconstruction, consecutive uploads, and close-after-encode.
+  Runtime graph reads and merged-resolve sampling remain in the next step.
+- [x] **Terrain caster collection and layered draws implemented** — `WorldTerrainShadows`
+  collects loaded section meshes from `ViewArea` against the fitted light volumes, independent
+  of camera visibility. `TerrainShadowRenderer` renders borrowed section buffers in one native
+  encoder on the world's queue before opaque terrain. Standard pack options configure cascade
+  count, map resolution, receiver distance and caster extension.
+- [x] Actual GPU draw smoke covers every opaque terrain layer, transparent atlas cutouts,
+  one/four active cascades, inactive physical layers, nonzero vertex/index offsets and
+  per-section instancing. `gradle build --offline` passed on 2026-09-04.
+- [x] In-game terrain draw/reload/resize validation passed on 2026-09-04: 49 terrain draws
+  after reload and after failed-pack recovery; fullscreen and creative search also passed.
+  The captured world screenshot was visually inspected.
 - [ ] Sample the shadow map in resolve and validate actual world shadows.
 
-**Status: in progress.** The tested fitting code does not yet draw shadows or change the
-selected pack's appearance. Do not mark PR 5 complete until the world sampling test passes.
+**Status: in progress.** Fitting, GPU allocation, typed frame bindings, and terrain depth
+rendering are implemented. The map is not yet consumed by world resolve, so the selected
+pack's appearance is unchanged. Entity/block-entity casters are not part of this terrain step.
+Do not mark PR 5 complete until the world sampling test passes.
+
+Resource/binding contract (validated by `gradle build --offline` on 2026-09-04):
+
+- Recreate the module when cascade count/resolution settings change; window dimensions
+  do not size the shadow map. Standard exposes these settings as recompile options;
+  pack reload/failure closes the module.
+- One logical cascade uses two physical layers because the current texture ABI represents
+  one layer as `texture2d`. All configurations therefore bind as `depth2d_array<float>`;
+  only `cascadeCount` layers participate in cascade selection.
+- `shadow_frame` is 432 bytes: four column-major camera-relative shadow matrices (0),
+  inverse Metal [0,1] projection (256), rotation-only view-to-camera-relative matrix (320),
+  four far splits (384), normalized direction-to-sun (400), then count, inverse resolution,
+  distance, and caster extension (416). Unused lanes are zero. Camera position stays double
+  precision on the CPU. The MSL reconstruction helper accounts for top-left texture UVs.
+- Callers assign `MC_BUFFER_SHADOW_FRAME` / `MC_TEX_SHADOW_MAP` slots and use the frame's
+  typed bind methods; no global slots or generic extra-buffer bag are introduced. These
+  names are not yet accepted as manifest reads: wire compiler/graph and merged resolve
+  together during world integration, before adding reads to the Standard pack.
+- Each frame owns a distinct uniform upload; close it after encoding all consumers.
+  Native command-buffer pinning preserves encoded resources until completion. Depth
+  writes and resolve reads must use one ordered command queue. The depth pass clears to
+  1 and stores every layer. Opaque terrain writes conventional LESS_EQUAL depth;
+  translucent terrain is excluded.
+
+**Validated plan correction:** the old PR 1 layered test only cleared an array; it never
+compiled a vertex shader that wrote `render_target_array_index`. The production terrain
+shader failed Metal PSO creation with `inputPrimitiveTopology is not specified`. PR 5 now
+adds typed `InputPrimitiveTopology` to the render descriptor/JNI, with `UNSPECIFIED` for
+existing callers and `TRIANGLE` for terrain shadows. This is required for layered draws,
+not a binary-archive optimization. The earlier topology denylist is superseded by this result.
+
+The next sampling step must capture the exact world raster projection (including bobbing),
+wire named reads through graph/compiler/merged resolve, and verify on-screen shadows. The
+current terrain fit uses the camera's unjittered projection; the shadow upload's camera
+reconstruction data is not yet a production world-resolve binding. Do not consume it there
+until raster/projection conventions are validated.
 
 - **Title:** Layered shadow map in one encoder
 - **Depends on:** PR 4
-- **Files:** `WorldShadowModule`, `LevelRendererShadowMixin`, `ProjectionMatrixBufferMixin`, `CommandEncoderMixin` (`getDepthOrLayers` exception for the module-owned texture), `ViewAreaAccessor`, `shadow.metal`
-- **Tests:** `renderTargetArrayLength=4` smoke already in PR 1; world: shadow sampled in resolve
+- **Files:** `WorldShadowModule`, `WorldTerrainShadows`, `TerrainShadowRenderer`,
+  `LevelRendererShadowMixin`, `ViewAreaAccessor`, `shadow.metal`; projection capture and
+  resolve binding follow in the sampling step. Direct Metal allocation leaves Blaze3D arrays restricted.
+- **Tests:** actual layered terrain depth/readback in PR 5 (PR 1 only tested clears);
+  world terrain draw counters and lifecycle pass; world shadow sampling remains pending
 - **Description:** Lift `MetalGpuDevice.createTexture` array reject **only** for this module's MetalDevice allocations, or keep using `MetalDevice` directly. No local cubes.
 
 ### PR 6 — Compute nodes (SSAO, bloom, volumetrics)

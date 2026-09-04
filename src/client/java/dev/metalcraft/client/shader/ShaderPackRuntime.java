@@ -5,6 +5,8 @@ import dev.metalcraft.api.MetalCraftShaderPackInfo;
 import dev.metalcraft.client.metal.MetalDevice;
 import dev.metalcraft.client.metal.MetalGpuDevice;
 import dev.metalcraft.client.metal.MetalTexture;
+import dev.metalcraft.client.shader.world.ShadowCascades;
+import dev.metalcraft.client.shader.world.WorldTerrainShadows;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,6 +39,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 	private ShaderGraphCompiler.@Nullable CompiledGraph graph;
 	private @Nullable MetalShaderFrameExecutor executor;
 	private @Nullable WorldGeometryAdapter worldGeometry;
+	private @Nullable WorldTerrainShadows worldShadows;
 	private @Nullable String lastError;
 	private int width;
 	private int height;
@@ -389,9 +392,22 @@ public final class ShaderPackRuntime implements AutoCloseable {
 					.toList(),
 				this::optionValueUnchecked
 			);
+			if (BUILTIN_ID.equals(this.pack.id())) {
+				this.worldShadows = new WorldTerrainShadows(this.gpuDevice,
+					new ShadowCascades.Settings(
+						((Number)this.optionValueUnchecked("shadow_cascades")).intValue(),
+						((Number)this.optionValueUnchecked("shadow_resolution")).intValue(), 0.05F,
+						((Number)this.optionValueUnchecked("shadow_distance")).floatValue(), 0.6F,
+						((Number)this.optionValueUnchecked("shadow_caster_distance")).floatValue()),
+					this.pack.metalSources().get("shared/shadows.metal"), this.pack.metalSources().get("shadow.metal"));
+			}
 		} catch (IOException | RuntimeException error) {
 			throw new IllegalStateException("Could not build world geometry adapter: " + error.getMessage(), error);
 		}
+	}
+
+	public @Nullable WorldTerrainShadows worldShadows() {
+		return this.worldShadows;
 	}
 
 	public @Nullable WorldGeometryAdapter worldGeometry() {
@@ -399,6 +415,10 @@ public final class ShaderPackRuntime implements AutoCloseable {
 	}
 
 	private void closeWorldGeometry() {
+		if (this.worldShadows != null) {
+			this.worldShadows.close();
+			this.worldShadows = null;
+		}
 		if (this.worldGeometry != null) {
 			this.worldGeometry.close();
 			this.worldGeometry = null;

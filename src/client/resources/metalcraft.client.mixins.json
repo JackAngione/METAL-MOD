@@ -19,7 +19,9 @@
     "ShaderManagerMixin",
     "VideoSettingsScreenMixin",
     "WindowFramebufferAccessor",
-    "WindowRenderResolutionMixin"
+    "WindowRenderResolutionMixin",
+    "LevelRendererShadowMixin",
+    "ViewAreaAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

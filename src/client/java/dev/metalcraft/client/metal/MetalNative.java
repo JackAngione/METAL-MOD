@@ -232,7 +232,8 @@ public final class MetalNative {
 		int[] attributeFormats,
 		int[] layoutBufferIndices,
 		int[] layoutStrides,
-		int[] layoutStepRates
+		int[] layoutStepRates,
+		int inputPrimitiveTopology
 	);
 
 	/**

@@ -312,6 +312,7 @@ public final class MetalShaderTranslationSmoke {
 			assertMemorylessAbi(device);
 			assertTextureArrayPass(device);
 			dev.metalcraft.client.shader.world.ShadowCascadesSmoke.run();
+			dev.metalcraft.client.shader.world.WorldShadowModuleSmoke.run(device);
 			assertMemorylessPassMerge();
 			assertIdentityGradePack(device);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(

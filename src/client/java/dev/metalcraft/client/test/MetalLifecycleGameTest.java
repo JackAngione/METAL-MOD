@@ -199,9 +199,14 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			this.context.runOnClient(client -> {
 				ShaderPackRuntime runtime = ShaderPackRuntime.active();
 				if (runtime == null || !runtime.isActive() || runtime.lastError().isPresent()
-					|| runtime.worldGeometry() == null || runtime.target("post_color") == null) {
+					|| runtime.worldGeometry() == null || runtime.worldShadows() == null || runtime.target("post_color") == null) {
 					throw new AssertionError("Shader pack did not survive world reload/resize");
 				}
+				if (runtime.worldShadows().renderedFrames() == 0 || runtime.worldShadows().lastDrawCount() == 0) {
+					throw new AssertionError("Shader pack did not encode loaded terrain into the sun shadow map");
+				}
+				LOGGER.info("Metal terrain shadows: {} draws, {} rendered frames",
+					runtime.worldShadows().lastDrawCount(), runtime.worldShadows().renderedFrames());
 				if (runtime.target("post_color").descriptor().width() != runtime.frameWidth()
 					|| runtime.target("post_color").descriptor().height() != runtime.frameHeight()) {
 					throw new AssertionError("Shader post target does not match configured surface");
@@ -215,7 +220,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				ShaderPackRuntime runtime = ShaderPackRuntime.active();
 				// Deterministic load failure without modifying any installed pack.
 				runtime.selectPack("metalcraft-lifecycle-missing-pack");
-				if (runtime.isActive() || runtime.lastError().isEmpty() || runtime.worldGeometry() != null) {
+				if (runtime.isActive() || runtime.lastError().isEmpty() || runtime.worldGeometry() != null || runtime.worldShadows() != null) {
 					throw new AssertionError("Failed pack did not fall back to vanilla");
 				}
 			});
