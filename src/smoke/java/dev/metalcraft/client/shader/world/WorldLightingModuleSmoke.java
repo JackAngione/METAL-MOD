@@ -7,6 +7,7 @@ import dev.metalcraft.client.metal.MetalRenderPipeline;
 import dev.metalcraft.client.metal.MetalTexture;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -63,6 +64,73 @@ public final class WorldLightingModuleSmoke {
 			}
 		}
 		System.out.println("Lighting frame: McFog layout and identity fog upload passed");
+		runColorTransfer(device);
+	}
+
+	/** Check the production transfer helpers against independent reference values in an HDR target. */
+	private static void runColorTransfer(final MetalDevice device) {
+		String helpers;
+		try {
+			helpers = resource("/assets/metalcraft/shaderpacks/standard/shared/color.metal");
+		} catch (IOException error) {
+			throw new AssertionError(error);
+		}
+		String source = "#include <metal_stdlib>\nusing namespace metal;\n" + helpers + """
+			struct V { float4 position [[position]]; };
+			vertex V vs(uint id [[vertex_id]]) {
+			    float2 p = id == 0 ? float2(-1,-1) : (id == 1 ? float2(3,-1) : float2(-1,3));
+			    return {float4(p,0,1)};
+			}
+			fragment float4 fs(V in [[stage_in]]) {
+			    uint x = uint(in.position.x);
+			    if (x == 0) return float4(mc_srgb_to_linear(float3(0, 0.5, 1)), 0.25);
+			    if (x == 1) return float4(mc_linear_to_srgb(float3(0, 0.5, 1)), 0.25);
+			    if (x == 2) return float4(mc_srgb_to_linear(float3(0.04044, 0.04045, 0.04046)), 0.25);
+			    if (x == 3) return float4(mc_linear_to_srgb(float3(0.0031307, 0.0031308, 0.0031309)), 0.25);
+			    if (x == 4) return float4(mc_srgb_to_linear(mc_linear_to_srgb(float3(0.18, 2, 4))), 0.25);
+			    if (x == 5) return float4(mc_linear_to_srgb(mc_srgb_to_linear(float3(0.02, 0.5, 1))), 0.25);
+			    if (x == 6) return float4(mc_srgb_to_linear(float3(-1, -0.01, 0)), 0.25);
+			    return float4(mc_linear_to_srgb(float3(-1, -0.01, 0)), 0.25);
+			}
+			""";
+		double[][] expected = {
+			{0, 0.2140411405, 1}, {0, 0.7353569831, 1},
+			{0.00313003096, 0.00313080495, 0.00313159455},
+			{0.040448644, 0.040449936, 0.0404511778},
+			{0.18, 2, 4}, {0.02, 0.5, 1}, {0, 0, 0}, {0, 0, 0}
+		};
+		try (var queue = device.createCommandQueue();
+			 var color = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA16_FLOAT, 8, 1, 1));
+			 var pipeline = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 source, "vs", source, "fs",
+				 List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA16_FLOAT)),
+				 null, MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+				 MetalRenderPipeline.RasterState.DEFAULT
+			 ))) {
+			try (var commands = queue.createCommandBuffer()) {
+				try (var pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+					MetalRenderPass.ColorAttachment.clear(color, 0, 0, 0, 0)
+				))) {
+					pass.setPipeline(pipeline);
+					pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				}
+				commands.commitAndWait();
+			}
+			ByteBuffer pixels = color.readback(queue, 0).order(ByteOrder.nativeOrder());
+			for (int x = 0; x < expected.length; x++) {
+				for (int channel = 0; channel < 4; channel++) {
+					float actual = Float.float16ToFloat(pixels.getShort((x * 4 + channel) * Short.BYTES));
+					double reference = channel == 3 ? 0.25 : expected[x][channel];
+					// Half-float storage has ten fraction bits; allow one ULP plus shader rounding.
+					double tolerance = Math.max(0.000002, Math.abs(reference) * 0.001);
+					if (!Float.isFinite(actual) || Math.abs(actual - reference) > tolerance) {
+						throw new AssertionError("Color transfer pixel " + x + " channel " + channel
+							+ ": expected " + reference + ", got " + actual);
+					}
+				}
+			}
+		}
+		System.out.println("Color transfer: sRGB reference values, knees, round trips, alpha and HDR readback passed");
 	}
 
 	private static String resource(final String path) throws IOException {

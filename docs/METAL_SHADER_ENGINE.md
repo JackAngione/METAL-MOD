@@ -12,6 +12,21 @@
 
 ---
 
+## PR 7b transfer prerequisite — 2026-09-05
+
+- [x] Audit actual atlas/lightmap allocation and shader math, world target, grading and
+  native presentation. Record the current legacy path and the intended HDR boundary
+  in [SHADER_COLOR_CONTRACT.md](SHADER_COLOR_CONTRACT.md).
+- [x] Implement explicit sRGB RGB helpers without changing the live compatibility path.
+- [x] Validate reference values, transfer knees, round trips, negative inputs, alpha and
+  values above 1 in an `RGBA16_FLOAT` GPU readback; `./gradlew build --offline` passed.
+- [ ] Wire live HDR world/forward composition and world-only tone/output conversion;
+  establish the display color-space contract and perform visual validation.
+- [ ] Implement and validate GGX, then measure HDR bandwidth and frame cost.
+
+The source audit and standalone GPU storage checks do not establish live HDR composition.
+PR 7b is in progress; subsequent SMAA and effects milestones remain open.
+
 ## Visible-shadow bug fix — 2026-09-05
 
 Earlier smoke checks proved isolated shader behavior and submitted shadow draws, but did
@@ -1574,7 +1589,16 @@ specialization with resource/consumer rewiring, not an encode-time early skip.
 
 ### PR 7 — Lighting module (vanilla lightmap + GGX)
 
-- [x] **PR 7a done** (Lambert/vanilla terms, 8-bit scene). PR 7b not started.
+- [x] **PR 7a done** (Lambert/vanilla terms, 8-bit scene).
+- [x] **PR 7b transfer source audit:** document atlas, artistic lightmap, legacy scene,
+  grade and native presentation behavior in [SHADER_COLOR_CONTRACT.md](SHADER_COLOR_CONTRACT.md).
+  The layer has no explicit color-space assignment; display validation remains open.
+- [x] **PR 7b transfer helpers:** add explicit RGB sRGB decode/encode helpers and GPU
+  reference/round-trip/HDR attachment readback coverage. Helpers remain outside the live
+  pack until its complete color-space transition is ready.
+- [ ] **PR 7b live HDR composition:** floating-point world target, matching geometry and
+  forward PSOs, linear blending/fog, world-only grade and one validated output conversion.
+- [ ] **PR 7b GGX:** bounded dielectric lighting and energy tests; measure HDR bandwidth.
 
 - **Title:** Deferred GGX consumed by `resolve.metal`
 - **Depends on:** PR 4 and PR 5a for PR 7a; PR 6a for PR 7b and world HDR composition
