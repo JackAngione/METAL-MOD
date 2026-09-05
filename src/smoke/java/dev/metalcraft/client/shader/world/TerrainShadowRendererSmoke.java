@@ -30,12 +30,13 @@ final class TerrainShadowRendererSmoke {
 			if (input == null) throw new AssertionError("Missing terrain shadow source");
 			source = new String(input.readAllBytes(), StandardCharsets.UTF_8);
 		} catch (IOException error) { throw new AssertionError(error); }
-		for (int count : new int[]{1, 4}) {
+		for (int count = 1; count <= 4; count++) {
 			for (var layer : ChunkSectionLayerGroup.OPAQUE.layers()) {
 				check(device, contract, source, count, layer, false);
 				check(device, contract, source, count, layer, true);
 			}
 		}
+		System.out.println("Terrain shadows: 1–4 cascades, depth draws, cutouts, visibility, split boundaries and PCF edges passed");
 	}
 
 	private static void check(final MetalDevice device, final String contract, final String source,
@@ -53,14 +54,51 @@ final class TerrainShadowRendererSmoke {
 			checks.append("ok = ok && abs(map.sample(s,float2(0.5),").append(i).append(") - ")
 				.append(expected).append(") < 0.0001;\n");
 		}
+		// Sample real terrain depth through the production visibility helper. Receivers below
+		// the y=8 caster are occluded; those above it, or behind a cutout hole, are lit.
+		for (int i = 0; i < count; i++) {
+			float viewDepth = (cascades.get(i).near() + cascades.get(i).far()) * 0.5F;
+			checks.append("ok = ok && mc_shadow_cascade(").append(viewDepth).append(", f) == ").append(i).append(";\n");
+			checks.append("ok = ok && mc_shadow_cascade(").append(cascades.get(i).far())
+				.append(", f) == ").append(i).append(";\n");
+			checks.append("ok = ok && mc_shadow_cascade(").append(Math.nextUp(cascades.get(i).far()))
+				.append(", f) == ").append(i + 1).append(";\n");
+			for (int height : new int[]{0, 16}) {
+				int visibility = height == 16 || transparent && cutout ? 1 : 0;
+				checks.append("ok = ok && abs(mc_shadow_visibility(float3(0,").append(height).append(",-")
+					.append(viewDepth).append("), ").append(viewDepth).append(", 0.00001, f, map, s) - ")
+					.append(visibility).append(") < 0.0001;\n");
+			}
+			// At the first texel's center, three of nine taps fall beyond the light volume.
+			// This distinguishes filtered visibility from a single comparison or clamped taps.
+			var shadowMatrix = cascades.get(i).cameraRelativeToShadow();
+			float receiverDepth = shadowMatrix.transformPosition(new Vector3f(0,0,0)).z;
+			var edge = new Matrix4f(shadowMatrix).invert().transformPosition(
+				new Vector3f(-1 + 1.0F / settings.resolution(), 0, receiverDepth));
+			checks.append("ok = ok && abs(mc_shadow_visibility(float3(").append(edge.x).append(',')
+				.append(edge.y).append(',').append(edge.z).append("), ").append(viewDepth)
+				.append(", 0.00001, f, map, s) - ").append(transparent && cutout ? "1.0" : "(1.0 / 3.0)")
+				.append(") < 0.0001;\n");
+		}
+		checks.append("""
+			ok = ok && mc_shadow_cascade(0, f) == f.cascadeCount;
+			ok = ok && mc_shadow_cascade(-1, f) == f.cascadeCount;
+			ok = ok && mc_shadow_cascade(97, f) == f.cascadeCount;
+			ok = ok && mc_shadow_visibility(float3(0,0,-97),97,0,f,map,s) == 1.0;
+			ok = ok && mc_shadow_visibility(float3(100000,0,-1),1,0,f,map,s) == 1.0;
+			ok = ok && mc_shadow_visibility(float3(0,100000,-1),1,0,f,map,s) == 1.0;
+			ok = ok && mc_shadow_visibility(float3(0,0,-1),1,1,f,map,s) == 1.0;
+			""");
 		String sampleSource = """
 			#include <metal_stdlib>
 			using namespace metal;
+			""" + contract + "\n" + """
 			struct V { float4 position [[position]]; };
 			vertex V vs(uint id [[vertex_id]]) {
 			    return {float4(id == 0 ? float2(-1,-1) : (id == 1 ? float2(3,-1) : float2(-1,3)),0,1)};
 			}
-			fragment float4 fs(V in [[stage_in]], depth2d_array<float> map [[texture(5)]], sampler s [[sampler(5)]]) {
+			fragment float4 fs(V in [[stage_in]], constant MCShadowFrame& f [[buffer(3)]],
+			    depth2d_array<float> map [[texture(5)]], sampler s [[sampler(5)]]) {
 			    bool ok = true;
 			""" + checks + "return ok ? float4(0,1,0,1) : float4(1,0,0,1); }";
 		int stride = layer.pipeline().getVertexFormatBinding(0).getVertexSize();
@@ -105,6 +143,7 @@ final class TerrainShadowRendererSmoke {
 				}
 				try (var pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(MetalRenderPass.ColorAttachment.clear(output,0,0,0,1)))) {
 					pass.setPipeline(sample);
+					frame.bindUniforms(pass,3,MetalRenderPass.STAGE_FRAGMENT);
 					frame.bindDepth(pass,5);
 					pass.draw(MetalRenderPass.Primitive.TRIANGLE,0,3);
 				}

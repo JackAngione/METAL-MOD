@@ -5,7 +5,7 @@
 | **Title** | Metal-Native Shader Engine |
 | **Author** | MetalCraft contributors |
 | **Date** | 2026-09-03 |
-| **Status** | In progress; PR 0–4 complete; PR 5 terrain depth rendering implemented; resolve sampling pending |
+| **Status** | In progress; PR 0–4 complete; PR 5 terrain depth and shadow visibility helper implemented; world resolve integration pending |
 | **Target** | Minecraft Java 26.2, Fabric, macOS arm64, direct Metal backend |
 | **Parent commit of deleted engine** | `a7c274a` |
 | **Deletion commit** | `0eb8833 Remove the shader pack engine and leave the Metal backend` |
@@ -65,8 +65,63 @@ gradle shaderTranslationSmoke --offline -PmetalPassMerging=false
 gradle runClient --offline -PmetalLifecycleTest -PmetalShaderLifecycleTest=true
 ```
 
-Continue PR 5's resolve sampling and actual world shadow validation, then PR 7 lighting;
-PR 6 effects can follow once their depth inputs and neutral outputs are defined.
+The remaining-work review below supersedes the earlier sequencing. Completed checkboxes
+above record prior validation; this review changes the plan, not the rendering code.
+
+### Remaining-work review — 2026-09-04
+
+Keep the PR numbers as stable references, but implement in this order:
+
+| Order | Deliverable | Completion gate |
+| --- | --- | --- |
+| 1 | PR 5a: world shadow bindings and visibility debug view | Actual terrain receivers reconstruct correctly in merged and split rendering, including camera effects |
+| 2 | PR 7a + PR 5b: lighting contract and visible sun shadows | Only the direct sun term is shadowed; blocklight, emission, overlays and fog retain their intended behavior |
+| 3 | PR 6a: general executor and world composition boundary | A mixed render/compute graph routes intermediate textures correctly, before GUI, with safe frame uploads |
+| 4 | PR 7b: linear HDR lighting and GGX | Values above 1 survive through composition; one deliberate tone/output conversion; forward content remains correct |
+| 5 | PR 9: SMAA 1x | Reference three-pass behavior on the graded world, with HUD excluded |
+| 6 | PR 6b: bloom; PR 6c: SSAO; PR 6d: volumetrics | Each lands separately with pixel checks and measured CPU/GPU/memory cost |
+| Optional | PR 8: PSO archives | Cold/warm reload measurements justify it; cache failure always recompiles |
+
+**Evidence from the current implementation:**
+
+- `WorldGeometryAdapter.encodeMergedResolve` binds only options at buffer 0;
+  `resolve.metal` preserves the shaded scene. Shadow helper coverage is not yet world
+  integration coverage. `WorldTerrainShadows` fits from `camera.projectionMatrix`, while
+  geometry rasterizes with its bound `Projection` and transforms.
+- `gbuffer.metal` already packs positive view depth over 24 bits into normal alpha and
+  light blue/alpha, over [0,1024]. `mc_shadow_camera_relative` instead accepts hardware
+  [0,1] depth. These representations are not interchangeable.
+- `MetalShaderFrameExecutor` skips compute and merged passes, supports only `scene`
+  reads, compiles fullscreen outputs as `BGRA8_UNORM`, and sends every fullscreen pass
+  to the same output. Adding effect files alone cannot implement a multi-pass graph.
+  `FrameBindings` currently supplies neither world depth nor camera/light bindings.
+- Both the world adapter and executor rewrite persistent shared option buffers.
+  Resource pinning protects object lifetime, not bytes from a later CPU overwrite.
+  Audit all uploads before adding more per-frame consumers.
+
+**Correctness and performance rules for every remaining PR:**
+
+- Keep geometry and opaque lighting in one Metal encoder where legal. Neighbor-sampling
+  effects need stored inputs; export only their required depth/normal/lighting data instead
+  of storing the entire G-buffer. Retain forced-split parity as a correctness oracle.
+  This follows Apple's [single-pass deferred lighting sample](https://developer.apple.com/documentation/metal/rendering-a-scene-with-deferred-lighting-in-swift).
+- Use immutable uploads or completion-retired frame-buffer slices for options, camera,
+  light and shadow data. A ring slot is reusable only after its GPU consumers complete;
+  do not insert a per-frame CPU wait to make shared-buffer updates safe. See Apple's
+  [CPU/GPU synchronization sample](https://developer.apple.com/documentation/metal/synchronizing-cpu-and-gpu-work).
+- Validate a replacement graph, targets and PSOs before switching rendering to it.
+  Missing current-frame world bindings must select a defined identity/unoccluded path,
+  never yesterday's shadows. Reload, resize, dimension changes and pack failures retire
+  resources after encoded consumers; partial post output must never be presented.
+- Record actual render/drawable dimensions, pack options, GPU/OS, warmup, CPU collection
+  and encoding time, encoder count, shadow draws/instances, target bytes, and GPU spans.
+  Use the existing benchmark's repeated fixed scenes, discard compositor-paced comparisons,
+  and compare disabled, enabled, and forced-split configurations. GPU spans overlap and
+  cannot be summed into frame cost. Set quality budgets from those measurements; no
+  speculative FPS claims or automatic adoption of a larger cascade/filter setting.
+
+Review validation is source inspection plus primary-source checks. The implementation
+tests listed under each PR are requirements for that PR, not results of this review.
 
 ---
 
@@ -203,7 +258,7 @@ The deletion test on `ShaderGraphCompiler`: if we deleted it, every caller would
 
 7. **Geometry mixins are always registered, and they stay on public Blaze3D types.** Always register the thin mixins so application order is stable. The adapter no-ops when no geometry pass is active. **Do not** add `beginPackRenderPass`. Lift the 1-color limit on `createRenderPass(RenderPassDescriptor)` (deleted behavior). Mixins redirect the 5-arg `CommandEncoder.createRenderPass`; the adapter builds a multi-color `RenderPassDescriptor` and calls `encoder.createRenderPass(descriptor)`, which returns Blaze3D `RenderPass`.
 
-8. **Lighting is vanilla lightmap in the G-buffer + GGX.** Iris/OptiFine do **not** replace Minecraft's 4-bit flood-fill light engine. Gbuffers receive `lmcoord` (vanilla lightmap UVs) and typically write them into a G-buffer; composite/deferred samples that plus `shadowtex` ([Iris gbuffers](https://shaders.properties/current/reference/programs/gbuffers/), `texture(lightmap, lmcoord)`). Colored blocklight / voxel GI in modern packs is pack-authored **on top of** the vanilla lightmap, not an occupancy volume. The lighting PR stores vanilla `UV2` / lightmap in the G-buffer and runs GGX with cascaded sun shadows. No `occupancyBuffer()`, no point-light occupancy volume, no `extraBuffers` bag. Named buffer reads may be added to the pack schema in that PR for sun/shadow matrices only. Occupancy/point lights remain a later optional experiment, not the Iris-aligned path.
+8. **Lighting is vanilla lightmap in the G-buffer + GGX.** Iris/OptiFine do **not** replace Minecraft's 4-bit flood-fill light engine. Gbuffers receive `lmcoord` (vanilla lightmap UVs) and typically write them into a G-buffer; composite/deferred samples that plus `shadowtex` ([Iris gbuffers](https://shaders.properties/current/reference/programs/gbuffers/), `texture(lightmap, lmcoord)`). Colored blocklight / voxel GI in modern packs is pack-authored **on top of** the vanilla lightmap, not an occupancy volume. The lighting PR stores vanilla `UV2` / lightmap in the G-buffer and runs GGX with cascaded sun shadows. No `occupancyBuffer()`, no point-light occupancy volume, no `extraBuffers` bag. PR 5a establishes typed named sun/shadow bindings in the pack schema; PR 7 consumes them. Occupancy/point lights remain a later optional experiment, not the Iris-aligned path.
 
 9. **Instrument first.** Pack passes use `MetalPassCensus.kindFor("MetalCraft shader: " + passId)`. Native cap is 32 kinds; overflow goes to `(other passes)`. Do not claim FPS. Flags `-PmetalPassMerging` and `-PmetalCommandBatching` remain.
 
@@ -215,7 +270,7 @@ The deletion test on `ShaderGraphCompiler`: if we deleted it, every caller would
 
 13. **Format 2 `source` is required for format-2 packs, optional for format 1.** Format 1 concatenates all `.metal` files and gates with `MC_PASS_<ID>` (smoke zip fixtures). The first-party pack is format 2.
 
-14. **`enabled_by` is name-checked only.** Matches `a7c274a`. `compile(ShaderPack)` takes no option set. The executor **does not skip** passes. Effects no-op in MSL / via uniform (`if (options.bloom == 0) return;`) until a compile-with-options API exists. A false `enabled_by` option must not disable the pack.
+14. **`enabled_by` is name-checked only.** Matches `a7c274a`. `compile(ShaderPack)` takes no option set. The executor **does not skip** passes. Disabled effects write a defined neutral output (AO 1, additive bloom 0, fog scattering 0/transmittance 1) or copy their input; returning without writing is invalid. A false `enabled_by` option must not disable the pack. Removing disabled work later requires compiling and validating a replacement graph with rewired consumers and recomputed lifetimes.
 
 15. **Never MetalFX.** Half-resolution keeps the existing linear present upscale. Do not restore spatial-scaler JNI, `MetalSpatialScaler`, or an `upscale_filter: metalfx` option in any PR.
 
@@ -1277,11 +1332,20 @@ Per-extension try/catch is **not** in this PR (see PR 0).
 - [x] In-game terrain draw/reload/resize validation passed on 2026-09-04: 49 terrain draws
   after reload and after failed-pack recovery; fullscreen and creative search also passed.
   The captured world screenshot was visually inspected.
+- [x] **Shadow visibility sampling foundation done** — `shared/shadows.metal` selects
+  cascades by positive camera-view depth and evaluates a 3×3 percentage-closer filter
+  using the existing nearest sampler. Receivers outside the covered depth/light volume
+  and filter taps outside the map return unoccluded visibility. The caller supplies bias
+  in normalized shadow depth; the helper returns visibility without changing lighting.
+- [x] GPU sampling checks use actual terrain depth for 1–4 cascades and every opaque
+  layer: receivers below/above casters, transparent cutouts, exact split boundaries and
+  their successors, distance/volume rejection, bias direction, and fractional PCF edge
+  visibility. `./gradlew build --offline` passed on 2026-09-04.
 - [ ] Sample the shadow map in resolve and validate actual world shadows.
 
 **Status: in progress.** Fitting, GPU allocation, typed frame bindings, and terrain depth
-rendering are implemented. The map is not yet consumed by world resolve, so the selected
-pack's appearance is unchanged. Entity/block-entity casters are not part of this terrain step.
+rendering and visibility sampling helpers are implemented. The map is not yet consumed by
+world resolve, so the selected pack's appearance is unchanged. Entity/block-entity casters are not part of this terrain step.
 Do not mark PR 5 complete until the world sampling test passes.
 
 Resource/binding contract (validated by `gradle build --offline` on 2026-09-04):
@@ -1314,11 +1378,49 @@ adds typed `InputPrimitiveTopology` to the render descriptor/JNI, with `UNSPECIF
 existing callers and `TRIANGLE` for terrain shadows. This is required for layered draws,
 not a binary-archive optimization. The earlier topology denylist is superseded by this result.
 
-The next sampling step must capture the exact world raster projection (including bobbing),
-wire named reads through graph/compiler/merged resolve, and verify on-screen shadows. The
-current terrain fit uses the camera's unjittered projection; the shadow upload's camera
-reconstruction data is not yet a production world-resolve binding. Do not consume it there
-until raster/projection conventions are validated.
+#### PR 5a — Integrate visibility without changing normal lighting
+
+- [ ] Capture the exact per-draw-group raster projection and view transforms, including
+  bobbing, hurt effects, FOV changes, and the translator's clip conversion. Keep cascade
+  fitting stable, but conservatively cover the actual raster frustum. Flush resolve when
+  its reconstruction transforms change; one frame-wide matrix cannot silently serve
+  draws made with different projections.
+- [ ] Decode the existing 24-bit **linear view depth** with exact texel/framebuffer reads.
+  Reconstruct a view ray using the inverse raster projection and scale it to positive
+  view depth, then transform to camera-relative world space. Validate the [0,1024] range,
+  quantization and far/sky rejection. Do not pass linear depth to the hardware-depth
+  helper or sample the depth attachment while geometry is writing it.
+- [ ] Add typed external texture/buffer declarations, slot generation and binding
+  validation through parser, graph, compiler and world adapter. Distinguish `shadow_map`
+  from `shadow_frame`; buffers are not render-target producers. Reject slot collisions,
+  missing/type-mismatched bindings and invalid array views before routing geometry.
+- [ ] Add receiver-position, cascade-index and visibility debug views. Compare actual
+  world pixels against deterministic lit/occluded fixtures, including off-camera casters,
+  large coordinates, split boundaries, grazing faces and animated atlas cutouts. Repeat
+  with merging disabled, resize/fullscreen, reload and failed-pack recovery.
+- [ ] Explicitly bind unoccluded/no-sun behavior at night, in other dimensions, during
+  world transitions, and when no current frame exists. Clear empty caster frames so an
+  empty world region cannot reuse old depth. Keep uploads alive through the last resolve.
+
+#### PR 5b — Ship terrain sun shadows with PR 7a
+
+- [ ] Apply visibility only to the direct sun component defined by PR 7a. Multiplying
+  the already fogged `scene` would incorrectly shadow blocklight, emission and fog.
+- [ ] Express receiver bias in world/texel units and convert using each cascade's depth
+  extent; test slope behavior and cap offsets to avoid detached shadows. Add overlapping
+  cascade fits before blend bands, and fade at the maximum receiver distance. Evaluate
+  acne, contact detachment, seams and subtexel camera movement with the existing 3×3 PCF
+  baseline before changing filtering or adding comparison-sampler ABI.
+- [ ] Measure CPU section collection/dispatcher lock time and GPU cascade amplification.
+  Current draws instance each selected section into every active cascade. Add per-cascade
+  intersection masks or compact lists only if profiling supports them; retain off-camera
+  caster coverage. Do not cache shadow maps without mesh, sun and fit invalidation rules.
+- [ ] Account for physical layers in allocation budgets: four 4096² depth32 layers alone
+  require 256 MiB, before driver overhead. Keep conservative defaults and validate size
+  limits/allocation failure. Entity and block-entity **casters**, water shadows and moon
+  shadows remain explicit follow-ups; receiving terrain shadows does not implement them.
+
+PR 5 completes only after the debug integration **and** sun-lighting world tests pass.
 
 - **Title:** Layered shadow map in one encoder
 - **Depends on:** PR 4
@@ -1329,24 +1431,88 @@ until raster/projection conventions are validated.
   world terrain draw counters and lifecycle pass; world shadow sampling remains pending
 - **Description:** Lift `MetalGpuDevice.createTexture` array reject **only** for this module's MetalDevice allocations, or keep using `MetalDevice` directly. No local cubes.
 
-### PR 6 — Compute nodes (SSAO, bloom, volumetrics)
+### PR 6 — Executor, world composition, then separate effect PRs
 
 - [ ] **Not started**.
 
-- **Title:** Optional compute pack nodes
-- **Depends on:** PR 1 compute ABI, PR 2 executor, visually PR 4 (depth)
-- **Files:** `ssao.metal`, `bloom.metal`, `volumetrics.metal`, pack.json options (`apply: uniform`); `enabled_by` may be present for documentation but is **name-checked only**
-- **Tests:** dispatchCovering overflow throws when threadgroup exceeds `maxThreadsPerThreadgroup`; kernel writes neutral output or copies input when its uniform is 0; toggling bloom off does **not** disable the pack; interned census names (smoke dump, not `take()`) still include the kernel label
-- **Description:** Compute passes always remain in the graph and always encode (Decision 14: executor does not skip). MSL writes a defined neutral output or copies its input when the corresponding uniform is 0. Do not use encode-time skip; that would orphan `grade` reads and disable the pack.
+- **Depends on:** PR 1/2/4 for PR 6a; PR 7b for HDR effects; PR 5/7a for sun volumetrics.
+- **Files:** `MetalShaderFrameExecutor`, `FrameBindings`, `ShaderPassCompiler`, graph and
+  allocator, a thin world-composition hook, then individual pack nodes.
+
+**PR 6a — Required execution foundation:**
+
+- [ ] Execute compiled groups in dependency order, routing each declared read/write to
+  its own target/view, format, extent and usage. Add compute PSOs, bindings and dispatch;
+  do not hardcode all fullscreen outputs to `post_color` or `BGRA8_UNORM`. Reject unsupported
+  executable nodes during configuration instead of silently skipping them.
+- [ ] Enforce no sampled read/write aliasing of a texture in the same pass; use explicit
+  ping-pong targets. Honor compiled load/store actions and resource lifetimes. Start with
+  tracked resources on the ordered world queue; validate render→compute→render hazards
+  without CPU waits. Heaps, aliasing and async compute require separate evidence.
+- [ ] Make buffer uploads safe for multiple frames in flight. Test consecutive frames
+  with different options and transforms queued before readback, plus reload/resize while
+  older frames are in flight; pinning alone does not preserve overwritten uniform bytes.
+- [ ] Insert world processing at explicit stages: opaque exports, forward/translucent
+  composition, world grade/AA, then HUD. Audit Fabulous targets, particles, clouds,
+  outlines, hand rendering, underwater effects and spectator post chains against mapped
+  26.2 call sites. Record the chosen order and identities in tests before moving the
+  existing present-time grade. Expose world depth with its projection, extent and stage;
+  later hand/GUI depth writes must not corrupt the effect's intended input.
+- [ ] Test a render→compute→render fixture with distinct intermediate colors, mixed
+  formats/scales, non-multiple and 1-pixel dimensions, invalid bindings and failed kernels.
+  Validate threadgroup bounds/overflow and per-kernel limits; tune against
+  `threadExecutionWidth`, not one assumed optimal group size for all kernels. See Apple's
+  [dispatch sizing guidance](https://developer.apple.com/documentation/metal/calculating-threadgroup-and-grid-sizes).
+
+**PR 6b — Bloom:** threshold and downsample linear HDR color, then a bounded mip/scale
+chain with separate read/write levels and upsample/composite before tone mapping. Start
+at reduced resolution; verify impulse spread, odd extents, energy control and zero output
+when disabled. Avoid a full-resolution multi-tap blur as the default.
+
+**PR 6c — SSAO:** decide its placement before implementing the kernel. Compute AO cannot
+consume the memoryless normals after resolve, and AO computed afterward cannot retroactively
+modulate the indirect term inside that resolve. Export compact depth/normal inputs and an
+indirect-light component for later AO composition, or separately measure a split-lighting
+alternative. Do not darken direct sun, emission or fog with a blanket scene multiply.
+Begin at half resolution with depth-aware filtering/upsampling; test silhouettes, thin
+geometry, sky, flat planes and camera motion. Disabled AO writes 1 everywhere.
+
+**PR 6d — Volumetrics:** bound ray steps and resolution; use the validated shadow frame,
+stored depth and a defined sun/weather model. Composite scattering and transmittance in
+linear HDR with a documented relationship to vanilla fog, before tone mapping. Test no-sun,
+sky, underwater and near-plane cases. Disabled output is scattering 0/transmittance 1.
+History/reprojection is a separate scope; accept and measure spatial quality first.
+
+All disabled nodes still write defined outputs under Decision 14; test repeated on/off
+transitions and census labels. Optimize disabled cost later through validated graph
+specialization with resource/consumer rewiring, not an encode-time early skip.
 
 ### PR 7 — Lighting module (vanilla lightmap + GGX)
 
 - [ ] **Not started**.
 
 - **Title:** Deferred GGX consumed by `resolve.metal`
-- **Depends on:** PR 4, PR 5
+- **Depends on:** PR 4 and PR 5a for PR 7a; PR 6a for PR 7b and world HDR composition
 - **Files:** `WorldLightingModule` **without** `occupancyBuffer`; named sun/shadow bindings established in PR 5 and consumed here; `shared/brdf.metal`
-- **Description:** G-buffer stores vanilla lightmap (`UV2` / `lmcoord`, same contract as Iris `texture(lightmap, lmcoord)`). Resolve runs GGX with cascaded sun shadows. No occupancy volume, no point-light list, no `extraBuffers` bag. Occupancy is not this PR.
+- **PR 7a — Lighting semantics before BRDF:** document G-buffer normal space and decoding,
+  material IDs, roughness and emission, exact UV2/lightmap sampling, overlays and fog.
+  The RGB lightmap mixes sky/block illumination and game effects; it is not an isolated
+  direct-sun term. Define an explicit direct-sun contribution and indirect/blocklight
+  policy without double-counting sky energy. Keep vanilla behavior available as a parity
+  path. Test torch-only caves, fullbright/emissive entities, damage overlays, weather,
+  sunrise/night and dimension changes, along with PR 5b's sun-shadow tests.
+- **PR 7b — Linear HDR and GGX:** audit actual atlas, lightmap, scene and drawable transfer
+  functions before adding conversions. Define decode, lighting, fog, forward blending,
+  tone mapping and output encoding; a `_UNORM` format alone does not identify color space.
+  Allocate a supported floating-point world color target (start with `RGBA16_FLOAT`) and
+  update geometry/resolve PSOs plus forward/translucent composition to match. Retaining
+  an 8-bit scene until present clips highlights before bloom and ACES can use them.
+  Keep fullbright/overlay semantics explicit. Use dielectric defaults until material data
+  exists, bound roughness away from zero, and guard GGX denominators/grazing angles against
+  NaN/Inf. Validate diffuse/specular energy, values above 1 through intermediate readback,
+  fog ordering, transparent blending and exactly one output conversion. Measure the HDR
+  bandwidth increase; do not widen every G-buffer attachment by default.
+- **Scope:** no occupancy volume, point-light list or generic `extraBuffers` bag.
 
 ### PR 8 — PSO binary archives
 
@@ -1355,6 +1521,14 @@ until raster/projection conventions are validated.
 - **Title:** Persistent Metal binary archives for pack PSOs
 - **Depends on:** PR 2
 - **Files:** `MetalPipelineCache`, add `archivePath`/`archiveWarm` to **compute** JNI and, in this PR only, to `nCreateRenderPipeline` for pack PSOs — vanilla GLSL PSOs may keep compiling without archives. Measure reload hitch.
+- **Gate:** first measure whether source/library compilation or PSO creation dominates.
+  Archive keys must cover expanded source/includes, compile options/constants, entry points,
+  attachment/depth formats, sample count, topology and vertex layout, plus device/runtime
+  compatibility. Use bounded storage and atomic replacement; missing, corrupt or stale
+  archives fall back to normal compilation. Test identical pixels for cold/warm/cache-miss
+  loads and option/format changes. Archive support reduces repeated pipeline work; it is
+  not a steady-state frame-rate claim. Follow Apple's
+  [binary archive workflow](https://developer.apple.com/documentation/metal/creating-binary-archives-from-device-built-pipeline-state-objects).
 - **Not:** MetalFX in this or any follow-up. Argument buffers and direct-to-drawable remain optional later flags. Half-resolution continues to use the existing linear present upscale.
 
 ### PR 9 — SMAA (after geometry, before TAA)
@@ -1362,9 +1536,19 @@ until raster/projection conventions are validated.
 - [ ] **Not started**.
 
 - **Title:** SMAA as a pack node on the graded scene
-- **Depends on:** PR 4 (geometry exists so depth/`scene` are stable)
+- **Depends on:** PR 6a target routing and world-only hook; PR 7b color-space contract for
+  the shipping HDR path. Does not require SSAO, bloom or volumetrics.
 - **Files:** `smaa.metal` (or split edge/blend/neighborhood passes), pack.json compute or fullscreen nodes, `apply: uniform` toggle
-- **Description:** First anti-aliasing node. No history, no motion vectors, no TAA. TAA is a later experiment and is not this PR. Never MetalFX.
+- **Description:** Implement SMAA **1x** edge detection, blend-weight calculation and
+  neighborhood blending, with the reference area/search textures and correct sampler
+  modes/texel offsets. Define gamma-encoded color for color/luma edge detection and the
+  reference blending-space behavior; do not assume arbitrary scene data works. Follow
+  the [original SMAA implementation](https://github.com/iryoku/smaa/blob/master/SMAA.hlsl).
+  Use distinct edge/weight/output targets, test diagonals, subpixel lines, foliage, image
+  borders and odd resolutions against reference fixtures, and require disabled identity.
+  Place after world grading and before HUD. Record its resolution relative to the existing
+  half-resolution linear upscale; measure both quality and cost before choosing a default.
+  No history, motion vectors or TAA. Never MetalFX.
 
 ### PR 10 (unscheduled) — OptiFine adapter
 
