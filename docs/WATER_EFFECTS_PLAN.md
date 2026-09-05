@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1 audit in progress.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1 complete; W2 HDR prerequisite next.
 
 ## Outcome and scope
 
@@ -41,7 +41,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
-| [ ] | W1 | Water identity and composition design | — | /root | in progress | 2026-09-05: repository audit and proposed contracts recorded below. Next: locate/generate mapped fluid sources, verify face metadata and sorting, then implement and capture the debug identity view. No live validation yet. |
+| [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
 | [ ] | W2 | HDR composition prerequisite | W1 | unassigned | not started | Complete or verify engine PR 7b live HDR gate. |
 | [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
@@ -283,3 +283,104 @@ found by the initial file inventory of local/project Gradle caches. Locate the c
 Loom cache or generate sources, audit fluid tessellation and sorted upload, then implement
 a water identity debug view with glass/ice/slime/lava controls. W1 stays unchecked until
 that view has live evidence and the outstanding contracts above are verified.
+
+
+### W1 mapped audit and diagnostic — 2026-09-05
+
+The source jar was present under the ignored `.gradle/loom-cache/minecraftMaven`
+folder; locating it required `rg --files --hidden --no-ignore`. Audit committed in
+`be07df6`; the following findings supersede provisional notes above.
+
+- [x] Locate and read mapped fluid tessellation and shared-batch sorting.
+- [x] Implement an opt-in, fluid-state-based mesh diagnostic and paired capture scene.
+- [x] Visually verify paired captures and close the final W1 routing/blend design (evidence below).
+
+`SectionCompiler.compile` calls `FluidRenderer.tesselate` with each block's `FluidState`
+before emitting its block model. This includes waterlogged blocks. `FluidRenderer` selects
+its resource-loaded model and layer, then emits top, bottom, side, overlay, and reverse
+faces through one `Output` consumer. Top UVs encode flow rotation; still/flow/overlay
+materials come from `FluidStateModelSet`. Resource texture coordinates are not identity.
+`BufferBuilder`'s BLOCK layout is 28 bytes: position at 0, color at 12, UV0 at 16,
+light at 24. It has no material/flow attribute. `MeshData.sortQuads` sorts indices while
+leaving vertices fixed; `ChunkSectionsToRender` also reverses translucent draw lists.
+
+The diagnostic wraps only water-tagged fluid output at the section compiler call. It
+changes vertex RGB to magenta, retaining alpha, UVs, light, topology and the existing
+sort path. Disabled and non-water calls return the original output. This is an identity
+probe, not production material transport: tint remains visible through atlas/light/fog
+modulation, and no later shader should classify magenta pixels. A flag change requires
+`levelExtractor.allChanged()` to rebuild terrain. The fixture performs that rebuild for
+baseline, diagnostic, and restored captures and restores the prior flag/pack afterward.
+
+For production choose an additional per-vertex material/flow stream bound beside the
+original terrain vertices, indexed by the same original vertex index/base vertex. Extend
+section compile results, vertex upload/storage, draw bindings, and retirement together;
+initialize non-fluid vertices explicitly to non-water. Never index metadata by sorted
+primitive number. This keeps vanilla BLOCK bytes and sorted indices intact but requires
+an audited multi-draw binding change in W3. The diagnostic does not implement that stream.
+
+Mapped composition order: clear main depth to **0**, sky, opaque terrain, solid features,
+copy main depth to Fabulous translucent/item targets, translucent features, feature
+outlines, translucent terrain, after-terrain translucent features; clouds and weather
+then precede the Fabulous composition chain. Always-on-top follows the chain. World
+rendering finishes before hand depth clear/render and screen overlays in `GameRenderer`.
+Capture opaque color/depth after resolving solid features and before any forward features;
+the existing post-world depth export is too late. Fabulous's copied depth is not a
+separate immutable water snapshot. Its intermediate targets are currently RGBA8.
+
+World depth uses reverse Z: clear 0, default `GREATER_THAN_OR_EQUAL` with depth writes;
+Standard preserves projection Z/W and flips Y. Preserve the terrain pipeline's actual
+state when substituting. `BlendFunction.TRANSLUCENT` uses source-alpha/one-minus-source-alpha
+for RGB and one/one-minus-source-alpha for alpha. Diagnostic retains this convention.
+Baseline water shading retains straight-alpha coverage and outputs only the shaded
+surface contribution. For W5, choose opaque-snapshot replacement at covered water
+fragments: output the complete reflected/transmitted RGB with alpha 1 through the
+existing blend state, preserving the original texture-alpha discard/coverage boundary.
+This avoids counting background twice and keeps depth/sort behavior. It deliberately
+cannot reproduce transparent objects behind water from an opaque snapshot. Such objects
+may disappear where water replaces their earlier contribution; above-water geometry
+still follows vanilla sorting/depth. Document this limitation in W5 live comparisons.
+Refraction-off retains baseline coverage blending. Fabulous refraction stays on that
+baseline fallback until W3 verifies how alpha-1 water and its depth participate in the
+transparency chain. This is a chosen supported fallback, not a Fabulous refraction claim.
+
+Validation command: `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`.
+The scene contains a water pool/falling flow, a waterlogged slab, glass, ice, slime and
+lava on an elevated platform. Captures are named `metalcraft-water-identity-baseline`,
+`metalcraft-water-identity-water`, and `metalcraft-water-identity-restored`.
+
+
+### W1 completion evidence — 2026-09-05
+
+W1 is complete as an identity/design milestone. W3 production metadata transport,
+snapshots and forward shading remain unimplemented; the RGB probe is debug-only and
+disabled by default. Final mapped findings and the replacement/fallback blend policy
+above supersede the initial audit's provisional contracts.
+
+Implementation files: `SectionCompilerWaterMixin.java`, `WaterIdentityDebug.java`,
+`MetalWaterIdentityGameTest.java`, the lifecycle dispatcher, client mixin manifest and
+`build.gradle`. Owner `/root`; all W1 changes share this tracker update.
+
+Validation:
+
+- `./gradlew build`: passed, including Metal shader translation/GPU smoke coverage.
+  An earlier run encountered an unrelated shadow fixture syntax error while that work
+  was changing in the shared workspace; it was corrected outside this water change.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed on
+  the Metal backend; final fixture run completed in 39 seconds. Visually inspected all
+  three 854×480 captures: pool, falling/flowing water and waterlogged-slab water become
+  magenta; glass, ice, slime and lava retain their appearance; debug-off restores water.
+- The earlier invocation with an empty `-PmetalWaterIdentityTest` ran the ordinary
+  lifecycle suite instead and passed. Use the explicit `=true` command above for water.
+- `git diff --check`: passed. No performance claim or W2–W8 validation is made.
+
+Local visual artifacts (generated outputs, not committed):
+
+- [Baseline](../run/screenshots/0000_metalcraft-water-identity-baseline.png)
+- [Water identity](../run/screenshots/0001_metalcraft-water-identity-water.png)
+- [Restored](../run/screenshots/0002_metalcraft-water-identity-restored.png)
+
+Logs: `/tmp/metalcraft-water-build.log`, `/tmp/metalcraft-water-client.log`.
+Next task is W2: coordinate the existing PR 7b linear HDR transition through world and
+forward targets and move tone/output conversion to the world seam. Do not start W3
+production shading from the legacy 8-bit path. No water performance budget is due at W1.
