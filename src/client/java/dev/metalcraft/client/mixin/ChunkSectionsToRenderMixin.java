@@ -6,6 +6,7 @@ import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import dev.metalcraft.client.shader.WorldGeometryAdapter;
+import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -48,6 +49,12 @@ abstract class ChunkSectionsToRenderMixin {
 		final ChunkSectionLayerGroup group,
 		final GpuSampler sampler
 	) {
+		// This attachment is the world framebuffer. Native presentation dimensions are not
+		// authoritative (Retina and render scaling can make them different).
+		ShaderPackRuntime runtime = ShaderPackRuntime.active();
+		if (group == ChunkSectionLayerGroup.OPAQUE && runtime != null && runtime.isActive()) {
+			runtime.resizeToScene(color.getWidth(0), color.getHeight(0));
+		}
 		boolean wireframe = SharedConstants.DEBUG_HOTKEYS && Minecraft.getInstance().wireframe;
 		List<RenderPipeline> pipelines = new ArrayList<>(group.layers().length);
 		for (ChunkSectionLayer layer : group.layers()) {

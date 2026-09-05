@@ -209,6 +209,14 @@ public final class ShaderPackRuntime implements AutoCloseable {
 		return this.pack == null ? List.of() : this.pack.manifest().options();
 	}
 
+	/** Use the actual scene attachment, which can differ from the native drawable extent. */
+	public synchronized void resizeToScene(final int width, final int height) {
+		if (this.width != width || this.height != height) {
+			WorldGeometryAdapter.resolveOpaque();
+			this.resize(width, height);
+		}
+	}
+
 	public synchronized void resize(final int width, final int height) {
 		this.requireOpen();
 		if (width <= 0 || height <= 0) {

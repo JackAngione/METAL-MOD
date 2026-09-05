@@ -37,7 +37,7 @@ uint mc_shadow_cascade(float viewDepth, constant MCShadowFrame& frame) {
 // distance or hardware depth). Bias is in normalized shadow depth and moves toward the sun.
 // Manual comparisons use the module's nearest sampler, avoiding a new comparison-sampler ABI.
 float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBias,
-    constant MCShadowFrame& frame, depth2d_array<float> map, sampler nearestSampler) {
+    constant MCShadowFrame& frame, depth2d_array<float> map, sampler nearestSampler, float3 worldNormal) {
     uint cascade = mc_shadow_cascade(viewDepth, frame);
     if (cascade >= min(frame.cascadeCount, 4u) || cascade >= map.get_array_size()
         || !all(isfinite(cameraRelative))) return 1.0;
@@ -45,7 +45,20 @@ float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBi
     if (!all(isfinite(clip)) || clip.w <= 0.0) return 1.0;
     float3 ndc = clip.xyz / clip.w;
     if (any(abs(ndc.xy) > 1.0) || ndc.z < 0.0 || ndc.z > 1.0) return 1.0;
-    float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    // shadow_terrain_vertex flips clip Y; Metal's viewport flip cancels it.
+    float2 uv = ndc.xy * 0.5 + 0.5;
+    float4x4 matrix = frame.cameraRelativeToShadow[cascade];
+    float3 rowX = float3(matrix[0].x, matrix[1].x, matrix[2].x);
+    float3 rowY = float3(matrix[0].y, matrix[1].y, matrix[2].y);
+    float3 rowZ = float3(matrix[0].z, matrix[1].z, matrix[2].z);
+    // Inverse-transpose the receiver plane into this orthographic light volume.
+    float3 plane = float3(dot(rowX, worldNormal) / max(dot(rowX, rowX), 1e-12),
+                         dot(rowY, worldNormal) / max(dot(rowY, rowY), 1e-12),
+                         dot(rowZ, worldNormal) / max(dot(rowZ, rowZ), 1e-12));
+    // Quantized normals nearly perpendicular to the light cannot define a stable
+    // depth plane; retain the bounded bias path at those grazing angles.
+    bool stablePlane = abs(dot(worldNormal, frame.directionToSun.xyz)) > 0.08;
+    float2 depthGradient = stablePlane && abs(plane.z) > 1e-5 ? -2.0 * plane.xy / plane.z : float2(0.0);
     float receiverDepth = ndc.z - max(depthBias, 0.0);
     float visibility = 0.0;
     for (int y = -1; y <= 1; ++y) {
@@ -53,10 +66,22 @@ float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBi
             float2 tap = uv + float2(x, y) * frame.inverseResolution;
             // Treat taps beyond the light volume as unoccluded, not clamped edge casters.
             if (any(tap < 0.0) || any(tap >= 1.0)) visibility += 1.0;
-            else visibility += receiverDepth <= map.sample(nearestSampler, tap, cascade) ? 1.0 : 0.0;
+            else {
+                // Compare at the sampled texel center, not the center receiver's depth.
+                // Otherwise neighboring samples on a sloped plane shadow the plane itself.
+                float2 center = (floor(tap * float(map.get_width())) + 0.5) / float(map.get_width());
+                float tapDepth = receiverDepth + dot(depthGradient, center - uv);
+                visibility += tapDepth <= map.sample(nearestSampler, tap, cascade) ? 1.0 : 0.0;
+            }
         }
     }
     return visibility / 9.0;
+}
+
+// Callers without a receiver normal retain the raw visibility/bias contract.
+float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBias,
+    constant MCShadowFrame& frame, depth2d_array<float> map, sampler nearestSampler) {
+    return mc_shadow_visibility(cameraRelative, viewDepth, depthBias, frame, map, nearestSampler, float3(0.0));
 }
 
 // World-space depth range of one cascade, from the light-space Z scale.
@@ -109,11 +134,12 @@ float mc_unpack_view_depth(float4 normal, float4 light) {
     return float(mc_unpack_view_depth_bits(normal, light)) * (1024.0 / 16777215.0);
 }
 
-// Raster ProjMat is OpenGL clip (Y-up). Geometry flips Y for Metal; screen UV is top-left.
+// Geometry negates clip Y before Metal viewport conversion. Inverting that pair
+// means original raster NDC Y is 2*uv.y-1, not 1-2*uv.y.
 // Scale the unprojected ray so -view.z equals the packed linear view depth. Do not pass that
 // depth to mc_shadow_camera_relative, which expects hardware [0,1] depth.
 float3 mc_reconstruct_view_position(float2 uv, float viewDepth, float4x4 inverseProjection) {
-    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float2 ndc = uv * 2.0 - 1.0;
     float4 viewH = inverseProjection * float4(ndc, 0.0, 1.0);
     float w = abs(viewH.w) < 1e-8 ? 1e-8 : viewH.w;
     float3 ray = viewH.xyz / w;

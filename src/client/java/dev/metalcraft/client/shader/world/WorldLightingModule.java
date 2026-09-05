@@ -19,9 +19,9 @@ import org.joml.Vector4fc;
  *
  * <p>Materials match {@code WorldGeometryAdapter.Material}: solid, foliage, water, entity,
  * emissive. Emission and damage overlays stay in the seed; they are not multiplied by sun
- * visibility. The RGB lightmap mixes sky and block energy, so it is not an isolated sun term.
- * Direct sun is the sky-weighted fraction of recovered (unfogged) lighting times {@code N·L},
- * then cascaded shadow visibility. Indirect is the remainder. {@code visibility = 1} is an
+ * visibility. The RGB lightmap mixes sky and block energy isotropically (no {@code N·L}),
+ * so the shadowed sun term is that sky share of the recovered seed, not a Lambert facing
+ * term. Gating on {@code N·L} leaves dawn ground unshadowed. {@code visibility = 1} is an
  * identity on the unfogged seed. Fog is decoded and reapplied after lighting.
  *
  * <p>{@link #FRAME_BYTES} matches {@code sizeof(McFog)} in MSL (40-byte members, 16-byte

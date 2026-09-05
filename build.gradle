@@ -103,6 +103,7 @@ tasks.named('runClient') {
 	}
 	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
 		systemProperty 'fabric.client.gametest', 'true'
+		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')

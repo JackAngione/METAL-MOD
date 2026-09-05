@@ -7,5 +7,5 @@ package dev.metalcraft.client.metal;
  */
 @FunctionalInterface
 public interface WorldUniformCapture {
-	void capture(String name, MetalBuffer buffer, long offset, long size);
+	void capture(String name, java.nio.ByteBuffer bytes);
 }

@@ -103,6 +103,7 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		if (runtime != null && runtime.isActive()) {
 			try {
 				MetalCommandBuffer commands = metalEncoder.commands();
+				runtime.resizeToScene(metalView.getWidth(0), metalView.getHeight(0));
 				FrameBindings bindings = WorldComposition.present(
 					scene, metalView.metal(), runtime.frameWidth(), runtime.frameHeight()
 				);

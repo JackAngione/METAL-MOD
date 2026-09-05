@@ -191,7 +191,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		this.uniforms.put(name, value);
 		WorldUniformCapture capture = this.device.worldUniformCapture();
 		if (capture != null) {
-			capture.capture(name, metal.metal(), value.offset(), value.length());
+			metal.captureUniform(name, value.offset(), value.length(), capture);
 		}
 	}
 

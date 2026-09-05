@@ -106,8 +106,6 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final String resolveSource;
 	private final Function<String, Object> optionValue;
 	private final List<ShaderPack.Option> uniformOptions;
-	private final MetalBuffer uniforms;
-	private final MetalBuffer resolveCamera;
 	private final int shadowMapSlot;
 	private final int shadowFrameSlot;
 	private final int resolveCameraSlot;
@@ -165,8 +163,6 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		this.resolveSource = resolveSource;
 		this.uniformOptions = List.copyOf(uniformOptions);
 		this.optionValue = optionValue;
-		this.uniforms = device.metal().createBuffer(256L, MetalBuffer.StorageMode.SHARED);
-		this.resolveCamera = device.metal().createBuffer(160L, MetalBuffer.StorageMode.SHARED);
 		int textureSlot = 0;
 		int shadowMap = -1;
 		for (String read : resolvePass.reads()) {
@@ -188,8 +184,6 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		this.resolveCameraSlot = bufferSlot;
 		this.lightingFrameSlot = bufferSlot + 1;
 		this.channels = this.captureChannels();
-		this.writeUniforms();
-		this.writeResolveCamera();
 		if (this.shadowMapSlot >= 0 || this.shadowFrameSlot >= 0) {
 			this.createUnoccludedBindings();
 		}
@@ -380,19 +374,25 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		if (!this.pendingResolve || this.resolvePipeline == null) {
 			return false;
 		}
-		try (MetalBuffer lighting = this.device.metal().createBuffer(
-			WorldLightingModule.FRAME_BYTES, MetalBuffer.StorageMode.SHARED
-		)) {
-			this.writeUniforms();
-			this.writeResolveCamera();
+		// Each resolve owns immutable uploads. Native command-buffer pinning keeps them alive
+		// after close; neither a later draw group nor the next frame can overwrite their bytes.
+		try (
+			MetalBuffer uniforms = this.device.metal().createBuffer(
+				Math.max(4L, this.uniformOptions.size() * 4L), MetalBuffer.StorageMode.SHARED);
+			MetalBuffer camera = this.device.metal().createBuffer(160L, MetalBuffer.StorageMode.SHARED);
+			MetalBuffer lighting = this.device.metal().createBuffer(
+				WorldLightingModule.FRAME_BYTES, MetalBuffer.StorageMode.SHARED)
+		) {
+			this.writeUniforms(uniforms);
+			this.writeResolveCamera(camera);
 			WorldLightingModule.write(lighting, this.fogColor,
 				this.fogEnvironmentalStart, this.fogEnvironmentalEnd,
 				this.fogRenderDistanceStart, this.fogRenderDistanceEnd,
 				this.fogSkyEnd, this.fogCloudsEnd);
 			openPass.setScissor(0, 0, this.sceneAttachment.getWidth(0), this.sceneAttachment.getHeight(0));
 			openPass.setPipeline(this.resolvePipeline);
-			openPass.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
-			openPass.setUniformBuffer(this.resolveCameraSlot, this.resolveCamera, 0L, MetalRenderPass.STAGE_FRAGMENT);
+			openPass.setUniformBuffer(0, uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
+			openPass.setUniformBuffer(this.resolveCameraSlot, camera, 0L, MetalRenderPass.STAGE_FRAGMENT);
 			openPass.setUniformBuffer(this.lightingFrameSlot, lighting, 0L, MetalRenderPass.STAGE_FRAGMENT);
 			this.bindShadowResources(openPass);
 			openPass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
@@ -569,8 +569,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		return preamble + this.source;
 	}
 
-	private void writeUniforms() {
-		try (MetalBuffer.Mapping mapping = this.uniforms.map()) {
+	private void writeUniforms(final MetalBuffer uniforms) {
+		try (MetalBuffer.Mapping mapping = uniforms.map()) {
 			ByteBuffer bytes = mapping.bytes();
 			bytes.clear();
 			while (bytes.hasRemaining()) {
@@ -589,8 +589,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 	}
 
-	private void writeResolveCamera() {
-		try (MetalBuffer.Mapping mapping = this.resolveCamera.map()) {
+	private void writeResolveCamera(final MetalBuffer camera) {
+		try (MetalBuffer.Mapping mapping = camera.map()) {
 			ByteBuffer bytes = mapping.bytes();
 			this.inverseProjection.get(0, bytes);
 			this.viewToCameraRelative.get(64, bytes);
@@ -601,46 +601,28 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 	}
 
-	private void captureWorldUniform(final String name, final MetalBuffer buffer, final long offset, final long size) {
-		if (!this.pendingResolve || this.closed) {
-			return;
-		}
+	private void captureWorldUniform(final String name, final ByteBuffer bytes) {
+		if (!this.pendingResolve || this.closed) return;
 		if ("Fog".equals(name)) {
-			this.captureFog(buffer, offset, size);
+			if (bytes.remaining() >= 40) {
+				this.setFog(new Vector4f(bytes.getFloat(0), bytes.getFloat(4), bytes.getFloat(8), bytes.getFloat(12)),
+					bytes.getFloat(16), bytes.getFloat(20), bytes.getFloat(24), bytes.getFloat(28),
+					bytes.getFloat(32), bytes.getFloat(36));
+			}
 			return;
 		}
-		if (size < 64L) {
-			return;
-		}
-		Matrix4f matrix = new Matrix4f();
-		try (MetalBuffer.Mapping mapping = buffer.map(offset, 64L)) {
-			matrix.set(mapping.bytes());
-		} catch (RuntimeException ignored) {
-			return;
-		}
-		if (!matrix.isFinite()) {
-			return;
-		}
+		if (bytes.remaining() < 64) return;
+		// JOML's enabled Unsafe path assumes direct buffers; private-upload mirrors are heap-backed.
+		Matrix4f matrix = new Matrix4f(
+			bytes.getFloat(0), bytes.getFloat(4), bytes.getFloat(8), bytes.getFloat(12),
+			bytes.getFloat(16), bytes.getFloat(20), bytes.getFloat(24), bytes.getFloat(28),
+			bytes.getFloat(32), bytes.getFloat(36), bytes.getFloat(40), bytes.getFloat(44),
+			bytes.getFloat(48), bytes.getFloat(52), bytes.getFloat(56), bytes.getFloat(60));
+		if (!matrix.isFinite()) return;
 		if ("Projection".equals(name)) {
 			this.setRasterProjection(matrix);
 		} else if ("ChunkSection".equals(name) || "DynamicTransforms".equals(name)) {
 			this.setRasterView(matrix);
-		}
-	}
-
-	private void captureFog(final MetalBuffer buffer, final long offset, final long size) {
-		if (size < 40L) {
-			return;
-		}
-		try (MetalBuffer.Mapping mapping = buffer.map(offset, 40L)) {
-			ByteBuffer bytes = mapping.bytes();
-			this.setFog(
-				new Vector4f(bytes.getFloat(0), bytes.getFloat(4), bytes.getFloat(8), bytes.getFloat(12)),
-				bytes.getFloat(16), bytes.getFloat(20), bytes.getFloat(24), bytes.getFloat(28),
-				bytes.getFloat(32), bytes.getFloat(36)
-			);
-		} catch (RuntimeException ignored) {
-			// Keep the last valid fog rather than lighting with a partial upload.
 		}
 	}
 
@@ -657,7 +639,6 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 		this.inverseProjection.set(inverse);
 		this.haveRasterProjection = true;
-		this.writeResolveCamera();
 	}
 
 	private void setRasterView(final Matrix4fc view) {
@@ -673,7 +654,6 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 		this.viewToCameraRelative.set(inverse);
 		this.haveRasterView = true;
-		this.writeResolveCamera();
 	}
 
 	private void flushPendingResolve() {
@@ -779,8 +759,6 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			this.resolvePipeline.close();
 			this.resolvePipeline = null;
 		}
-		this.uniforms.close();
-		this.resolveCamera.close();
 		if (this.unoccludedSampler != null) {
 			this.unoccludedSampler.close();
 			this.unoccludedSampler = null;

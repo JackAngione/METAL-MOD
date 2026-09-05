@@ -78,6 +78,11 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		}
 		LOGGER.info("Metal lifecycle validation: {} backend selected", backend);
 
+		if (Boolean.getBoolean("metalcraft.shadowVisibilityTest")) {
+			new MetalShadowVisibilityGameTest(context).run();
+			return;
+		}
+
 		if (benchmark) {
 			new MetalRealWorldBenchmark(context, backend).run();
 			return;

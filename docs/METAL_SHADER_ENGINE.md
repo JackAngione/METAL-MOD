@@ -4,13 +4,66 @@
 | --- | --- |
 | **Title** | Metal-Native Shader Engine |
 | **Author** | MetalCraft contributors |
-| **Date** | 2026-09-03 |
-| **Status** | In progress; PR 0–5a complete; PR 7a + PR 5b sun-term lighting implemented; PR 6a executor/world-composition seam implemented (live grade still present-time) |
+| **Date** | 2026-09-05 |
+| **Status** | In progress; PR 0–5a complete; PR 7a + PR 5b sun-term lighting implemented; PR 6a executor/world-composition seam implemented; resolve upload isolation verified (live grade still present-time) |
 | **Target** | Minecraft Java 26.2, Fabric, macOS arm64, direct Metal backend |
 | **Parent commit of deleted engine** | `a7c274a` |
 | **Deletion commit** | `0eb8833 Remove the shader pack engine and leave the Metal backend` |
 
 ---
+
+## Visible-shadow bug fix — 2026-09-05
+
+Earlier smoke checks proved isolated shader behavior and submitted shadow draws, but did
+not prove visible shadows in a real world. The controlled in-game regression reproduced
+zero darkened pixels despite an active pack. The earlier completion claims were insufficient.
+
+- [x] Size G-buffer and post targets from the actual scene attachment, not the drawable.
+  The failing run rendered 854×480 terrain against 1708×960 G-buffer targets; the adapter
+  silently selected forward rendering. Terrain now synchronizes targets before routing,
+  and presentation synchronizes from its source texture as well.
+- [x] Capture private uniform uploads without GPU readback. Real `Projection` buffers
+  cannot be CPU-mapped. Retain CPU provenance for private uniform writes/copies, track
+  initialized ranges, and consume those bytes at named binding capture. The old path
+  swallowed mapping failure and left an identity projection. Shared mapped uniforms
+  continue to capture their current contents. A smoke fixture covers private upload slices.
+- [x] Match shadow sampling and receiver reconstruction to the actual clip-Y flip in the
+  terrain shaders. Add receiver-plane depth correction at each PCF texel center, with a
+  grazing-angle guard, to prevent flat surfaces from shadowing themselves.
+- [x] Add an opt-in real-world column/platform test with fixed time, camera and geometry,
+  vanilla versus lit image comparisons, and a clean-ground assertion. Visually inspected
+  the resulting cast shadow. Merged rendering produced 5,593 darkened pixels; forced-split
+  produced 5,484 and passed the clean-ground check. Full offline build passed.
+
+Reproduce with `./gradlew runClient --offline -PmetalLifecycleTest
+-PmetalShadowVisibilityTest=true` (append `-PmetalPassMerging=false` for split rendering).
+This validates terrain sun shadows in the fixture; entity casters and the other planned
+lighting/effect milestones remain open.
+
+## Continuation checkpoint — 2026-09-05
+
+- [x] Review the remaining sequence against HEAD and preserve the in-progress shadow
+  strength/grazing-face changes. PR 7b remains the next feature milestone; the world-only
+  composition boundary is documented but is not yet wired into live rendering.
+- [x] Close the resolve upload prerequisite called out in the remaining-work review.
+  `WorldGeometryAdapter` now allocates immutable options and camera uploads for each
+  resolve, just as it already did for lighting. Matrix setters update CPU state after
+  flushing the old resolve. Encoded buffers are retained by native command-buffer pinning
+  after their Java owners close; no GPU wait or encoder split is added.
+- [x] Add deterministic GPU regression coverage with two resolves recorded before one
+  submission: different debug options and different raster views must retain their own
+  values. All pixels in both half-screen regions are checked. The options test failed
+  before the fix (first region read the second resolve's albedo option).
+- [x] Validate `./gradlew build --offline` and
+  `./gradlew shaderTranslationSmoke --offline -PmetalPassMerging=false` on macOS arm64.
+  Both passed, including existing shadow-lighting and graph tests.
+
+Still open: PR 7b transfer-function audit, live HDR/forward composition and GGX; PR 9
+SMAA; PR 6b bloom, PR 6c SSAO and PR 6d volumetrics; shadow collection/cascade cost
+measurement. PR 8 archives remain measurement-gated and optional; PR 10 remains
+unscheduled. This checkpoint does not claim in-game visual validation or a performance
+improvement. Immutable resolve uploads add two small buffer allocations per resolve;
+measure their cost before replacing them with completion-retired pooling.
 
 ## Implementation review — 2026-09-04
 
@@ -99,10 +152,10 @@ Keep the PR numbers as stable references, but implement in this order:
   remains present-time; `WorldComposition.PACK_POST` (`WORLD_GRADE_AA`) is the
   documented world-only insertion point. `FrameBindings` can carry a world-depth
   snapshot, projection, extent and stage.
-- The executor option ring is completion-retired. The world adapter still rewrites
-  persistent shared option/camera/lighting buffers in merged resolve; pinning
-  protects object lifetime, not those bytes. Audit remaining uploads before adding
-  more per-frame consumers.
+- The executor option ring is completion-retired. As of the 2026-09-05 checkpoint,
+  the world adapter uses immutable per-resolve option/camera/lighting uploads.
+  Native pinning retains each upload through GPU completion without reusing its bytes.
+  Shadow frame and terrain-offset uploads are also allocated for each encoding.
 
 **Correctness and performance rules for every remaining PR:**
 
@@ -1535,7 +1588,9 @@ specialization with resource/consumer rewiring, not an encode-time early skip.
   sunrise/night and dimension changes, along with PR 5b's sun-shadow tests.
 
   Implemented: view-space octahedral normals; materials including `MC_MATERIAL_EMISSIVE`;
-  UV2 sky/block split of the recovered (unfogged) seed; `sunWeight = skyShare * N·L`;
+  UV2 sky/block split of the recovered (unfogged) seed. The in-progress lighting
+  correction uses `sunWeight = saturate(skyShare * shadowStrength)` because the vanilla
+  lightmap seed already carries isotropic sky light, including on grazing faces;
   `lit = unfogged - unfogged * sunWeight * (1 - vis)`; fog decoded and reapplied after
   lighting. `visibility = 1` is a seed identity. `debug_view=vanilla` is an explicit
   parity control. GPU fixtures cover torch-only caves, emissive, partial fog, vis=1

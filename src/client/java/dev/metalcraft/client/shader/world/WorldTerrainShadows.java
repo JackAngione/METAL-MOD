@@ -61,7 +61,7 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		this.endFrame();
 		this.lastDrawCount = 0;
 		if (!camera.initialized || sky.skybox != DimensionType.Skybox.OVERWORLD
-			|| !Float.isFinite(sky.sunAngle) || Math.cos(sky.sunAngle) <= 0
+			|| !Float.isFinite(sky.sunAngle) || Math.cos(sky.sunAngle) < 0
 			|| Minecraft.getInstance().wireframe) {
 			this.frame = this.resources.prepareUnoccludedFrame();
 			return;

@@ -325,6 +325,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 			this.commands().copyBuffer(
 				requireBuffer(staging.buffer()).metal(), staging.offset(), target.metal(), destination.offset(), length
 			);
+			target.recordUpload(destination.offset(), data, length);
 		}
 	}
 
@@ -333,6 +334,8 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.commands().copyBuffer(
 			requireBuffer(source.buffer()).metal(), source.offset(), requireBuffer(target.buffer()).metal(), target.offset(), source.length()
 		);
+		requireBuffer(target.buffer()).recordCopy(target.offset(),
+			requireBuffer(source.buffer()), source.offset(), source.length());
 	}
 
 	@Override

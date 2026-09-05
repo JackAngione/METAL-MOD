@@ -13,14 +13,14 @@
 // Materials match WorldGeometryAdapter.Material ordinals. Emission and the vanilla seed's
 // overlay mix stay in albedo/scene; they are not a separate shadowed term.
 //
-// The RGB lightmap is recovered from the unfogged seed, not resampled. Sky vs block energy
-// is split by UV2 so the directional sun term is a portion of that recovered lighting:
-//   sunWeight = sky / (sky + block) * N·L   when the sun is active, else 0
-//   lit = unfogged - unfogged * sunWeight * (1 - visibility)
-// Visibility therefore darkens only the direct sun component. vis = 1 is an identity on the
-// unfogged seed (torch-only caves, fullbright, overlays). Fog is decoded and reapplied after
-// lighting so shadowing cannot darken fog. cascadeCount == 0, sun below the horizon, or a
-// missing frame leaves vis = 1 and sunWeight = 0.
+// The RGB lightmap is recovered from the unfogged seed, not resampled. Vanilla already
+// applied sky energy isotropically (no N·L), so the shadowed sun term is that sky share:
+//   sunWeight = saturate(sky / (sky + block) * shadowStrength)   when the sun is active
+//   lit       = unfogged - unfogged * sunWeight * (1 - visibility)
+// Gating on N·L would leave dawn ground and walls unshadowed because the seed still
+// carries full sky lightmap on those faces. vis = 1 is an identity. Blocklight, emission,
+// and fog stay unshadowed. cascadeCount == 0 (night, other dimensions, missing frame)
+// leaves sunWeight = 0.
 
 #ifndef MC_MATERIAL_SOLID
 #define MC_MATERIAL_SOLID 0
@@ -101,20 +101,19 @@ static inline float3 mc_decode_normal(float2 encoded) {
 }
 
 static inline bool mc_sun_active(constant MCShadowFrame &frame) {
-    return frame.cascadeCount > 0u && frame.directionToSun.y > 0.0 && all(isfinite(frame.directionToSun.xyz))
-        && dot(frame.directionToSun.xyz, frame.directionToSun.xyz) > 1e-8;
+    // cascadeCount is the CPU night/dimension gate. Do not also require directionToSun.y > 0:
+    // dawn is y ≈ 0 and is when ground shadows are longest.
+    return frame.cascadeCount > 0u;
 }
 
 // Fraction of recovered (unfogged) lighting treated as the shadowed directional sun term.
-static inline float mc_direct_sun_weight(float2 lightLevels, float3 worldNormal, constant MCShadowFrame &frame) {
+static inline float mc_direct_sun_weight(float2 lightLevels, constant MCShadowFrame &frame, float shadowStrength) {
     if (!mc_sun_active(frame)) {
         return 0.0;
     }
     float block = saturate(lightLevels.x);
     float sky = saturate(lightLevels.y);
-    float skyShare = sky / max(sky + block, 1e-5);
-    float nDotL = saturate(dot(worldNormal, normalize(frame.directionToSun.xyz)));
-    return saturate(skyShare * nDotL);
+    return saturate(sky / max(sky + block, 1e-5) * max(shadowStrength, 0.0));
 }
 
 static inline float3 mc_light_unfogged(float3 unfogged, float sunWeight, float visibility) {
@@ -125,12 +124,12 @@ static inline float3 mc_light_unfogged(float3 unfogged, float sunWeight, float v
 static inline float4 mc_compose_lighting(
     float4 scene,
     float4 albedo,
-    float3 worldNormal,
     float2 lightLevels,
     float3 cameraRelative,
     float visibility,
     constant McFog &fog,
-    constant MCShadowFrame &frame
+    constant MCShadowFrame &frame,
+    float shadowStrength
 ) {
     int material = mc_gbuffer_material(albedo.a);
     if (material == MC_MATERIAL_EMISSIVE) {
@@ -143,7 +142,7 @@ static inline float4 mc_compose_lighting(
         return scene;
     }
     float3 unfogged = mc_unfog(scene.rgb, fog, amount);
-    float sunWeight = mc_direct_sun_weight(lightLevels, worldNormal, frame);
+    float sunWeight = mc_direct_sun_weight(lightLevels, frame, shadowStrength);
     float3 lit = mc_light_unfogged(unfogged, sunWeight, visibility);
     return float4(mix(lit, fog.FogColor.rgb, amount), scene.a);
 }

@@ -52,7 +52,7 @@ fragment ResolveTargets resolve_fragment(
     uint cascade = validDepth ? mc_shadow_cascade(viewDepth, shadowFrame) : shadowFrame.cascadeCount;
     float bias = mc_shadow_receiver_bias(worldNormal, viewDepth, shadowFrame);
     float visibility = validDepth
-        ? mc_shadow_visibility(cameraRelative, viewDepth, bias, shadowFrame, shadowMap, shadowSampler)
+        ? mc_shadow_visibility(cameraRelative, viewDepth, bias, shadowFrame, shadowMap, shadowSampler, worldNormal)
         : 1.0;
     visibility = mix(1.0, visibility, mc_shadow_distance_fade(viewDepth, shadowFrame));
     if (options.debugView == 2) {
@@ -92,7 +92,8 @@ fragment ResolveTargets resolve_fragment(
         return out;
     }
     out.scene = mc_compose_lighting(
-        previous.scene, previous.albedo, worldNormal, previous.light.rg, cameraRelative, visibility, fog, shadowFrame
+        previous.scene, previous.albedo, previous.light.rg, cameraRelative, visibility, fog, shadowFrame,
+        options.shadowStrength
     );
     out.albedo.a = 0.0;
     return out;

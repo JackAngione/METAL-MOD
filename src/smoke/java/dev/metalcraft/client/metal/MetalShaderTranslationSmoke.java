@@ -1267,6 +1267,23 @@ public final class MetalShaderTranslationSmoke {
 
 	/** Exercises the production adapter and deferred hook, with deterministic MRT seed pixels. */
 	private static void assertWorldResolve(final MetalGpuDevice gpu, final ShaderPackRuntime runtime) {
+		// Real Projection uniforms use private storage and upload through CommandEncoder.
+		// Capture must see CPU upload bytes before GPU submission, including slice offsets.
+		try (MetalGpuBuffer uniform = gpu.createBuffer(() -> "capture-private", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 128)) {
+			ByteBuffer upload = ByteBuffer.allocateDirect(64).order(java.nio.ByteOrder.nativeOrder());
+			new Matrix4f().perspective(1.1F, 1.5F, 0.1F, 100).get(0, upload);
+			((MetalCommandEncoder)gpu.createCommandEncoder()).writeToBuffer(uniform.slice(32, 64), upload);
+			if (uniform.metal().storageMode() != MetalBuffer.StorageMode.PRIVATE) throw new AssertionError("Expected private uniform");
+			boolean[] captured = {false};
+			uniform.captureUniform("Projection", 32, 64, (name, bytes) -> {
+				for (int i = 0; i < 64; i++) {
+					if (bytes.get(i) != upload.get(i)) throw new AssertionError("Private uniform capture differs at " + i);
+				}
+				captured[0] = true;
+			});
+			if (!captured[0] || uniform.cpuBytes(0, 64) != null) throw new AssertionError("Private uniform validity tracking failed");
+		}
+
 		String seedSource = """
 			#include <metal_stdlib>
 			using namespace metal;
@@ -1282,7 +1299,7 @@ public final class MetalShaderTranslationSmoke {
 			};
 			fragment Targets seed_fragment() {
 			    return {float4(144.0/255,96.0/255,48.0/255,1), float4(0.2,0.4,0.6,1),
-			            float4(0.5,0.5,0.8,0), float4(0,0,0,0)};
+			            float4(0.5,0.5,0.8,1.0/255), float4(0,0,0,0)};
 			}
 			""";
 		RenderPipeline.Builder builder = RenderPipeline.builder()
@@ -1315,10 +1332,23 @@ public final class MetalShaderTranslationSmoke {
 						backend::submitRenderPass, descriptor.renderArea);
 				}
 			};
-			for (String debug : List.of("off", "albedo")) {
-				runtime.setOption("debug_view", debug);
+			for (String debug : List.of("off", "albedo", "mixed", "camera")) {
+				runtime.setOption("debug_view", debug.equals("mixed") ? "off" : debug.equals("camera") ? "receiver" : debug);
 				runtime.worldGeometry().beginFrame();
 				for (int half = 0; half < 2; half++) {
+					if (debug.equals("camera")) {
+						// Changing the raster view flushes the first resolve before updating the
+						// CPU matrices. Its camera upload must survive that change until submission.
+						runtime.worldGeometry().setRasterTransforms(
+							new Matrix4f().perspective((float)Math.PI / 2, 1, 0.1F, 1000),
+							new Matrix4f().rotationY(half == 0 ? 0 : (float)Math.PI));
+					}
+					if (debug.equals("mixed") && half == 1) {
+						// Both resolves are recorded before submission: the second upload must not
+						// change the options read by the first draw when the GPU finally executes.
+						WorldGeometryAdapter.resolveOpaque();
+						runtime.setOption("debug_view", "albedo");
+					}
 					try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-resolve-smoke",
 						sceneView, half == 0 ? Optional.of(new Vector4f(0, 0, 0, 1)) : Optional.empty(),
 						depthView, half == 0 ? OptionalDouble.of(1) : OptionalDouble.empty(),
@@ -1343,7 +1373,32 @@ public final class MetalShaderTranslationSmoke {
 						throw new AssertionError("World resolve GPU submission timed out");
 					}
 				}
-				if (debug.equals("off")) {
+				if (debug.equals("camera")) {
+					ByteBuffer pixels = scene.readback(queue, 0);
+					float viewDepth = 65536.0F * (1024.0F / 16777215.0F);
+					for (int y = 0; y < 32; y++) {
+						for (int x = 0; x < 32; x++) {
+							float direction = x < 16 ? 1 : -1;
+							float receiverX = ((x + 0.5F) / 16 - 1) * viewDepth * direction;
+							float receiverY = ((y + 0.5F) / 16 - 1) * viewDepth;
+							float receiverZ = -viewDepth * direction;
+							assertBgraDelta(pixels.slice((y * 32 + x) * 4, 4),
+								(byte)Math.round((receiverX / 64 + 0.5F) * 255),
+								(byte)Math.round((receiverY / 64 + 0.5F) * 255),
+								(byte)Math.round((receiverZ / 64 + 0.5F) * 255), 2,
+								"immutable resolve camera at " + x + "," + y);
+						}
+					}
+				} else if (debug.equals("mixed")) {
+					ByteBuffer pixels = scene.readback(queue, 0);
+					for (int y = 0; y < 32; y++) {
+						for (int x = 0; x < 32; x++) {
+							assertBgraDelta(pixels.slice((y * 32 + x) * 4, 4),
+								(byte)(x < 16 ? 144 : 51), (byte)(x < 16 ? 96 : 102),
+								(byte)(x < 16 ? 48 : 153), 2, "immutable resolve options at " + x + "," + y);
+						}
+					}
+				} else if (debug.equals("off")) {
 					assertBgraDelta(scene.readback(queue, 0), (byte)144, (byte)96, (byte)48, 2, "world shaded seed");
 				} else {
 					assertBgraDelta(scene.readback(queue, 0), (byte)51, (byte)102, (byte)153, 2, "world tile resolve");
@@ -1619,10 +1674,18 @@ public final class MetalShaderTranslationSmoke {
 		assertBgraDelta(scene.readback(queue, 0), (byte)200, (byte)40, (byte)40, 2,
 			occluded ? "occluded emissive stays unshadowed" : "unoccluded emissive stays fullbright");
 
+		runtime.setOption("shadow_strength", 1.0);
 		drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
 			0.4F, 0.4F, 0.4F, 0.4F, 0.4F, 0.4F, solidAlpha, nx, ny, 0.85F, 0.0F, 1.0F, "sun");
 		if (occluded) {
 			assertBgraDelta(scene.readback(queue, 0), (byte)0, (byte)0, (byte)0, 16, "occluded sun term is darkened");
+			// Octahedral +X: N·L with the overhead sun is 0. The vanilla seed still carries
+			// full sky lightmap on that face, so gating the sun term on N·L leaves dawn
+			// ground and walls unshadowed.
+			drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
+				0.4F, 0.4F, 0.4F, 0.4F, 0.4F, 0.4F, solidAlpha, 1.0F, 0.5F, 0.85F, 0.0F, 1.0F, "grazing-sun");
+			assertBgraDelta(scene.readback(queue, 0), (byte)0, (byte)0, (byte)0, 16,
+				"occluded sky-lit grazing face still loses the sun term");
 			runtime.setOption("debug_view", "vanilla");
 			drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
 				0.4F, 0.4F, 0.4F, 0.4F, 0.4F, 0.4F, solidAlpha, nx, ny, 0.85F, 0.0F, 1.0F, "vanilla");
@@ -1635,6 +1698,10 @@ public final class MetalShaderTranslationSmoke {
 			assertPartialFogUnshadowed(gpu, runtime, encoder, scene, sceneView, depthView, queue, packed, viewDepth, fov, solidAlpha, nx, ny);
 		} else {
 			assertBgraDelta(scene.readback(queue, 0), (byte)102, (byte)102, (byte)102, 2, "visibility=1 sunlit seed is an identity");
+			drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
+				0.4F, 0.4F, 0.4F, 0.4F, 0.4F, 0.4F, solidAlpha, 1.0F, 0.5F, 0.85F, 0.0F, 1.0F, "grazing-identity");
+			assertBgraDelta(scene.readback(queue, 0), (byte)102, (byte)102, (byte)102, 2,
+				"visibility=1 grazing seed is an identity");
 		}
 		runtime.setOption("debug_view", "off");
 	}
@@ -1749,7 +1816,7 @@ public final class MetalShaderTranslationSmoke {
 	private static float receiverSpherical(final float viewDepth, final float fov, final int width) {
 		float uv = 0.5F / width;
 		float ndcX = uv * 2.0F - 1.0F;
-		float ndcY = 1.0F - uv * 2.0F;
+		float ndcY = uv * 2.0F - 1.0F;
 		float tanHalf = (float)Math.tan(fov * 0.5);
 		float x = ndcX * tanHalf * viewDepth;
 		float y = ndcY * tanHalf * viewDepth;
@@ -1797,7 +1864,7 @@ public final class MetalShaderTranslationSmoke {
 	private static void assertReceiverPixel(final ByteBuffer pixels, final float viewDepth, final float fov, final String description) {
 		float uv = 0.5F / 32.0F;
 		float ndcX = uv * 2.0F - 1.0F;
-		float ndcY = 1.0F - uv * 2.0F;
+		float ndcY = uv * 2.0F - 1.0F;
 		float tanHalf = (float)Math.tan(fov * 0.5);
 		float x = ndcX * tanHalf * viewDepth;
 		float y = ndcY * tanHalf * viewDepth;
