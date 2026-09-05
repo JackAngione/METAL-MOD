@@ -10,6 +10,7 @@ import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.shader.WorldGeometryAdapter;
 import dev.metalcraft.client.shader.FrameBindings;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
+import dev.metalcraft.client.shader.WorldComposition;
 import java.util.Collection;
 import java.util.List;
 import org.slf4j.Logger;
@@ -102,7 +103,7 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		if (runtime != null && runtime.isActive()) {
 			try {
 				MetalCommandBuffer commands = metalEncoder.commands();
-				FrameBindings bindings = new FrameBindings(
+				FrameBindings bindings = WorldComposition.present(
 					scene, metalView.metal(), runtime.frameWidth(), runtime.frameHeight()
 				);
 				if (runtime.executor().orElseThrow().encode(commands, bindings)) {

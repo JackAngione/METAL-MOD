@@ -176,9 +176,6 @@ public final class ShaderPackRuntime implements AutoCloseable {
 		try {
 			switch (option.apply()) {
 				case UNIFORM -> {
-					if (this.executor != null) {
-						this.executor.writeUniforms();
-					}
 				}
 				case RECOMPILE -> {
 					this.rebuildExecutor();

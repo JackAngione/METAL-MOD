@@ -39,7 +39,6 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
 import dev.metalcraft.client.shader.world.ShadowCascades;
 import dev.metalcraft.client.shader.world.TerrainShadowRenderer;
-import dev.metalcraft.client.shader.world.WorldLightingModule;
 import dev.metalcraft.client.shader.world.WorldShadowModule;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
@@ -324,7 +323,6 @@ public final class MetalShaderTranslationSmoke {
 			assertTextureArrayPass(device);
 			dev.metalcraft.client.shader.world.ShadowCascadesSmoke.run();
 			dev.metalcraft.client.shader.world.WorldShadowModuleSmoke.run(device);
-			dev.metalcraft.client.shader.world.WorldLightingModuleSmoke.run(device);
 			assertMemorylessPassMerge();
 			assertIdentityGradePack(device);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(
@@ -1523,8 +1521,7 @@ public final class MetalShaderTranslationSmoke {
 
 				runtime.setOption("debug_view", "off");
 				drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
-				assertBgraDelta(scene.readback(queue, 0), (byte)144, (byte)96, (byte)48, 2, "unshadowed seed when UV2 sky is zero");
-				assertWorldSunLighting(gpu, runtime, encoder, scene, sceneView, depthView, queue, packed, viewDepth, fov, true);
+				assertBgraDelta(scene.readback(queue, 0), (byte)144, (byte)96, (byte)48, 2, "shadow sampling must not change lighting");
 			}
 
 			try (WorldShadowModule.Frame empty = module.prepareUnoccludedFrame()) {
@@ -1532,7 +1529,6 @@ public final class MetalShaderTranslationSmoke {
 				runtime.setOption("debug_view", "visibility");
 				drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
 				assertBgraDelta(scene.readback(queue, 0), (byte)255, (byte)255, (byte)255, 2, "no-sun visibility");
-				assertWorldSunLighting(gpu, runtime, encoder, scene, sceneView, depthView, queue, packed, viewDepth, fov, false);
 			}
 
 			runtime.worldGeometry().setShadowFrameSupplier(
@@ -1583,178 +1579,6 @@ public final class MetalShaderTranslationSmoke {
 				throw new AssertionError("World shadow resolve GPU submission timed out");
 			}
 		}
-	}
-
-	private static void assertWorldSunLighting(
-		final MetalGpuDevice gpu,
-		final ShaderPackRuntime runtime,
-		final CommandEncoder encoder,
-		final MetalTexture scene,
-		final MetalGpuTextureView sceneView,
-		final MetalGpuTextureView depthView,
-		final MetalCommandQueue queue,
-		final int packed,
-		final float viewDepth,
-		final float fov,
-		final boolean occluded
-	) {
-		float solidAlpha = (WorldGeometryAdapter.Material.SOLID.ordinal() + 1) / 255.0F;
-		float emissiveAlpha = (WorldGeometryAdapter.Material.EMISSIVE.ordinal() + 1) / 255.0F;
-		float nx = 0.5F;
-		float ny = 1.0F;
-		runtime.worldGeometry().setFog(new Vector4f(),
-			WorldLightingModule.DISABLED_FOG_DISTANCE, WorldLightingModule.DISABLED_FOG_DISTANCE,
-			WorldLightingModule.DISABLED_FOG_DISTANCE, WorldLightingModule.DISABLED_FOG_DISTANCE);
-
-		runtime.setOption("debug_view", "off");
-		drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
-			144 / 255.0F, 96 / 255.0F, 48 / 255.0F,
-			0.2F, 0.4F, 0.6F, solidAlpha, nx, ny, 0.85F, 1.0F, 0.0F, "cave");
-		assertBgraDelta(scene.readback(queue, 0), (byte)144, (byte)96, (byte)48, 2,
-			occluded ? "occluded cave keeps blocklight" : "unoccluded cave keeps blocklight");
-
-		drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
-			200 / 255.0F, 40 / 255.0F, 40 / 255.0F,
-			200 / 255.0F, 40 / 255.0F, 40 / 255.0F, emissiveAlpha, nx, ny, 0.7F, 0.0F, 1.0F, "emissive");
-		assertBgraDelta(scene.readback(queue, 0), (byte)200, (byte)40, (byte)40, 2,
-			occluded ? "occluded emissive stays unshadowed" : "unoccluded emissive stays fullbright");
-
-		drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
-			0.4F, 0.4F, 0.4F, 0.4F, 0.4F, 0.4F, solidAlpha, nx, ny, 0.85F, 0.0F, 1.0F, "sun");
-		if (occluded) {
-			assertBgraDelta(scene.readback(queue, 0), (byte)0, (byte)0, (byte)0, 16, "occluded sun term is darkened");
-			runtime.setOption("debug_view", "vanilla");
-			drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
-				0.4F, 0.4F, 0.4F, 0.4F, 0.4F, 0.4F, solidAlpha, nx, ny, 0.85F, 0.0F, 1.0F, "vanilla");
-			assertBgraDelta(scene.readback(queue, 0), (byte)102, (byte)102, (byte)102, 2, "vanilla debug view preserves the seed");
-			runtime.setOption("debug_view", "visibility");
-			drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
-				0.4F, 0.4F, 0.4F, 0.4F, 0.4F, 0.4F, solidAlpha, 1.0F, 0.5F, 0.85F, 0.0F, 1.0F, "grazing");
-			assertBgraDelta(scene.readback(queue, 0), (byte)0, (byte)0, (byte)0, 8, "grazing slope bias still occludes");
-			runtime.setOption("debug_view", "off");
-			assertPartialFogUnshadowed(gpu, runtime, encoder, scene, sceneView, depthView, queue, packed, viewDepth, fov, solidAlpha, nx, ny);
-		} else {
-			assertBgraDelta(scene.readback(queue, 0), (byte)102, (byte)102, (byte)102, 2, "visibility=1 sunlit seed is an identity");
-		}
-		runtime.setOption("debug_view", "off");
-	}
-
-	private static void assertPartialFogUnshadowed(
-		final MetalGpuDevice gpu,
-		final ShaderPackRuntime runtime,
-		final CommandEncoder encoder,
-		final MetalTexture scene,
-		final MetalGpuTextureView sceneView,
-		final MetalGpuTextureView depthView,
-		final MetalCommandQueue queue,
-		final int packed,
-		final float viewDepth,
-		final float fov,
-		final float solidAlpha,
-		final float nx,
-		final float ny
-	) {
-		float spherical = receiverSpherical(viewDepth, fov, 32);
-		runtime.worldGeometry().setFog(new Vector4f(1.0F, 1.0F, 1.0F, 1.0F), 0.0F, spherical * 2.0F,
-			WorldLightingModule.DISABLED_FOG_DISTANCE, WorldLightingModule.DISABLED_FOG_DISTANCE);
-		float unfogged = 0.4F;
-		float fogged = unfogged * 0.5F + 0.5F;
-		runtime.setOption("debug_view", "vanilla");
-		drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
-			fogged, fogged, fogged, unfogged, unfogged, unfogged, solidAlpha, nx, ny, 0.85F, 0.0F, 1.0F, "fog-vanilla");
-		assertBgraDelta(scene.readback(queue, 0), unorm8(fogged), unorm8(fogged), unorm8(fogged), 3, "fogged seed before lighting");
-		runtime.setOption("debug_view", "off");
-		drawLightingSeed(gpu, runtime, encoder, sceneView, depthView, packed,
-			fogged, fogged, fogged, unfogged, unfogged, unfogged, solidAlpha, nx, ny, 0.85F, 0.0F, 1.0F, "fog-lit");
-		int actual = Byte.toUnsignedInt(scene.readback(queue, 0).get(0));
-		int foggedByte = Byte.toUnsignedInt(unorm8(fogged));
-		if (actual < 80 || actual > 160 || Math.abs(actual - foggedByte) < 20) {
-			throw new AssertionError("Fog must be reapplied after shadowing the sun term, not multiplied with the seed: got "
-				+ actual + " foggedSeed=" + foggedByte);
-		}
-		runtime.worldGeometry().setFog(new Vector4f(),
-			WorldLightingModule.DISABLED_FOG_DISTANCE, WorldLightingModule.DISABLED_FOG_DISTANCE,
-			WorldLightingModule.DISABLED_FOG_DISTANCE, WorldLightingModule.DISABLED_FOG_DISTANCE);
-	}
-
-	private static void drawLightingSeed(
-		final MetalGpuDevice gpu,
-		final ShaderPackRuntime runtime,
-		final CommandEncoder encoder,
-		final MetalGpuTextureView sceneView,
-		final MetalGpuTextureView depthView,
-		final int packed,
-		final float sceneR, final float sceneG, final float sceneB,
-		final float albedoR, final float albedoG, final float albedoB, final float albedoA,
-		final float nx, final float ny, final float roughness,
-		final float block, final float sky,
-		final String id
-	) {
-		RenderPipeline seed = lightingSeedPipeline(id);
-		gpu.registerNativePipeline(seed, new MetalGpuDevice.NativeProgram(
-			lightingSeedSource(packed, sceneR, sceneG, sceneB, albedoR, albedoG, albedoB, albedoA, nx, ny, roughness, block, sky),
-			"seed_vertex", "seed_fragment"
-		));
-		try {
-			drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
-		} finally {
-			gpu.forgetNativePipeline(seed);
-		}
-	}
-
-	private static RenderPipeline lightingSeedPipeline(final String id) {
-		RenderPipeline.Builder builder = RenderPipeline.builder()
-			.withLocation(Identifier.parse("metalcraft:smoke/lighting_seed_" + id))
-			.withVertexShader(Identifier.parse("metalcraft:lighting_seed_" + id))
-			.withFragmentShader(Identifier.parse("metalcraft:lighting_seed_" + id))
-			.withCull(false).withPrimitiveTopology(PrimitiveTopology.TRIANGLES);
-		for (int index = 0; index < 4; index++) {
-			builder.withColorTargetState(index, new ColorTargetState(Optional.empty(),
-				GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL));
-		}
-		return builder.build();
-	}
-
-	private static String lightingSeedSource(
-		final int packed,
-		final float sceneR, final float sceneG, final float sceneB,
-		final float albedoR, final float albedoG, final float albedoB, final float albedoA,
-		final float nx, final float ny, final float roughness,
-		final float block, final float sky
-	) {
-		float hi = ((packed >> 16) & 255) / 255.0F;
-		float mid = ((packed >> 8) & 255) / 255.0F;
-		float lo = (packed & 255) / 255.0F;
-		return """
-			#include <metal_stdlib>
-			using namespace metal;
-			vertex float4 seed_vertex(uint id [[vertex_id]]) {
-			    const float2 p[3] = {float2(-1,-1), float2(3,-1), float2(-1,3)};
-			    return float4(p[id], 0, 1);
-			}
-			struct Targets {
-			    float4 scene [[color(0)]];
-			    float4 albedo [[color(1)]];
-			    float4 normal [[color(2)]];
-			    float4 light [[color(3)]];
-			};
-			fragment Targets seed_fragment() {
-			    return {float4(%s,%s,%s,1), float4(%s,%s,%s,%s),
-			            float4(%s,%s,%s,%s), float4(%s,%s,%s,%s)};
-			}
-			""".formatted(sceneR, sceneG, sceneB, albedoR, albedoG, albedoB, albedoA,
-			nx, ny, roughness, hi, block, sky, mid, lo);
-	}
-
-	private static float receiverSpherical(final float viewDepth, final float fov, final int width) {
-		float uv = 0.5F / width;
-		float ndcX = uv * 2.0F - 1.0F;
-		float ndcY = 1.0F - uv * 2.0F;
-		float tanHalf = (float)Math.tan(fov * 0.5);
-		float x = ndcX * tanHalf * viewDepth;
-		float y = ndcY * tanHalf * viewDepth;
-		float z = -viewDepth;
-		return (float)Math.sqrt(x * x + y * y + z * z);
 	}
 
 	private static RenderPipeline packedSeedPipeline() {
@@ -1847,7 +1671,7 @@ public final class MetalShaderTranslationSmoke {
 				.findFirst()
 				.orElseThrow()
 				.values();
-			if (!debugViews.containsAll(List.of("receiver", "cascade", "visibility", "vanilla"))) {
+			if (!debugViews.containsAll(List.of("receiver", "cascade", "visibility"))) {
 				throw new AssertionError("debug_view values were " + debugViews);
 			}
 			for (String id : List.of("gbuffer_albedo", "gbuffer_normal", "gbuffer_light")) {

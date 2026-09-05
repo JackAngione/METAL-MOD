@@ -4,6 +4,7 @@ import dev.metalcraft.client.metal.MetalDevice;
 import dev.metalcraft.client.metal.MetalGpuDevice;
 import dev.metalcraft.client.metal.MetalGpuTextureView;
 import dev.metalcraft.client.metal.MetalTexture;
+import dev.metalcraft.client.metal.MetalTextureView;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -15,6 +16,7 @@ public final class ShaderTargetAllocator implements AutoCloseable {
 	private final @Nullable MetalGpuDevice gpuDevice;
 	private final Map<String, MetalTexture> textures = new LinkedHashMap<>();
 	private final Map<String, MetalGpuTextureView> views = new LinkedHashMap<>();
+	private final Map<String, MetalTextureView> sampleViews = new LinkedHashMap<>();
 	private ShaderGraphCompiler.@Nullable CompiledGraph graph;
 	private int width;
 	private int height;
@@ -45,27 +47,33 @@ public final class ShaderTargetAllocator implements AutoCloseable {
 		}
 		Map<String, MetalTexture> nextTextures = new LinkedHashMap<>();
 		Map<String, MetalGpuTextureView> nextViews = new LinkedHashMap<>();
+		Map<String, MetalTextureView> nextSampleViews = new LinkedHashMap<>();
 		for (Map.Entry<String, ShaderGraphCompiler.TargetInfo> entry : graph.targets().entrySet()) {
 			String id = entry.getKey();
 			if (ShaderGraphCompiler.RESERVED_TARGETS.contains(id)) {
 				continue;
 			}
 			ShaderGraphCompiler.TargetInfo info = entry.getValue();
+			MetalTexture.Descriptor wanted = descriptor(graph, id, info, width, height);
 			MetalTexture existing = this.textures.get(id);
-			if (existing != null
-				&& existing.descriptor().width() == width
-				&& existing.descriptor().height() == height
-				&& existing.isMemoryless() == info.memoryless()) {
+			if (existing != null && existing.descriptor().equals(wanted)) {
 				nextTextures.put(id, existing);
 				MetalGpuTextureView view = this.views.get(id);
 				if (view != null) {
 					nextViews.put(id, view);
 				}
+				MetalTextureView sample = this.sampleViews.get(id);
+				if (sample != null) {
+					nextSampleViews.put(id, sample);
+				}
 				continue;
 			}
-			MetalTexture created = this.device.createTexture(descriptor(info, width, height));
+			MetalTexture created = this.device.createTexture(wanted);
 			nextTextures.put(id, created);
-			if (this.gpuDevice != null) {
+			if (!created.isMemoryless()) {
+				nextSampleViews.put(id, created.createView());
+			}
+			if (this.gpuDevice != null && (wanted.usage() & MetalTexture.USAGE_RENDER_TARGET) != 0) {
 				nextViews.put(id, this.gpuDevice.wrapAttachment(created, "metalcraft/" + id));
 			}
 		}
@@ -75,6 +83,10 @@ public final class ShaderTargetAllocator implements AutoCloseable {
 				if (view != null) {
 					view.close();
 				}
+				MetalTextureView sample = this.sampleViews.get(previous.getKey());
+				if (sample != null) {
+					sample.close();
+				}
 				previous.getValue().close();
 			}
 		}
@@ -82,6 +94,8 @@ public final class ShaderTargetAllocator implements AutoCloseable {
 		this.textures.putAll(nextTextures);
 		this.views.clear();
 		this.views.putAll(nextViews);
+		this.sampleViews.clear();
+		this.sampleViews.putAll(nextSampleViews);
 	}
 
 	@Nullable MetalTexture target(final String id) {
@@ -92,9 +106,15 @@ public final class ShaderTargetAllocator implements AutoCloseable {
 		return this.views.get(id);
 	}
 
+	@Nullable MetalTextureView sampleView(final String id) {
+		return this.sampleViews.get(id);
+	}
+
 	void release() {
 		this.views.values().forEach(MetalGpuTextureView::close);
 		this.views.clear();
+		this.sampleViews.values().forEach(MetalTextureView::close);
+		this.sampleViews.clear();
 		this.textures.values().forEach(MetalTexture::close);
 		this.textures.clear();
 	}
@@ -104,7 +124,30 @@ public final class ShaderTargetAllocator implements AutoCloseable {
 		this.release();
 	}
 
+	static int usage(final ShaderGraphCompiler.CompiledGraph graph, final String targetId) {
+		int usage = 0;
+		for (ShaderGraphCompiler.CompiledPass pass : graph.passes()) {
+			if (pass.declaration().reads().contains(targetId)) {
+				usage |= MetalTexture.USAGE_SHADER_READ;
+			}
+			if (pass.declaration().writes().contains(targetId)) {
+				if (pass.declaration().kind() == ShaderPack.PassKind.COMPUTE) {
+					usage |= MetalTexture.USAGE_SHADER_WRITE;
+				} else {
+					usage |= MetalTexture.USAGE_RENDER_TARGET;
+				}
+			}
+		}
+		if (usage == 0) {
+			return MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_RENDER_TARGET;
+		}
+		usage |= MetalTexture.USAGE_SHADER_READ;
+		return usage;
+	}
+
 	private static MetalTexture.Descriptor descriptor(
+		final ShaderGraphCompiler.CompiledGraph graph,
+		final String id,
 		final ShaderGraphCompiler.TargetInfo info,
 		final int width,
 		final int height
@@ -115,9 +158,12 @@ public final class ShaderTargetAllocator implements AutoCloseable {
 		if (info.memoryless()) {
 			return MetalTexture.Descriptor.memoryless(format, scaledWidth, scaledHeight);
 		}
-		return new MetalTexture.Descriptor(
-			format, scaledWidth, scaledHeight, 1, MetalTexture.USAGE_SHADER_READ | MetalTexture.USAGE_RENDER_TARGET
-		);
+		int layers = Math.max(1, info.declaration().layers());
+		int usage = usage(graph, id);
+		if (layers > 1) {
+			return MetalTexture.Descriptor.array(format, scaledWidth, scaledHeight, layers, usage);
+		}
+		return new MetalTexture.Descriptor(format, scaledWidth, scaledHeight, 1, usage);
 	}
 
 	private static int extent(final ShaderPack.Extent extent, final int full) {

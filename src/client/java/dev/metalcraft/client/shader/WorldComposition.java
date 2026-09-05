@@ -1,0 +1,97 @@
+package dev.metalcraft.client.shader;
+
+import dev.metalcraft.client.metal.MetalTexture;
+import dev.metalcraft.client.metal.MetalTextureView;
+import java.util.List;
+import org.joml.Matrix4fc;
+import org.jspecify.annotations.Nullable;
+
+/**
+ * World-only pack insertion relative to Minecraft 26.2's frame graph.
+ *
+ * <p>Live identity/grade still encodes at {@link Stage#PRESENT} from
+ * {@code MetalGpuSurface.blitFromTexture} so {@code blitToDrawable(post_color)} and the vanilla
+ * fallback stay intact. Effects that must exclude HUD/hand consume {@link #PACK_POST} bindings,
+ * whose world depth is a snapshot taken before later depth writes.
+ */
+public final class WorldComposition {
+	/**
+	 * After the world graph (opaque exports, forward/translucent composition, Fabulous, particles,
+	 * clouds, weather, outlines) and before hand, underwater overlay, spectator chains, and HUD.
+	 */
+	public static final Stage PACK_POST = Stage.WORLD_GRADE_AA;
+
+	/**
+	 * 26.2 sites that finish before {@link #PACK_POST}. Audited against mapped
+	 * {@code LevelRenderer} / {@code FeatureRenderDispatcher.PreparedFrame}.
+	 */
+	public static final List<String> WORLD_STAGE_SITES = List.of(
+		"LevelRenderer.addSkyPass",
+		"LevelRenderer.addMainPass / FeatureRenderDispatcher.PreparedFrame.executeSolid",
+		"PreparedFeatureFrameMixin → WorldGeometryAdapter.resolveOpaque at executeTranslucent HEAD",
+		"FeatureRenderDispatcher.PreparedFrame.executeTranslucent / executeTranslucentAfterTerrain",
+		"LevelRenderer.getTransparencyChain (Fabulous TRANSPARENCY_POST_CHAIN_ID: translucent, itemEntity, particles, weather, clouds targets)",
+		"LevelRenderer.addCloudsPass",
+		"LevelRenderer.addWeatherPass",
+		"LevelRenderer.addAlwaysOnTopPass",
+		"LevelRenderer.doEntityOutline / ENTITY_OUTLINE_POST_CHAIN_ID"
+	);
+
+	/**
+	 * 26.2 sites that run after world composition. Hand and GUI write the main depth attachment;
+	 * they must not be sampled as world depth.
+	 */
+	public static final List<String> AFTER_WORLD_SITES = List.of(
+		"GameRenderer.renderItemInHand",
+		"ScreenEffectRenderer.submitWater / submitFire (underwater and fire overlays)",
+		"GameRenderer.checkEntityPostEffect / postEffectId (spectator)",
+		"GuiRenderer (HUD / 2D GUI)"
+	);
+
+	public enum Stage {
+		OPAQUE_EXPORTS,
+		FORWARD_TRANSLUCENT,
+		WORLD_GRADE_AA,
+		HUD,
+		PRESENT
+	}
+
+	private WorldComposition() {
+	}
+
+	public static boolean excludesHud(final Stage stage) {
+		return stage == PACK_POST;
+	}
+
+	public static FrameBindings present(
+		final MetalTexture scene,
+		final MetalTextureView sceneView,
+		final int width,
+		final int height
+	) {
+		return new FrameBindings(scene, sceneView, width, height);
+	}
+
+	public static FrameBindings world(
+		final MetalTexture scene,
+		final MetalTextureView sceneView,
+		final int width,
+		final int height,
+		final MetalTexture worldDepth,
+		final MetalTextureView worldDepthView,
+		final @Nullable Matrix4fc worldProjection
+	) {
+		return new FrameBindings(
+			scene,
+			sceneView,
+			width,
+			height,
+			worldDepth,
+			worldDepthView,
+			worldProjection,
+			worldDepth.descriptor().width(),
+			worldDepth.descriptor().height(),
+			PACK_POST
+		);
+	}
+}

@@ -1,14 +1,14 @@
 package dev.metalcraft.client.shader;
 
+import dev.metalcraft.client.metal.MetalComputePipeline;
 import dev.metalcraft.client.metal.MetalDevice;
 import dev.metalcraft.client.metal.MetalRenderPipeline;
-import dev.metalcraft.client.metal.MetalTexture;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-/** Builds the MSL compile unit and fullscreen PSO for one pack pass. */
+/** Builds the MSL compile unit and PSOs for one pack pass. */
 final class ShaderPassCompiler {
 	private ShaderPassCompiler() {
 	}
@@ -27,6 +27,11 @@ final class ShaderPassCompiler {
 		for (String read : pass.reads()) {
 			preamble.append("#define MC_TEX_").append(symbol(read)).append(' ').append(textureSlot++).append('\n');
 		}
+		if (pass.kind() == ShaderPack.PassKind.COMPUTE) {
+			for (String write : pass.writes()) {
+				preamble.append("#define MC_TARGET_").append(symbol(write)).append(' ').append(textureSlot++).append('\n');
+			}
+		}
 		// Buffer 0 is pack options. Declared host buffers follow, then the resolve camera
 		// and the lighting/fog frame. Callers must assign the same extra slots.
 		int bufferSlot = 1;
@@ -35,9 +40,11 @@ final class ShaderPassCompiler {
 		}
 		preamble.append("#define MC_BUFFER_RESOLVE_CAMERA ").append(bufferSlot).append('\n');
 		preamble.append("#define MC_BUFFER_LIGHTING_FRAME ").append(bufferSlot + 1).append('\n');
-		int colorIndex = 0;
-		for (String write : pass.writes()) {
-			preamble.append("#define MC_TARGET_").append(symbol(write)).append(' ').append(colorIndex++).append('\n');
+		if (pass.kind() != ShaderPack.PassKind.COMPUTE) {
+			int colorIndex = 0;
+			for (String write : pass.writes()) {
+				preamble.append("#define MC_TARGET_").append(symbol(write)).append(' ').append(colorIndex++).append('\n');
+			}
 		}
 		for (ShaderPack.Option option : pack.manifest().options()) {
 			if (option.apply() != ShaderPack.ApplyMode.RECOMPILE) {
@@ -55,8 +62,13 @@ final class ShaderPassCompiler {
 		final ShaderPack pack,
 		final ShaderPack.Pass pass,
 		final Map<String, Object> optionValues,
-		final MetalTexture.Format colorFormat
+		final List<MetalRenderPipeline.ColorTarget> colorTargets
 	) throws ShaderPackLoader.LoadException {
+		if (colorTargets == null || colorTargets.isEmpty()) {
+			throw new ShaderPackLoader.LoadException(
+				"Fullscreen pass '" + pass.id() + "' requires at least one color target"
+			);
+		}
 		String compiled = source(pack, pass, optionValues);
 		String passId = pass.id();
 		return device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
@@ -64,12 +76,22 @@ final class ShaderPassCompiler {
 			passId + "_vertex",
 			compiled,
 			passId + "_fragment",
-			List.of(MetalRenderPipeline.ColorTarget.opaque(colorFormat)),
+			List.copyOf(colorTargets),
 			null,
 			MetalRenderPipeline.VertexDescriptor.EMPTY,
 			MetalRenderPipeline.DepthState.DISABLED,
 			MetalRenderPipeline.RasterState.DEFAULT
 		));
+	}
+
+	static MetalComputePipeline compileCompute(
+		final MetalDevice device,
+		final ShaderPack pack,
+		final ShaderPack.Pass pass,
+		final Map<String, Object> optionValues
+	) throws ShaderPackLoader.LoadException {
+		String compiled = source(pack, pass, optionValues);
+		return device.createComputePipeline(new MetalComputePipeline.Descriptor(compiled, pass.id() + "_kernel"));
 	}
 
 	static String symbol(final String id) {

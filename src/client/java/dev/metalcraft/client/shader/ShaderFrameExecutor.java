@@ -8,7 +8,9 @@ import dev.metalcraft.client.metal.MetalTexture;
  */
 public interface ShaderFrameExecutor {
 	/**
-	 * Encodes every enabled fullscreen/compute pass into {@code commands}.
+	 * Encodes every executable fullscreen/compute pass into {@code commands} in compiled
+	 * group order. Geometry, shadow, and merged-resolve groups are owned by the world adapter.
+	 * Does not skip {@code enabled_by} passes.
 	 *
 	 * @return false unless pack target {@code post_color} exists and its width/height equal
 	 *         {@code bindings.width/height}; caller then blits vanilla {@code scene}

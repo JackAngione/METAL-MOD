@@ -5,7 +5,7 @@
 | **Title** | Metal-Native Shader Engine |
 | **Author** | MetalCraft contributors |
 | **Date** | 2026-09-03 |
-| **Status** | In progress; PR 0–4 complete; PR 5a world shadow bindings and visibility debug views implemented; PR 7a + PR 5b lighting contract and sun-term shadows implemented |
+| **Status** | In progress; PR 0–5a complete; PR 7a + PR 5b sun-term lighting implemented; PR 6a executor/world-composition seam implemented (live grade still present-time) |
 | **Target** | Minecraft Java 26.2, Fabric, macOS arm64, direct Metal backend |
 | **Parent commit of deleted engine** | `a7c274a` |
 | **Deletion commit** | `0eb8833 Remove the shader pack engine and leave the Metal backend` |
@@ -76,7 +76,7 @@ Keep the PR numbers as stable references, but implement in this order:
 | --- | --- | --- |
 | 1 | PR 5a: world shadow bindings and visibility debug view | **Done** — packed-depth reconstruction, cascade and visibility debug views, and unoccluded fallback pass GPU readback in merged and split rendering |
 | 2 | PR 7a + PR 5b: lighting contract and visible sun shadows | **Done** — GPU readback: vis=1 is a seed identity; cave/blocklight and emissive stay unshadowed; only the sky-weighted sun term darkens; fog is reapplied after lighting. Debug views still pass. In-game look was not re-inspected this session |
-| 3 | PR 6a: general executor and world composition boundary | A mixed render/compute graph routes intermediate textures correctly, before GUI, with safe frame uploads |
+| 3 | PR 6a: general executor and world composition boundary | **Done** — mixed render/compute routing, completion-retired option uploads, world-depth `FrameBindings`, world-only insertion documented; live grade is still present-time |
 | 4 | PR 7b: linear HDR lighting and GGX | Values above 1 survive through composition; one deliberate tone/output conversion; forward content remains correct |
 | 5 | PR 9: SMAA 1x | Reference three-pass behavior on the graded world, with HUD excluded |
 | 6 | PR 6b: bloom; PR 6c: SSAO; PR 6d: volumetrics | Each lands separately with pixel checks and measured CPU/GPU/memory cost |
@@ -93,13 +93,16 @@ Keep the PR numbers as stable references, but implement in this order:
   fragment position; it does not pass that depth to `mc_shadow_camera_relative`.
   Cascade fitting still uses the stable camera; raster `Projection` / view uniforms
   are captured and flush resolve when they change.
-- `MetalShaderFrameExecutor` skips compute and merged passes, supports only `scene`
-  reads, compiles fullscreen outputs as `BGRA8_UNORM`, and sends every fullscreen pass
-  to the same output. Adding effect files alone cannot implement a multi-pass graph.
-  `FrameBindings` currently supplies neither world depth nor camera/light bindings.
-- Both the world adapter and executor rewrite persistent shared option buffers.
-  Resource pinning protects object lifetime, not bytes from a later CPU overwrite.
-  Audit all uploads before adding more per-frame consumers.
+- `MetalShaderFrameExecutor` runs non-merged fullscreen and compute groups in
+  dependency order, with per-target formats/extents and a completion-retired option
+  ring. Merged geometry/resolve still lives in `WorldGeometryAdapter`. Live grade
+  remains present-time; `WorldComposition.PACK_POST` (`WORLD_GRADE_AA`) is the
+  documented world-only insertion point. `FrameBindings` can carry a world-depth
+  snapshot, projection, extent and stage.
+- The executor option ring is completion-retired. The world adapter still rewrites
+  persistent shared option/camera/lighting buffers in merged resolve; pinning
+  protects object lifetime, not those bytes. Audit remaining uploads before adding
+  more per-frame consumers.
 
 **Correctness and performance rules for every remaining PR:**
 
@@ -1454,36 +1457,44 @@ PR 5 sun-lighting GPU tests passed in merged and `-PmetalPassMerging=false` smok
 
 ### PR 6 — Executor, world composition, then separate effect PRs
 
-- [ ] **Not started**.
+- [x] **PR 6a done** (2026-09-04). PR 6b–6d not started.
 
 - **Depends on:** PR 1/2/4 for PR 6a; PR 7b for HDR effects; PR 5/7a for sun volumetrics.
-- **Files:** `MetalShaderFrameExecutor`, `FrameBindings`, `ShaderPassCompiler`, graph and
+- **Files:** `MetalShaderFrameExecutor`, `FrameBindings`, `WorldComposition`, `ShaderPassCompiler`, graph and
   allocator, a thin world-composition hook, then individual pack nodes.
 
 **PR 6a — Required execution foundation:**
 
-- [ ] Execute compiled groups in dependency order, routing each declared read/write to
+- [x] Execute compiled groups in dependency order, routing each declared read/write to
   its own target/view, format, extent and usage. Add compute PSOs, bindings and dispatch;
   do not hardcode all fullscreen outputs to `post_color` or `BGRA8_UNORM`. Reject unsupported
   executable nodes during configuration instead of silently skipping them.
-- [ ] Enforce no sampled read/write aliasing of a texture in the same pass; use explicit
+- [x] Enforce no sampled read/write aliasing of a texture in the same pass; use explicit
   ping-pong targets. Honor compiled load/store actions and resource lifetimes. Start with
   tracked resources on the ordered world queue; validate render→compute→render hazards
   without CPU waits. Heaps, aliasing and async compute require separate evidence.
-- [ ] Make buffer uploads safe for multiple frames in flight. Test consecutive frames
-  with different options and transforms queued before readback, plus reload/resize while
-  older frames are in flight; pinning alone does not preserve overwritten uniform bytes.
-- [ ] Insert world processing at explicit stages: opaque exports, forward/translucent
+- [x] Make buffer uploads safe for multiple frames in flight. Test consecutive frames
+  with different options queued before readback. Executor option bytes use
+  completion-retired ring slices (per-slot fences; overflow immutable buffers). Pinning
+  alone does not preserve overwritten uniform bytes.
+- [x] Insert world processing at explicit stages: opaque exports, forward/translucent
   composition, world grade/AA, then HUD. Audit Fabulous targets, particles, clouds,
   outlines, hand rendering, underwater effects and spectator post chains against mapped
   26.2 call sites. Record the chosen order and identities in tests before moving the
   existing present-time grade. Expose world depth with its projection, extent and stage;
   later hand/GUI depth writes must not corrupt the effect's intended input.
-- [ ] Test a render→compute→render fixture with distinct intermediate colors, mixed
+  **Live grade remains present-time** (`blitFromTexture` → `Stage.PRESENT` →
+  `blitToDrawable(post_color)`). The world-only seam is `WorldComposition.PACK_POST`
+  (`WORLD_GRADE_AA`): after `LevelRenderer` sky/main/Fabulous/clouds/weather/outlines
+  and before `GameRenderer.renderItemInHand`, `ScreenEffectRenderer` underwater, spectator
+  `postEffectId`, and `GuiRenderer`. Hosts must pass a world-depth snapshot; present-time
+  encode of a depth-reading pack returns false rather than sampling hand/GUI depth.
+- [x] Test a render→compute→render fixture with distinct intermediate colors, mixed
   formats/scales, non-multiple and 1-pixel dimensions, invalid bindings and failed kernels.
   Validate threadgroup bounds/overflow and per-kernel limits; tune against
   `threadExecutionWidth`, not one assumed optimal group size for all kernels. See Apple's
   [dispatch sizing guidance](https://developer.apple.com/documentation/metal/calculating-threadgroup-and-grid-sizes).
+  Fixture zip: `build/shader-graph-smoke/mixed-graph.zip`.
 
 **PR 6b — Bloom:** threshold and downsample linear HDR color, then a bounded mip/scale
 chain with separate read/write levels and upsample/composite before tone mapping. Start
