@@ -11,7 +11,7 @@ struct GradeVaryings {
 vertex GradeVaryings grade_vertex(uint vertexId [[vertex_id]]) {
     const float2 corners[3] = {float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)};
     float2 p = corners[vertexId % 3];
-    return {float4(p, 0.0, 1.0), p * 0.5 + 0.5};
+    return {float4(p, 0.0, 1.0), float2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5)};
 }
 
 static float3 acesFitted(float3 x) {

@@ -5,7 +5,7 @@
 | **Title** | Metal-Native Shader Engine |
 | **Author** | MetalCraft contributors |
 | **Date** | 2026-09-05 |
-| **Status** | In progress; PR 0–5a complete; PR 7a + PR 5b sun-term lighting implemented; PR 6a executor/world-composition seam implemented; resolve upload isolation verified (live grade still present-time) |
+| **Status** | In progress; PR 0–5a complete; PR 7a + PR 5b sun-term lighting implemented; PR 6a executor/world-composition seam implemented; resolve upload isolation verified (live grade now world-only) |
 | **Target** | Minecraft Java 26.2, Fabric, macOS arm64, direct Metal backend |
 | **Parent commit of deleted engine** | `a7c274a` |
 | **Deletion commit** | `0eb8833 Remove the shader pack engine and leave the Metal backend` |
@@ -1684,3 +1684,15 @@ specialization with resource/consumer rewiring, not an encode-time early skip.
 - [ ] **Not started**.
 
 Emits `ShaderPack`. Does not modify executor, native TBDR, or first-party MSL.
+
+
+## PR 7b / water W2 world grading seam — 2026-09-05
+
+Live pack grading now executes after the world graph and before hand-depth clear via
+`GameRendererWorldGradeMixin` / `MetalWorldGrade`. A stored world-depth snapshot excludes
+later hand/HUD writes, and presentation copies the already composed scene without
+reapplying the pack. Standard's UV convention is corrected for this live texture path.
+The controlled water scene additionally checks half world exposure with a white HUD
+title. This completes the live world-only insertion prerequisite; world color remains
+8-bit legacy, so the HDR/linear forward gate above remains unchecked. See the
+[water W2 progress and evidence](WATER_EFFECTS_PLAN.md) for validation and screenshots.

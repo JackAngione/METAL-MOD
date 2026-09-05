@@ -9,10 +9,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * World-only pack insertion relative to Minecraft 26.2's frame graph.
  *
- * <p>Live identity/grade still encodes at {@link Stage#PRESENT} from
- * {@code MetalGpuSurface.blitFromTexture} so {@code blitToDrawable(post_color)} and the vanilla
- * fallback stay intact. Effects that must exclude HUD/hand consume {@link #PACK_POST} bindings,
- * whose world depth is a snapshot taken before later depth writes.
+ * <p>Live grading runs before the hand-depth clear in {@code GameRenderer.renderLevel}.
+ * Presentation copies the completed scene without running the pack again. World consumers
+ * receive a stored depth snapshot taken before hand and HUD can overwrite main depth.
  */
 public final class WorldComposition {
 	/**

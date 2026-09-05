@@ -9,6 +9,7 @@
     "CreativeModeInventoryScreenInvoker",
     "FramerateLimitBypassMixin",
     "GametestHandoffMixin",
+    "GameRendererWorldGradeMixin",
     "MinecraftBackendAvailabilityMixin",
     "MinecraftFrameMetricsMixin",
     "MinecraftTickPhaseMixin",

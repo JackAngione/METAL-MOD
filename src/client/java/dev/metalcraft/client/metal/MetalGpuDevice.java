@@ -65,6 +65,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private boolean closed;
 	/** Built on first use; most sessions that never recycle an item-atlas slot never compile it. */
 	private MetalRegionClear regionClear;
+	private MetalWorldGrade worldGrade;
 	private final @Nullable ShaderPackRuntime shaderPackRuntime;
 
 	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource) {
@@ -106,6 +107,20 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	public void encodeNativePass(final MetalRenderPass.Descriptor descriptor, final String label,
 		final java.util.function.Consumer<MetalRenderPass> encode) {
 		this.commandEncoder.encodeNativePass(descriptor, MetalPassCensus.kindFor(label), encode);
+	}
+
+	/** Called after the complete world graph, before hand depth is cleared. */
+	public void gradeWorld(final GpuTextureView color, final GpuTextureView depth) {
+		if (this.shaderPackRuntime == null || !this.shaderPackRuntime.isActive()) return;
+		if (!(color instanceof MetalGpuTextureView scene) || !(depth instanceof MetalGpuTextureView worldDepth)) return;
+		try {
+			dev.metalcraft.client.shader.WorldGeometryAdapter.resolveOpaque();
+			if (this.worldGrade == null) this.worldGrade = new MetalWorldGrade();
+			this.worldGrade.encode(this, this.commandEncoder.commands(), this.shaderPackRuntime, scene, worldDepth);
+		} catch (RuntimeException error) {
+			this.shaderPackRuntime.markFailed("World grading failed: " + error.getMessage(), error);
+			LOGGER.error("World grading failed; preserving the world scene", error);
+		}
 	}
 
 	/** Borrowed native resources for world modules; ownership stays with Blaze3D. */
@@ -318,6 +333,10 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	@Override
 	public void clearPipelineCache() {
 		this.commandEncoder.finishPendingWork();
+		if (this.worldGrade != null) {
+			this.worldGrade.close();
+			this.worldGrade = null;
+		}
 		this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 		this.pipelineCache.clear();
 		if (this.shaderPackRuntime != null) {
@@ -336,6 +355,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			if (this.shaderPackRuntime != null) {
 				this.shaderPackRuntime.close();
 			}
+			if (this.worldGrade != null) this.worldGrade.close();
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.pipelineCache.clear();
 			if (this.regionClear != null) {

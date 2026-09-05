@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1 complete; W2 HDR prerequisite next.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1 complete; W2 HDR prerequisite in progress.
 
 ## Outcome and scope
 
@@ -42,7 +42,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
-| [ ] | W2 | HDR composition prerequisite | W1 | unassigned | not started | Complete or verify engine PR 7b live HDR gate. |
+| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-05: live world-only grading and stored world depth implemented; exposure/HUD test passed. Linear HDR targets/forward math and display contract remain open. |
 | [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
@@ -384,3 +384,46 @@ Logs: `/tmp/metalcraft-water-build.log`, `/tmp/metalcraft-water-client.log`.
 Next task is W2: coordinate the existing PR 7b linear HDR transition through world and
 forward targets and move tone/output conversion to the world seam. Do not start W3
 production shading from the legacy 8-bit path. No water performance budget is due at W1.
+
+
+### W2 progress — live world grading seam (2026-09-05, `/root`)
+
+- [x] Move pack execution to the end of the world graph, before hand-depth clear.
+- [x] Store world depth separately before later hand/HUD writes.
+- [x] Remove present-time pack execution, leaving one world grade and a presentation copy.
+- [ ] Convert world/forward/Fabulous targets and participating shader fog/blend math to
+  coherent linear RGBA16_FLOAT and validate values above 1 through live composition.
+- [ ] Establish and verify display color space and HDR transparent overlap.
+
+`GameRendererWorldGradeMixin` injects before the hand-depth clear in `renderLevel`.
+`MetalWorldGrade` owns a private stored DEPTH32_FLOAT snapshot at world attachment
+resolution and a format-matched, unblended copy pipeline. It encodes on the existing
+world command queue after deferred resolve, grades into separate `post_color`, then
+copies those pixels into main color without sampling the destination. Main depth is
+not attached to that copy. Native command-buffer retention protects released resources;
+there is no frame-loop CPU readback, wait or new queue. Resize reallocates the snapshot.
+Projection metadata is still absent at this seam; effects requiring it must not assume
+an identity matrix. This snapshot is after transparency, not W3's opaque snapshot.
+
+Presentation now copies main color without executing the pack again. Menus/HUD/hand
+are excluded from world grading. Standard grade UVs explicitly account for Metal's
+upper-left framebuffer origin; the copy uses integer pixel coordinates. Color math
+and world storage remain the legacy 8-bit path. No linear transfer is added prematurely.
+
+The water fixture now also halves exposure and displays a white title. Its image
+assertion checks an unobstructed sky pixel halves once (two-byte tolerance) and at least
+100 central HUD pixels remain white. Standard exposure/tonemap/invert/debug settings
+are controlled for the test and restored afterward. Captures include
+[half exposure with white HUD](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png).
+This proves the live world/HUD seam, not a physical display color-space contract.
+
+
+W2 seam validation (2026-09-05): `./gradlew build` passed, including GPU shader smoke;
+`./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true` passed with the
+numeric single-exposure/HUD assertion (37 seconds), and `./gradlew runClient
+-PmetalLifecycleTest -PmetalShaderLifecycleTest=true` passed (34 seconds). The lifecycle
+run exposed a closed grading-resource cache reused after reload; clearing that owner on
+pipeline-cache reset fixed it, and the complete lifecycle run then passed. Logs are
+`/tmp/water-w2-build.log`, `/tmp/water-w2-client.log`, and `/tmp/water-w2-lifecycle.log`.
+Visually inspected the half-exposure scene with white HUD. W2 remains unchecked; next is
+coordinated linear world/forward target and shader conversion, not a post-only decoder.

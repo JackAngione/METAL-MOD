@@ -12,7 +12,7 @@ This records PR 7b's transfer prerequisite. The live renderer still uses the PR 
 | Lightmap | `Lightmap` allocates `RGBA8_UNORM`; `assets/minecraft/shaders/core/lightmap.fsh` combines sky/block/ambient/night vision, clamps, and mixes in `notGamma` using `BrightnessFactor` | This is a bounded, brightness-adjusted artistic multiplier. It is neither isolated sunlight nor a known sRGB encoding of radiance. Applying an sRGB decoder to this multiplier is not a justified physical conversion. |
 | Geometry | Vanilla `terrain.fsh` multiplies sampled color by vertex color, then applies visibility fade and fog. Standard `gbuffer.metal` similarly multiplies atlas, tint and lightmap, then writes fogged `scene` | The current seed and fog arithmetic operate on legacy color values. `shared/lighting.metal` recovers and shadows this seed in that same space. Neither path establishes linear lighting. |
 | World target | `MainTarget` selects `GpuFormat.RGBA8_UNORM`; `RenderTarget` allocates that format | Values above 1 are lost before present-time grading. A floating-point post target alone cannot recover them. |
-| Grade | `standard/grade.metal` applies exposure and optional ACES fit directly to sampled scene; `pack.json` selects `bgra8_unorm` for `post_color` | Existing grading is a legacy color operation, not a linear HDR tonemapper. Default exposure 1 / tonemap none preserves the seed. |
+| Grade | `standard/grade.metal` applies exposure and optional ACES fit directly to sampled scene; `pack.json` selects `bgra8_unorm` for `post_color` | Grading now executes at the world seam before hand/HUD. It remains a legacy color operation, not a linear HDR tonemapper. Default exposure 1 / tonemap none preserves the seed. |
 | Present | `mc_presentation_pipeline` returns the linearly filtered source sample; `MCMetalSurface` selects `BGRA8Unorm` | Neither the fragment program nor the pixel format performs an sRGB output transfer. `CAMetalLayer.colorspace` is not explicitly assigned. Compositor/display interpretation is therefore not yet an explicitly managed output contract. |
 
 Mapped sources are in the project's Loom `minecraft-clientOnly-043a8b3edf-26.2-sources.jar`;
@@ -54,3 +54,9 @@ readback against independent numeric references: black/midgray/white, values on 
 sides of each transfer knee, encoded and linear round trips, negative inputs, alpha,
 and values 2 and 4. This proves helper behavior and floating-point attachment storage;
 it does not prove HDR survives live forward composition or presentation.
+
+
+2026-09-05 W2 update: the live world-only grading seam is now wired. Pack execution
+and a stored depth snapshot precede hand-depth clear; present only copies the finished
+main scene. World and forward storage/math are still legacy 8-bit. The remaining HDR
+contract above is unchanged; the seam is not evidence of live HDR or display calibration.
