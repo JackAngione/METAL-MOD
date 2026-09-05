@@ -1411,6 +1411,15 @@ Per-extension try/catch is **not** in this PR (see PR 0).
   using the existing nearest sampler. Receivers outside the covered depth/light volume
   and filter taps outside the map return unoccluded visibility. The caller supplies bias
   in normalized shadow depth; the helper returns visibility without changing lighting.
+  Movement follow-up (2026-09-05): comparisons are now bilinearly weighted, combining
+  the overlapping 3×3 kernels into sixteen texel-center reads. The previous nine nearest
+  comparisons stepped as receivers crossed texel boundaries; larger shadow distances
+  made those steps cover more world space. Receiver-plane depth correction and unoccluded
+  border taps remain intact. `ShadowFilteringSmoke` first failed against the old filter,
+  then passed horizontal/vertical edge sweeps at 1/16-texel increments, 1/4 cascades,
+  256/1024/4096 resolution, 32/96/256 shadow distance and 0/96/256 caster distance.
+  `./gradlew build --offline` passed. GPU timing and the reported in-game scene have not
+  been re-measured; cascade transitions and caster-volume boundaries are unchanged.
 - [x] GPU sampling checks use actual terrain depth for 1–4 cascades and every opaque
   layer: receivers below/above casters, transparent cutouts, exact split boundaries and
   their successors, distance/volume rejection, bias direction, and fractional PCF edge

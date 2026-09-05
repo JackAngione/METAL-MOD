@@ -60,18 +60,27 @@ float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBi
     bool stablePlane = abs(dot(worldNormal, frame.directionToSun.xyz)) > 0.08;
     float2 depthGradient = stablePlane && abs(plane.z) > 1e-5 ? -2.0 * plane.xy / plane.z : float2(0.0);
     float receiverDepth = ndc.z - max(depthBias, 0.0);
+    // Bilinearly interpolate depth comparisons, not stored depth. Nine nearest
+    // comparisons jump by 1/9 when the receiver crosses a texel boundary. The
+    // overlapping bilinear 3x3 kernels combine into sixteen weighted comparisons.
+    float resolution = float(map.get_width());
+    float2 texelPosition = uv * resolution - 0.5;
+    float2 base = floor(texelPosition);
+    float2 fraction = texelPosition - base;
+    float4 weightsX = float4(1.0 - fraction.x, 1.0, 1.0, fraction.x);
+    float4 weightsY = float4(1.0 - fraction.y, 1.0, 1.0, fraction.y);
     float visibility = 0.0;
-    for (int y = -1; y <= 1; ++y) {
-        for (int x = -1; x <= 1; ++x) {
-            float2 tap = uv + float2(x, y) * frame.inverseResolution;
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            float weight = weightsX[x] * weightsY[y];
+            float2 center = (base + float2(x - 1, y - 1) + 0.5) / resolution;
             // Treat taps beyond the light volume as unoccluded, not clamped edge casters.
-            if (any(tap < 0.0) || any(tap >= 1.0)) visibility += 1.0;
+            if (any(center < 0.0) || any(center >= 1.0)) visibility += weight;
             else {
                 // Compare at the sampled texel center, not the center receiver's depth.
                 // Otherwise neighboring samples on a sloped plane shadow the plane itself.
-                float2 center = (floor(tap * float(map.get_width())) + 0.5) / float(map.get_width());
                 float tapDepth = receiverDepth + dot(depthGradient, center - uv);
-                visibility += tapDepth <= map.sample(nearestSampler, tap, cascade) ? 1.0 : 0.0;
+                visibility += weight * (tapDepth <= map.sample(nearestSampler, center, cascade) ? 1.0 : 0.0);
             }
         }
     }
@@ -136,14 +145,18 @@ float mc_unpack_view_depth(float4 normal, float4 light) {
 
 // Geometry negates clip Y before Metal viewport conversion. Inverting that pair
 // means original raster NDC Y is 2*uv.y-1, not 1-2*uv.y.
-// Scale the unprojected ray so -view.z equals the packed linear view depth. Do not pass that
-// depth to mc_shadow_camera_relative, which expects hardware [0,1] depth.
+// Intersect the unprojected pixel line with z = -viewDepth. Minecraft folds walking
+// translation into the projection, so this line need not pass through the view origin.
+// Scaling a single unprojected point amplifies that translation with receiver distance.
+// Use two finite clip depths; the far endpoint can be at infinity.
+// Do not pass linear depth to mc_shadow_camera_relative, which expects hardware [0,1] depth.
 float3 mc_reconstruct_view_position(float2 uv, float viewDepth, float4x4 inverseProjection) {
     float2 ndc = uv * 2.0 - 1.0;
     float4 viewH = inverseProjection * float4(ndc, 0.0, 1.0);
-    float w = abs(viewH.w) < 1e-8 ? 1e-8 : viewH.w;
-    float3 ray = viewH.xyz / w;
-    return ray * (viewDepth / max(-ray.z, 1e-8));
+    float4 middleH = viewH + 0.5 * inverseProjection[2];
+    float3 origin = viewH.xyz / viewH.w;
+    float3 direction = middleH.xyz / middleH.w - origin;
+    return origin + direction * ((-viewDepth - origin.z) / direction.z);
 }
 
 float3 mc_view_to_camera_relative(float3 viewPos, float4x4 viewToCameraRelative) {

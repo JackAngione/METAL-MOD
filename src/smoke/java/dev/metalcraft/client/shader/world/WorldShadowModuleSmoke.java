@@ -1,11 +1,13 @@
 package dev.metalcraft.client.shader.world;
 
 import dev.metalcraft.client.metal.MetalDevice;
+import dev.metalcraft.client.metal.MetalBuffer;
 import dev.metalcraft.client.metal.MetalRenderPass;
 import dev.metalcraft.client.metal.MetalRenderPipeline;
 import dev.metalcraft.client.metal.MetalTexture;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.joml.Matrix4f;
@@ -29,8 +31,73 @@ public final class WorldShadowModuleSmoke {
 			throw new AssertionError(error);
 		}
 		for (int count = 1; count <= 4; count++) check(device, contract, count);
+		checkWalkingReconstruction(device, contract);
+		ShadowFilteringSmoke.run(device, contract);
 		TerrainShadowRendererSmoke.run(device, contract);
 		System.out.println("Shadow resources: 1–4 cascades, named bindings, reconstruction and immutable uploads passed");
+	}
+
+	/** Project fixed receivers with Minecraft's walking bob, then reconstruct with production MSL. */
+	private static void checkWalkingReconstruction(final MetalDevice device, final String contract) {
+		final int samples = 128;
+		final float[] depths = {1, 8, 32, 96};
+		String source = "#include <metal_stdlib>\nusing namespace metal;\n" + contract + """
+			struct Sample { float4x4 inverseProjection; float4 point; float4 clip; };
+			struct V { float4 position [[position]]; };
+			vertex V vs(uint id [[vertex_id]]) {
+			    float2 p = id == 0 ? float2(-1,-1) : (id == 1 ? float2(3,-1) : float2(-1,3));
+			    return {float4(p,0,1)};
+			}
+			fragment float4 fs(V in [[stage_in]], constant Sample* samples [[buffer(0)]]) {
+			    Sample s = samples[uint(in.position.x)];
+			    float2 uv = (s.clip.xy / s.clip.w + 1.0) * 0.5;
+			    float3 actual = mc_reconstruct_view_position(uv, -s.point.z, s.inverseProjection);
+			    return float4(abs(actual - s.point.xyz), 1);
+			}
+			""";
+		try (var queue = device.createCommandQueue();
+			 var inputs = device.createBuffer(samples * 96, MetalBuffer.StorageMode.SHARED);
+			 var color = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA16_FLOAT, samples, 1, 1));
+			 var pipeline = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
+				 source, "vs", source, "fs", List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA16_FLOAT)),
+				 null, MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
+				 MetalRenderPipeline.RasterState.DEFAULT))) {
+			try (var mapping = inputs.map()) {
+				var bytes = mapping.bytes();
+				for (int i = 0; i < samples; i++) {
+					float phase = (i % 16) * (float)Math.PI / 8;
+					float bob = i % 16 == 0 ? 0 : 0.1F;
+					Matrix4f projection = new Matrix4f().perspective(1.2F, 1.5F, 0.05F, 1024, true)
+						.translate(i < 64 ? (float)Math.sin(phase) * bob * 0.5F : 0,
+							i < 64 ? -(float)Math.abs(Math.cos(phase) * bob) : 0, 0)
+						.rotateZ((float)Math.toRadians(Math.sin(phase) * bob * 3))
+						.rotateX((float)Math.toRadians(Math.abs(Math.cos(phase - 0.2F) * bob) * 5));
+					Vector4f point = new Vector4f(0.3F, -0.4F, -depths[i / 16 % depths.length], 1);
+					new Matrix4f(projection).invert().get(i * 96, bytes);
+					point.get(i * 96 + 64, bytes);
+					projection.transform(point, new Vector4f()).get(i * 96 + 80, bytes);
+				}
+			}
+			try (var commands = queue.createCommandBuffer()) {
+				try (var pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+					MetalRenderPass.ColorAttachment.clear(color, 0, 0, 0, 1)))) {
+					pass.setPipeline(pipeline);
+					pass.setUniformBuffer(0, inputs, 0, MetalRenderPass.STAGE_FRAGMENT);
+					pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
+				}
+				commands.commitAndWait();
+			}
+			ByteBuffer pixels = color.readback(queue, 0).order(ByteOrder.nativeOrder());
+			for (int i = 0; i < samples; i++) {
+				for (int axis = 0; axis < 3; axis++) {
+					float error = Float.float16ToFloat(pixels.getShort(i * 8 + axis * 2));
+					if (!Float.isFinite(error) || error > 0.002F) {
+						throw new AssertionError("Walking shadow receiver moved: sample " + i + ", axis " + axis + ", error " + error + " blocks");
+					}
+				}
+			}
+		}
+		System.out.println("Walking reconstruction: fixed receivers stable through walking and rotation-only phases at 1–96 blocks");
 	}
 
 	private static void check(final MetalDevice device, final String contract, final int count) {
