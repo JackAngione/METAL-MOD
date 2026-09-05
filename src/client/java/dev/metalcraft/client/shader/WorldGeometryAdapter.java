@@ -22,6 +22,7 @@ import dev.metalcraft.client.metal.MetalRenderPipeline;
 import dev.metalcraft.client.metal.MetalSampler;
 import dev.metalcraft.client.metal.MetalTexture;
 import dev.metalcraft.client.metal.MetalTextureView;
+import dev.metalcraft.client.shader.world.WorldLightingModule;
 import dev.metalcraft.client.shader.world.WorldShadowModule;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -110,6 +111,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final int shadowMapSlot;
 	private final int shadowFrameSlot;
 	private final int resolveCameraSlot;
+	private final int lightingFrameSlot;
 	private final Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
 	private final Set<String> declined = new LinkedHashSet<>();
 	private final Matrix4f inverseProjection = new Matrix4f();
@@ -127,9 +129,17 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private @Nullable MetalBuffer unoccludedFrame;
 	private boolean haveRasterProjection;
 	private boolean haveRasterView;
+	private boolean haveFog;
 	private boolean pendingResolve;
 	private boolean resolveUnavailable;
 	private boolean closed;
+	private final Vector4f fogColor = new Vector4f();
+	private float fogEnvironmentalStart = WorldLightingModule.DISABLED_FOG_DISTANCE;
+	private float fogEnvironmentalEnd = WorldLightingModule.DISABLED_FOG_DISTANCE;
+	private float fogRenderDistanceStart = WorldLightingModule.DISABLED_FOG_DISTANCE;
+	private float fogRenderDistanceEnd = WorldLightingModule.DISABLED_FOG_DISTANCE;
+	private float fogSkyEnd = WorldLightingModule.DISABLED_FOG_DISTANCE;
+	private float fogCloudsEnd = WorldLightingModule.DISABLED_FOG_DISTANCE;
 
 	WorldGeometryAdapter(
 		final MetalGpuDevice device,
@@ -176,6 +186,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		this.shadowMapSlot = shadowMap;
 		this.shadowFrameSlot = shadowFrame;
 		this.resolveCameraSlot = bufferSlot;
+		this.lightingFrameSlot = bufferSlot + 1;
 		this.channels = this.captureChannels();
 		this.writeUniforms();
 		this.writeResolveCamera();
@@ -198,6 +209,43 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	public void setRasterTransforms(final Matrix4fc projection, final Matrix4fc view) {
 		this.setRasterProjection(projection);
 		this.setRasterView(view);
+	}
+
+	/**
+	 * Fog distances and colour used when resolve re-applies fog after lighting. Unset fog is
+	 * disabled (starts/ends beyond world distance), matching an unfogged seed.
+	 */
+	public void setFog(final Vector4fc color, final float environmentalStart, final float environmentalEnd,
+		final float renderDistanceStart, final float renderDistanceEnd) {
+		this.setFog(color, environmentalStart, environmentalEnd, renderDistanceStart, renderDistanceEnd,
+			WorldLightingModule.DISABLED_FOG_DISTANCE, WorldLightingModule.DISABLED_FOG_DISTANCE);
+	}
+
+	public void setFog(final Vector4fc color, final float environmentalStart, final float environmentalEnd,
+		final float renderDistanceStart, final float renderDistanceEnd,
+		final float skyEnd, final float cloudsEnd) {
+		if (color == null || !Float.isFinite(environmentalStart) || !Float.isFinite(environmentalEnd)
+			|| !Float.isFinite(renderDistanceStart) || !Float.isFinite(renderDistanceEnd)
+			|| !Float.isFinite(skyEnd) || !Float.isFinite(cloudsEnd)) {
+			return;
+		}
+		if (this.haveFog && this.fogColor.equals(color, 1.0e-5F)
+			&& this.fogEnvironmentalStart == environmentalStart && this.fogEnvironmentalEnd == environmentalEnd
+			&& this.fogRenderDistanceStart == renderDistanceStart && this.fogRenderDistanceEnd == renderDistanceEnd
+			&& this.fogSkyEnd == skyEnd && this.fogCloudsEnd == cloudsEnd) {
+			return;
+		}
+		if (this.haveFog && this.pendingResolve) {
+			this.flushPendingResolve();
+		}
+		this.fogColor.set(color);
+		this.fogEnvironmentalStart = environmentalStart;
+		this.fogEnvironmentalEnd = environmentalEnd;
+		this.fogRenderDistanceStart = renderDistanceStart;
+		this.fogRenderDistanceEnd = renderDistanceEnd;
+		this.fogSkyEnd = skyEnd;
+		this.fogCloudsEnd = cloudsEnd;
+		this.haveFog = true;
 	}
 
 	public static @Nullable WorldGeometryAdapter active() {
@@ -332,13 +380,20 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		if (!this.pendingResolve || this.resolvePipeline == null) {
 			return false;
 		}
-		try {
+		try (MetalBuffer lighting = this.device.metal().createBuffer(
+			WorldLightingModule.FRAME_BYTES, MetalBuffer.StorageMode.SHARED
+		)) {
 			this.writeUniforms();
 			this.writeResolveCamera();
+			WorldLightingModule.write(lighting, this.fogColor,
+				this.fogEnvironmentalStart, this.fogEnvironmentalEnd,
+				this.fogRenderDistanceStart, this.fogRenderDistanceEnd,
+				this.fogSkyEnd, this.fogCloudsEnd);
 			openPass.setScissor(0, 0, this.sceneAttachment.getWidth(0), this.sceneAttachment.getHeight(0));
 			openPass.setPipeline(this.resolvePipeline);
 			openPass.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
 			openPass.setUniformBuffer(this.resolveCameraSlot, this.resolveCamera, 0L, MetalRenderPass.STAGE_FRAGMENT);
+			openPass.setUniformBuffer(this.lightingFrameSlot, lighting, 0L, MetalRenderPass.STAGE_FRAGMENT);
 			this.bindShadowResources(openPass);
 			openPass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 			this.pendingResolve = false;
@@ -547,7 +602,14 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	}
 
 	private void captureWorldUniform(final String name, final MetalBuffer buffer, final long offset, final long size) {
-		if (!this.pendingResolve || this.closed || size < 64L) {
+		if (!this.pendingResolve || this.closed) {
+			return;
+		}
+		if ("Fog".equals(name)) {
+			this.captureFog(buffer, offset, size);
+			return;
+		}
+		if (size < 64L) {
 			return;
 		}
 		Matrix4f matrix = new Matrix4f();
@@ -563,6 +625,22 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			this.setRasterProjection(matrix);
 		} else if ("ChunkSection".equals(name) || "DynamicTransforms".equals(name)) {
 			this.setRasterView(matrix);
+		}
+	}
+
+	private void captureFog(final MetalBuffer buffer, final long offset, final long size) {
+		if (size < 40L) {
+			return;
+		}
+		try (MetalBuffer.Mapping mapping = buffer.map(offset, 40L)) {
+			ByteBuffer bytes = mapping.bytes();
+			this.setFog(
+				new Vector4f(bytes.getFloat(0), bytes.getFloat(4), bytes.getFloat(8), bytes.getFloat(12)),
+				bytes.getFloat(16), bytes.getFloat(20), bytes.getFloat(24), bytes.getFloat(28),
+				bytes.getFloat(32), bytes.getFloat(36)
+			);
+		} catch (RuntimeException ignored) {
+			// Keep the last valid fog rather than lighting with a partial upload.
 		}
 	}
 

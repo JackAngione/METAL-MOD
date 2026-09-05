@@ -21,6 +21,7 @@ float3 mc_shadow_camera_relative(float2 uv, float depth, constant MCShadowFrame&
 
 // Returns cascadeCount when the receiver is outside the covered camera depth range.
 // Equality belongs to the nearer cascade; unused physical array layers are never selected.
+// Overlapping blend bands are not applied: a split pixel uses only the nearer cascade.
 uint mc_shadow_cascade(float viewDepth, constant MCShadowFrame& frame) {
     if (!isfinite(viewDepth) || viewDepth <= 0.0 || viewDepth > frame.shadowDistance) {
         return frame.cascadeCount;
@@ -56,6 +57,44 @@ float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBi
         }
     }
     return visibility / 9.0;
+}
+
+// World-space depth range of one cascade, from the light-space Z scale.
+float mc_shadow_cascade_depth_range(uint cascade, constant MCShadowFrame& frame) {
+    float4x4 m = frame.cameraRelativeToShadow[cascade];
+    return 1.0 / max(length(float3(m[0].z, m[1].z, m[2].z)), 1e-8);
+}
+
+float mc_shadow_cascade_texel_size(uint cascade, constant MCShadowFrame& frame) {
+    float4x4 m = frame.cameraRelativeToShadow[cascade];
+    float invExtent = length(float3(m[0].x, m[1].x, m[2].x));
+    return 2.0 * frame.inverseResolution / max(invExtent, 1e-8);
+}
+
+// Normalized shadow-depth bias from world/texel units. Slope raises the offset for
+// grazing receivers; the cap avoids pushing a contact receiver through the caster.
+float mc_shadow_receiver_bias(float3 worldNormal, float viewDepth, constant MCShadowFrame& frame) {
+    uint cascade = mc_shadow_cascade(viewDepth, frame);
+    if (cascade >= min(frame.cascadeCount, 4u)) return 0.0;
+    float depthRange = mc_shadow_cascade_depth_range(cascade, frame);
+    float texel = mc_shadow_cascade_texel_size(cascade, frame);
+    float3 sun = frame.directionToSun.xyz;
+    float nDotL = 0.0;
+    if (all(isfinite(worldNormal)) && all(isfinite(sun)) && dot(sun, sun) > 1e-8) {
+        nDotL = saturate(dot(normalize(worldNormal), normalize(sun)));
+    }
+    float slope = sqrt(max(0.0, 1.0 - nDotL * nDotL)) / max(nDotL, 0.08);
+    float worldBias = min(0.05 + min(texel, 0.1) * (0.5 + slope), 0.12);
+    return saturate(worldBias / depthRange);
+}
+
+// 1 inside the shadow volume, 0 at/beyond shadowDistance. Applied to visibility, not lighting.
+float mc_shadow_distance_fade(float viewDepth, constant MCShadowFrame& frame) {
+    if (frame.cascadeCount == 0u || frame.shadowDistance <= 0.0 || !isfinite(viewDepth)) return 0.0;
+    float start = frame.shadowDistance * 0.9;
+    if (viewDepth <= start) return 1.0;
+    if (viewDepth >= frame.shadowDistance) return 0.0;
+    return 1.0 - (viewDepth - start) / max(frame.shadowDistance - start, 1e-5);
 }
 
 // Inverse of mc_write_gbuffer's 24-bit packing: linear positive view depth over [0, 1024].

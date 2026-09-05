@@ -5,7 +5,7 @@
 | **Title** | Metal-Native Shader Engine |
 | **Author** | MetalCraft contributors |
 | **Date** | 2026-09-03 |
-| **Status** | In progress; PR 0–4 complete; PR 5a world shadow bindings and visibility debug views implemented; PR 5b/7a lighting integration pending |
+| **Status** | In progress; PR 0–4 complete; PR 5a world shadow bindings and visibility debug views implemented; PR 7a + PR 5b lighting contract and sun-term shadows implemented |
 | **Target** | Minecraft Java 26.2, Fabric, macOS arm64, direct Metal backend |
 | **Parent commit of deleted engine** | `a7c274a` |
 | **Deletion commit** | `0eb8833 Remove the shader pack engine and leave the Metal backend` |
@@ -75,7 +75,7 @@ Keep the PR numbers as stable references, but implement in this order:
 | Order | Deliverable | Completion gate |
 | --- | --- | --- |
 | 1 | PR 5a: world shadow bindings and visibility debug view | **Done** — packed-depth reconstruction, cascade and visibility debug views, and unoccluded fallback pass GPU readback in merged and split rendering |
-| 2 | PR 7a + PR 5b: lighting contract and visible sun shadows | Only the direct sun term is shadowed; blocklight, emission, overlays and fog retain their intended behavior |
+| 2 | PR 7a + PR 5b: lighting contract and visible sun shadows | **Done** — GPU readback: vis=1 is a seed identity; cave/blocklight and emissive stay unshadowed; only the sky-weighted sun term darkens; fog is reapplied after lighting. Debug views still pass. In-game look was not re-inspected this session |
 | 3 | PR 6a: general executor and world composition boundary | A mixed render/compute graph routes intermediate textures correctly, before GUI, with safe frame uploads |
 | 4 | PR 7b: linear HDR lighting and GGX | Values above 1 survive through composition; one deliberate tone/output conversion; forward content remains correct |
 | 5 | PR 9: SMAA 1x | Reference three-pass behavior on the graded world, with HUD excluded |
@@ -84,10 +84,11 @@ Keep the PR numbers as stable references, but implement in this order:
 
 **Evidence from the current implementation:**
 
-- Merged resolve now binds pack options, `shadow_frame`, `shadow_map`, and a resolve
-  camera (inverse raster projection, view-to-camera-relative, screen size). `debug_view`
-  `receiver` / `cascade` / `visibility` sample that path; `off` still preserves the
-  shaded scene. Night/no-frame binds an unoccluded dummy (`cascadeCount = 0`).
+- Merged resolve now binds pack options, `shadow_frame`, `shadow_map`, a resolve
+  camera (inverse raster projection, view-to-camera-relative, screen size), and a
+  lighting/fog frame. `debug_view` `receiver` / `cascade` / `visibility` sample that
+  path; `off` applies the sun-term lighting contract; `vanilla` keeps the geometry seed.
+  Night/no-frame binds an unoccluded dummy (`cascadeCount = 0`).
 - Reconstruction unpacks the G-buffer's 24-bit linear view depth and unprojects from
   fragment position; it does not pass that depth to `mc_shadow_camera_relative`.
   Cascade fitting still uses the stable camera; raster `Projection` / view uniforms
@@ -1351,10 +1352,11 @@ Per-extension try/catch is **not** in this PR (see PR 0).
   `./gradlew shaderTranslationSmoke --offline` and `-PmetalPassMerging=false` passed
   on 2026-09-04.
 
-**Status: PR 5a done; PR 5b still open.** Fitting, GPU allocation, terrain depth, and
-world resolve sampling/debug views are implemented. The selected pack's default look is
-still unshadowed vanilla lighting. Entity/block-entity casters are not part of this
-terrain step. Do not mark PR 5 complete until PR 5b's sun-lighting world tests pass.
+**Status: PR 5a and PR 5b done for terrain sun visibility.** Fitting, GPU allocation,
+terrain depth, world resolve sampling/debug views, and sun-term lighting are implemented.
+Default `debug_view=off` now shadows only the direct sun component. Entity/block-entity
+casters, water shadows and moon shadows remain follow-ups. In-game acne/seams were not
+re-inspected this session.
 
 Resource/binding contract (validated by `gradle build --offline` on 2026-09-04):
 
@@ -1417,23 +1419,28 @@ not a binary-archive optimization. The earlier topology denylist is superseded b
 
 #### PR 5b — Ship terrain sun shadows with PR 7a
 
-- [ ] Apply visibility only to the direct sun component defined by PR 7a. Multiplying
+- [x] Apply visibility only to the direct sun component defined by PR 7a. Multiplying
   the already fogged `scene` would incorrectly shadow blocklight, emission and fog.
-- [ ] Express receiver bias in world/texel units and convert using each cascade's depth
-  extent; test slope behavior and cap offsets to avoid detached shadows. Add overlapping
-  cascade fits before blend bands, and fade at the maximum receiver distance. Evaluate
-  acne, contact detachment, seams and subtexel camera movement with the existing 3×3 PCF
-  baseline before changing filtering or adding comparison-sampler ABI.
+  GPU fixtures: occluded sunlit pixels darken; torch-only cave, emissive, and fogged
+  pixels do not go black. `vanilla` debug view keeps the seed as a parity control.
+- [x] Express receiver bias in world/texel units and convert using each cascade's depth
+  extent; cap offsets to avoid detached shadows. Fade visibility to 1 over the last 10%
+  of `shadowDistance`. Keep the current hard split (equality belongs to the nearer
+  cascade); overlapping blend bands were not added. Existing 3×3 PCF is unchanged; no
+  comparison-sampler ABI. GPU fixtures cover occluded sun-facing and grazing receivers.
+  In-game acne, contact detachment, seams and subtexel camera movement were not re-run.
 - [ ] Measure CPU section collection/dispatcher lock time and GPU cascade amplification.
   Current draws instance each selected section into every active cascade. Add per-cascade
   intersection masks or compact lists only if profiling supports them; retain off-camera
   caster coverage. Do not cache shadow maps without mesh, sun and fit invalidation rules.
-- [ ] Account for physical layers in allocation budgets: four 4096² depth32 layers alone
-  require 256 MiB, before driver overhead. Keep conservative defaults and validate size
-  limits/allocation failure. Entity and block-entity **casters**, water shadows and moon
+  Not measured this session; instancing is unchanged.
+- [x] Account for physical layers in allocation budgets: four 4096² depth32 layers alone
+  require 256 MiB, before driver overhead. Conservative pack defaults stay 4 cascades,
+  1024², distance 96. Entity and block-entity **casters**, water shadows and moon
   shadows remain explicit follow-ups; receiving terrain shadows does not implement them.
 
-PR 5 completes only after the debug integration **and** sun-lighting world tests pass.
+PR 5 sun-lighting GPU tests passed in merged and `-PmetalPassMerging=false` smoke on
+2026-09-04. In-game visual inspection of shadowed lighting was not re-run this session.
 
 - **Title:** Layered shadow map in one encoder
 - **Depends on:** PR 4
@@ -1441,8 +1448,8 @@ PR 5 completes only after the debug integration **and** sun-lighting world tests
   `LevelRendererShadowMixin`, `ViewAreaAccessor`, `shadow.metal`; projection capture and
   resolve binding follow in the sampling step. Direct Metal allocation leaves Blaze3D arrays restricted.
 - **Tests:** actual layered terrain depth/readback in PR 5 (PR 1 only tested clears);
-  world terrain draw counters and lifecycle pass; world resolve reconstruction and
-  visibility debug-view GPU fixtures. PR 5b sun-lighting world tests remain.
+  world terrain draw counters and lifecycle pass; world resolve reconstruction,
+  visibility debug-view GPU fixtures, and PR 5b sun-lighting world tests.
 - **Description:** Lift `MetalGpuDevice.createTexture` array reject **only** for this module's MetalDevice allocations, or keep using `MetalDevice` directly. No local cubes.
 
 ### PR 6 — Executor, world composition, then separate effect PRs
@@ -1503,11 +1510,11 @@ specialization with resource/consumer rewiring, not an encode-time early skip.
 
 ### PR 7 — Lighting module (vanilla lightmap + GGX)
 
-- [ ] **Not started**.
+- [x] **PR 7a done** (Lambert/vanilla terms, 8-bit scene). PR 7b not started.
 
 - **Title:** Deferred GGX consumed by `resolve.metal`
 - **Depends on:** PR 4 and PR 5a for PR 7a; PR 6a for PR 7b and world HDR composition
-- **Files:** `WorldLightingModule` **without** `occupancyBuffer`; named sun/shadow bindings established in PR 5 and consumed here; `shared/brdf.metal`
+- **Files:** `WorldLightingModule` **without** `occupancyBuffer`; named sun/shadow bindings established in PR 5 and consumed here; `shared/lighting.metal` (not `brdf.metal`)
 - **PR 7a — Lighting semantics before BRDF:** document G-buffer normal space and decoding,
   material IDs, roughness and emission, exact UV2/lightmap sampling, overlays and fog.
   The RGB lightmap mixes sky/block illumination and game effects; it is not an isolated
@@ -1515,6 +1522,15 @@ specialization with resource/consumer rewiring, not an encode-time early skip.
   policy without double-counting sky energy. Keep vanilla behavior available as a parity
   path. Test torch-only caves, fullbright/emissive entities, damage overlays, weather,
   sunrise/night and dimension changes, along with PR 5b's sun-shadow tests.
+
+  Implemented: view-space octahedral normals; materials including `MC_MATERIAL_EMISSIVE`;
+  UV2 sky/block split of the recovered (unfogged) seed; `sunWeight = skyShare * N·L`;
+  `lit = unfogged - unfogged * sunWeight * (1 - vis)`; fog decoded and reapplied after
+  lighting. `visibility = 1` is a seed identity. `debug_view=vanilla` is an explicit
+  parity control. GPU fixtures cover torch-only caves, emissive, partial fog, vis=1
+  identity, and occluded sun. Night/other dimensions already bind `cascadeCount = 0`.
+  Weather, sunrise, damage-overlay pixels, and in-game dimension changes were not
+  re-verified this session. No occupancy, no GGX, no HDR targets.
 - **PR 7b — Linear HDR and GGX:** audit actual atlas, lightmap, scene and drawable transfer
   functions before adding conversions. Define decode, lighting, fog, forward blending,
   tone mapping and output encoding; a `_UNORM` format alone does not identify color space.

@@ -7,6 +7,6 @@ using namespace metal;
 struct PackOptions {
     float exposure; // 0
     int tonemap;    // 4; 0 = none, 1 = aces
-    int debugView;  // 8; 0=off 1=scene 2=albedo 3=normal 4=light 5=receiver 6=cascade 7=visibility
+    int debugView;  // 8; 0=off 1=scene 2=albedo 3=normal 4=light 5=receiver 6=cascade 7=visibility 8=vanilla
 };
 #endif

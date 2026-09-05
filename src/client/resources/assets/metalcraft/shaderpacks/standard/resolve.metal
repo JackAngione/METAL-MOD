@@ -30,6 +30,7 @@ fragment ResolveTargets resolve_fragment(
     constant PackOptions &options [[buffer(0)]],
     constant MCShadowFrame &shadowFrame [[buffer(MC_BUFFER_SHADOW_FRAME)]],
     constant MCResolveCamera &camera [[buffer(MC_BUFFER_RESOLVE_CAMERA)]],
+    constant McFog &fog [[buffer(MC_BUFFER_LIGHTING_FRAME)]],
     depth2d_array<float> shadowMap [[texture(MC_TEX_SHADOW_MAP)]],
     sampler shadowSampler [[sampler(MC_TEX_SHADOW_MAP)]]
 ) {
@@ -46,10 +47,14 @@ fragment ResolveTargets resolve_fragment(
     float3 cameraRelative = validDepth
         ? mc_view_to_camera_relative(viewPos, camera.viewToCameraRelative)
         : float3(0.0);
+    float3 viewNormal = mc_decode_normal(previous.normal.rg);
+    float3 worldNormal = normalize((camera.viewToCameraRelative * float4(viewNormal, 0.0)).xyz);
     uint cascade = validDepth ? mc_shadow_cascade(viewDepth, shadowFrame) : shadowFrame.cascadeCount;
+    float bias = mc_shadow_receiver_bias(worldNormal, viewDepth, shadowFrame);
     float visibility = validDepth
-        ? mc_shadow_visibility(cameraRelative, viewDepth, 0.0005, shadowFrame, shadowMap, shadowSampler)
+        ? mc_shadow_visibility(cameraRelative, viewDepth, bias, shadowFrame, shadowMap, shadowSampler)
         : 1.0;
+    visibility = mix(1.0, visibility, mc_shadow_distance_fade(viewDepth, shadowFrame));
     if (options.debugView == 2) {
         out.scene = float4(previous.albedo.rgb, 1.0);
         out.albedo.a = 0.0;
@@ -82,9 +87,13 @@ fragment ResolveTargets resolve_fragment(
         out.albedo.a = 0.0;
         return out;
     }
-    // Geometry already wrote the sampled RGB lightmap, overlays, emissive treatment and fog
-    // into scene. UV2 levels are metadata, not a replacement for that lighting. Preserve the
-    // shaded seed until the lighting module can also reconstruct and apply those effects.
+    if (options.debugView == 8) {
+        out.albedo.a = 0.0;
+        return out;
+    }
+    out.scene = mc_compose_lighting(
+        previous.scene, previous.albedo, worldNormal, previous.light.rg, cameraRelative, visibility, fog, shadowFrame
+    );
     out.albedo.a = 0.0;
     return out;
 }

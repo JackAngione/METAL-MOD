@@ -8,8 +8,10 @@
 // Minecraft's own code lands where this program expects it.
 //
 // Colour zero is Minecraft's own attachment and receives the vanilla-shaded seed. The merged
-// resolve replaces routed opaque pixels with deferred lighting and preserves the seed wherever no
-// G-buffer material was written. The three channels after it are the memoryless G-buffer proper.
+// resolve replaces routed opaque pixels with deferred lighting (sun visibility on the direct sun
+// term only) and preserves the seed wherever no G-buffer material was written. Layout, materials,
+// fog and the sun-term split are documented in shared/lighting.metal. The three channels after
+// scene are the memoryless G-buffer proper.
 
 #include <metal_stdlib>
 using namespace metal;
@@ -23,16 +25,6 @@ using namespace metal;
 
 struct McProjection {
     float4x4 ProjMat;
-};
-
-struct McFog {
-    float4 FogColor;
-    float FogEnvironmentalStart;
-    float FogEnvironmentalEnd;
-    float FogRenderDistanceStart;
-    float FogRenderDistanceEnd;
-    float FogSkyEnd;
-    float FogCloudsEnd;
 };
 
 struct McGlobals {
@@ -89,33 +81,7 @@ struct GBufferVaryings {
     float cylindricalDistance;
 };
 
-// ---- Shared helpers ----------------------------------------------------------------------------
-
-static inline float mc_fog_spherical_distance(float3 pos) {
-    return length(pos);
-}
-
-static inline float mc_fog_cylindrical_distance(float3 pos) {
-    return max(length(pos.xz), abs(pos.y));
-}
-
-static inline float mc_linear_fog_value(float distance, float start, float end) {
-    if (distance <= start) {
-        return 0.0;
-    }
-    if (distance >= end) {
-        return 1.0;
-    }
-    return (distance - start) / (end - start);
-}
-
-static inline float4 mc_apply_fog(float4 color, float spherical, float cylindrical, constant McFog &fog) {
-    float value = max(
-        mc_linear_fog_value(spherical, fog.FogEnvironmentalStart, fog.FogEnvironmentalEnd),
-        mc_linear_fog_value(cylindrical, fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd)
-    );
-    return float4(mix(color.rgb, fog.FogColor.rgb, value * fog.FogColor.a), color.a);
-}
+// Fog, octahedral encode/decode, material IDs and the sun-term split live in shared/lighting.metal.
 
 /**
  * Clip space, with the sign convention Minecraft's own programs are translated into.
@@ -134,17 +100,6 @@ static inline float4 mc_clip_position(float4 clip) {
 static inline float4 mc_sample_lightmap(texture2d<float> lightMap, sampler lightSampler, float2 uv2) {
     float2 coord = clamp(uv2 / 256.0 + 0.5 / 16.0, float2(0.5 / 16.0), float2(15.5 / 16.0));
     return lightMap.sample(lightSampler, coord, level(0.0));
-}
-
-/// Octahedral normal encoding: a unit vector in two channels, exact at the axis directions that
-/// most of Minecraft's geometry actually points along.
-static inline float2 mc_encode_normal(float3 n) {
-    n /= max(abs(n.x) + abs(n.y) + abs(n.z), 1e-8);
-    float2 encoded = n.xy;
-    if (n.z < 0.0) {
-        encoded = (1.0 - abs(float2(n.y, n.x))) * float2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
-    }
-    return encoded * 0.5 + 0.5;
 }
 
 /// How rough this surface class is, until a pack can say so per block.
