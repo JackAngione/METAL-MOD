@@ -62,7 +62,10 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		this.lastDrawCount = 0;
 		if (!camera.initialized || sky.skybox != DimensionType.Skybox.OVERWORLD
 			|| !Float.isFinite(sky.sunAngle) || Math.cos(sky.sunAngle) <= 0
-			|| Minecraft.getInstance().wireframe) return;
+			|| Minecraft.getInstance().wireframe) {
+			this.frame = this.resources.prepareUnoccludedFrame();
+			return;
+		}
 		var projection = camera.projectionMatrix;
 		float fov = 2 * (float)Math.atan(1.0 / Math.abs(projection.m11()));
 		float aspect = Math.abs(projection.m11() / projection.m00());
@@ -71,7 +74,10 @@ public final class WorldTerrainShadows implements AutoCloseable {
 			new Vector3f(-(float)Math.sin(sky.sunAngle), (float)Math.cos(sky.sunAngle), 0),
 			new Matrix4f(projection).invert());
 		var dispatcher = levelRenderer.sectionRenderDispatcher();
-		if (dispatcher == null) return;
+		if (dispatcher == null) {
+			this.device.encodeNativePass(this.resources.depthPass(), "MetalCraft shader: shadow_terrain", pass -> {});
+			return;
+		}
 		List<TerrainShadowRenderer.Draw> draws = new ArrayList<>();
 		List<SectionRenderDispatcher.RenderSection> casters = new ArrayList<>();
 		var sequential = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
@@ -124,6 +130,7 @@ public final class WorldTerrainShadows implements AutoCloseable {
 
 	public long renderedFrames() { return this.renderedFrames; }
 	public int lastDrawCount() { return this.lastDrawCount; }
+	public WorldShadowModule.@Nullable Frame currentFrame() { return this.frame; }
 
 	public void endFrame() {
 		if (this.frame != null) this.frame.close();

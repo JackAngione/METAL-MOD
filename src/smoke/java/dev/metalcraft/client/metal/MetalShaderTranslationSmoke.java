@@ -30,8 +30,16 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.OptionalDouble;
+import org.joml.Matrix4f;
+import org.joml.Quaternionf;
+import org.joml.Vector3d;
+import org.joml.Vector3f;
 import org.joml.Vector4f;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
+import dev.metalcraft.client.shader.world.ShadowCascades;
+import dev.metalcraft.client.shader.world.TerrainShadowRenderer;
+import dev.metalcraft.client.shader.world.WorldShadowModule;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -1135,6 +1143,7 @@ public final class MetalShaderTranslationSmoke {
 
 	private static void assertIdentityGradePack(final MetalDevice device) {
 		assertDeclaredShaderGraph();
+		assertExternalBindings();
 		assertInvalidPackJson();
 		assertIncludeCycle();
 		assertBundledGradeGraph();
@@ -1331,8 +1340,298 @@ public final class MetalShaderTranslationSmoke {
 					assertBgraDelta(scene.readback(queue, 0), (byte)51, (byte)102, (byte)153, 2, "world tile resolve");
 				}
 			}
+			assertWorldShadowDebugViews(gpu, runtime, encoder, scene, sceneView, depthView, queue);
 		} finally {
 			gpu.forgetNativePipeline(seed);
+		}
+	}
+
+	private static void assertExternalBindings() {
+		ShaderPack.Target colour = new ShaderPack.Target(
+			ShaderPack.PixelFormat.RGBA8_UNORM, new ShaderPack.Scale(1.0), ShaderPack.Lifetime.TRANSIENT, 1
+		);
+		ShaderPack.Pass gbuffer = new ShaderPack.Pass(
+			"gbuffer", ShaderPack.PassKind.GEOMETRY, null, List.of("terrain"),
+			List.of(), List.of("g"), List.of(), null, null
+		);
+		ShaderPack.Pass resolve = new ShaderPack.Pass(
+			"resolve", ShaderPack.PassKind.FULLSCREEN, null, List.of(),
+			List.of("shadow_map"), List.of("g"), List.of("g"), "gbuffer", null, List.of("shadow_frame")
+		);
+		ShaderGraphCompiler.CompiledGraph graph = ShaderGraphCompiler.compile(new ShaderPack.Manifest(
+			1, "Shadows", Map.of("g", colour), List.of(gbuffer, resolve), List.of()
+		));
+		if (!graph.passes().get(1).declaration().reads().contains("shadow_map")
+			|| !graph.passes().get(1).declaration().buffers().contains("shadow_frame")) {
+			throw new AssertionError("Compiled graph dropped external shadow bindings");
+		}
+		try {
+			new ShaderPack.Pass(
+				"resolve", ShaderPack.PassKind.FULLSCREEN, null, List.of(),
+				List.of("shadow_frame"), List.of("g"), List.of(), null, null
+			);
+			throw new AssertionError("shadow_frame was accepted as a sampled read");
+		} catch (IllegalArgumentException expected) {
+			if (!expected.getMessage().contains("shadow_frame")) {
+				throw new AssertionError("Buffer-as-read diagnostic omitted the name", expected);
+			}
+		}
+		try {
+			new ShaderPack.Pass(
+				"resolve", ShaderPack.PassKind.FULLSCREEN, null, List.of(),
+				List.of(), List.of("g"), List.of(), null, null, List.of("shadow_map")
+			);
+			throw new AssertionError("shadow_map was accepted as a buffer");
+		} catch (IllegalArgumentException expected) {
+			if (!expected.getMessage().contains("shadow_map")) {
+				throw new AssertionError("Texture-as-buffer diagnostic omitted the name", expected);
+			}
+		}
+		try {
+			new ShaderPack.Manifest(1, "Reserved", Map.of("shadow_map", colour), List.of(gbuffer), List.of());
+			throw new AssertionError("shadow_map was accepted as a pack target");
+		} catch (IllegalArgumentException expected) {
+			if (!expected.getMessage().contains("shadow_map")) {
+				throw new AssertionError("Reserved-target diagnostic omitted the name", expected);
+			}
+		}
+		try {
+			ShaderGraphCompiler.compile(new ShaderPack.Manifest(
+				1, "Write", Map.of("g", colour),
+				List.of(new ShaderPack.Pass(
+					"p", ShaderPack.PassKind.FULLSCREEN, null, List.of(),
+					List.of(), List.of("shadow_map"), List.of(), null, null
+				)),
+				List.of()
+			));
+			throw new AssertionError("A write of shadow_map was accepted");
+		} catch (ShaderGraphCompiler.CompileException expected) {
+			if (!expected.getMessage().contains("shadow_map")) {
+				throw new AssertionError("External-write diagnostic omitted the name", expected);
+			}
+		}
+		try {
+			ShaderGraphCompiler.compile(new ShaderPack.Manifest(
+				1, "Unknown", Map.of("g", colour),
+				List.of(new ShaderPack.Pass(
+					"p", ShaderPack.PassKind.FULLSCREEN, null, List.of(),
+					List.of(), List.of("g"), List.of(), null, null, List.of("camera")
+				)),
+				List.of()
+			));
+			throw new AssertionError("An unknown buffer was accepted");
+		} catch (ShaderGraphCompiler.CompileException expected) {
+			if (!expected.getMessage().contains("camera")) {
+				throw new AssertionError("Unknown-buffer diagnostic omitted the name", expected);
+			}
+		}
+	}
+
+	private static void assertWorldShadowDebugViews(
+		final MetalGpuDevice gpu,
+		final ShaderPackRuntime runtime,
+		final CommandEncoder encoder,
+		final MetalTexture scene,
+		final MetalGpuTextureView sceneView,
+		final MetalGpuTextureView depthView,
+		final MetalCommandQueue queue
+	) {
+		final float viewDepth = 8.0F;
+		final float fov = (float)Math.toRadians(90.0);
+		Matrix4f projection = new Matrix4f().perspective(fov, 1.0F, 0.05F, 1024.0F, true);
+		Matrix4f view = new Matrix4f();
+		int packed = Math.round(Math.min(1.0F, Math.max(0.0F, viewDepth / 1024.0F)) * 16_777_215.0F);
+		String packedSeed = packedSeedSource(packed);
+		RenderPipeline seed = packedSeedPipeline();
+		gpu.registerNativePipeline(seed, new MetalGpuDevice.NativeProgram(packedSeed, "seed_vertex", "seed_fragment"));
+		String shadows;
+		String terrain;
+		try {
+			shadows = resourceText("/assets/metalcraft/shaderpacks/standard/shared/shadows.metal");
+			terrain = resourceText("/assets/metalcraft/shaderpacks/standard/shadow.metal");
+		} catch (IOException error) {
+			gpu.forgetNativePipeline(seed);
+			throw new AssertionError(error);
+		}
+		var settings = new ShadowCascades.Settings(4, 32, 0.1F, 96, 0.6F, 96);
+		var layer = ChunkSectionLayerGroup.OPAQUE.layers()[0];
+		int stride = layer.pipeline().getVertexFormatBinding(0).getVertexSize();
+		try (WorldShadowModule module = new WorldShadowModule(gpu.metal(), settings);
+			 TerrainShadowRenderer renderer = new TerrainShadowRenderer(gpu.metal(), shadows, terrain);
+			 MetalBuffer vertices = gpu.metal().createBuffer(32L + (long)stride * 4, MetalBuffer.StorageMode.SHARED);
+			 MetalBuffer indices = gpu.metal().createBuffer(16, MetalBuffer.StorageMode.SHARED);
+			 MetalTexture atlas = gpu.metal().createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 1, 1, 1));
+			 MetalTextureView atlasView = atlas.createView();
+			 MetalSampler sampler = gpu.metal().createSampler(new MetalSampler.Descriptor(
+				 MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE
+			 ))) {
+			try (var mapping = vertices.map()) {
+				var bytes = mapping.bytes();
+				for (int i = 0; i < bytes.capacity(); i++) {
+					bytes.put(i, (byte)0);
+				}
+				for (int i = 0; i < 4; i++) {
+					int start = 32 + i * stride;
+					bytes.putFloat(start, (i == 0 || i == 3) ? -1024 : 1024);
+					bytes.putFloat(start + 8, i < 2 ? -1024 : 1024);
+				}
+			}
+			try (var mapping = indices.map()) {
+				mapping.bytes().position(4);
+				for (int i : new int[]{0, 1, 2, 0, 2, 3}) {
+					mapping.bytes().putShort((short)i);
+				}
+			}
+			ByteBuffer pixel = ByteBuffer.allocateDirect(4);
+			pixel.put(new byte[]{-1, -1, -1, -1}).flip();
+			atlas.upload(queue, 0, pixel);
+			List<TerrainShadowRenderer.Draw> draws = List.of(
+				new TerrainShadowRenderer.Draw(layer, vertices, 32, indices, 4, MetalRenderPass.IndexType.UINT16, 6, 0, 8, 0)
+			);
+			runtime.worldGeometry().setRasterTransforms(projection, view);
+
+			runtime.setOption("debug_view", "receiver");
+			drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
+			assertReceiverPixel(scene.readback(queue, 0), viewDepth, fov, "receiver reconstruction");
+
+			runtime.setOption("debug_view", "visibility");
+			drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
+			assertBgraDelta(scene.readback(queue, 0), (byte)255, (byte)255, (byte)255, 2, "unoccluded visibility without a shadow frame");
+
+			try (WorldShadowModule.Frame frame = module.prepareFrame(
+				new Vector3d(), new Quaternionf(), fov, 1.0F, new Vector3f(0, 1, 0), new Matrix4f(projection).invert()
+			)) {
+				runtime.worldGeometry().setShadowFrameSupplier(() -> frame);
+				gpu.encodeNativePass(module.depthPass(), "MetalCraft shader: shadow_terrain", pass ->
+					renderer.encode(pass, frame, draws, atlasView, sampler));
+				runtime.setOption("debug_view", "visibility");
+				drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
+				assertBgraDelta(scene.readback(queue, 0), (byte)0, (byte)0, (byte)0, 8, "occluded visibility");
+
+				runtime.setOption("debug_view", "cascade");
+				drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
+				assertBgraDelta(scene.readback(queue, 0), (byte)64, (byte)255, (byte)255, 8, "cascade 0 coverage");
+
+				runtime.setOption("debug_view", "off");
+				drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
+				assertBgraDelta(scene.readback(queue, 0), (byte)144, (byte)96, (byte)48, 2, "shadow sampling must not change lighting");
+			}
+
+			try (WorldShadowModule.Frame empty = module.prepareUnoccludedFrame()) {
+				runtime.worldGeometry().setShadowFrameSupplier(() -> empty);
+				runtime.setOption("debug_view", "visibility");
+				drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
+				assertBgraDelta(scene.readback(queue, 0), (byte)255, (byte)255, (byte)255, 2, "no-sun visibility");
+			}
+
+			runtime.worldGeometry().setShadowFrameSupplier(
+				() -> runtime.worldShadows() == null ? null : runtime.worldShadows().currentFrame()
+			);
+			runtime.setOption("debug_view", "receiver");
+			runtime.worldGeometry().beginFrame();
+			try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-sky-smoke",
+				sceneView, Optional.of(new Vector4f(0, 0, 0, 1)),
+				depthView, OptionalDouble.of(1),
+				List.of(RenderPipelines.SOLID_TERRAIN))) {
+				WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+			}
+			WorldGeometryAdapter.resolveOpaque();
+			try (var fence = encoder.createFence()) {
+				encoder.submit();
+				if (!fence.awaitCompletion(5_000_000_000L)) {
+					throw new AssertionError("Sky resolve GPU submission timed out");
+				}
+			}
+			assertBgraDelta(scene.readback(queue, 0), (byte)0, (byte)0, (byte)0, 2, "sky/far pixels must not reconstruct");
+			runtime.setOption("debug_view", "off");
+		} finally {
+			gpu.forgetNativePipeline(seed);
+		}
+	}
+
+	private static void drawWorldSeed(
+		final ShaderPackRuntime runtime,
+		final CommandEncoder encoder,
+		final MetalGpuTextureView sceneView,
+		final MetalGpuTextureView depthView,
+		final RenderPipeline seed
+	) {
+		runtime.worldGeometry().beginFrame();
+		try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-shadow-smoke",
+			sceneView, Optional.of(new Vector4f(0, 0, 0, 1)),
+			depthView, OptionalDouble.of(1),
+			List.of(RenderPipelines.SOLID_TERRAIN))) {
+			WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+			pass.setPipeline(seed);
+			pass.draw(3, 1, 0, 0);
+		}
+		WorldGeometryAdapter.resolveOpaque();
+		try (var fence = encoder.createFence()) {
+			encoder.submit();
+			if (!fence.awaitCompletion(5_000_000_000L)) {
+				throw new AssertionError("World shadow resolve GPU submission timed out");
+			}
+		}
+	}
+
+	private static RenderPipeline packedSeedPipeline() {
+		RenderPipeline.Builder builder = RenderPipeline.builder()
+			.withLocation(Identifier.parse("metalcraft:smoke/shadow_seed"))
+			.withVertexShader(Identifier.parse("metalcraft:shadow_seed"))
+			.withFragmentShader(Identifier.parse("metalcraft:shadow_seed"))
+			.withCull(false).withPrimitiveTopology(PrimitiveTopology.TRIANGLES);
+		for (int index = 0; index < 4; index++) {
+			builder.withColorTargetState(index, new ColorTargetState(Optional.empty(),
+				GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL));
+		}
+		return builder.build();
+	}
+
+	private static String packedSeedSource(final int packed) {
+		float hi = ((packed >> 16) & 255) / 255.0F;
+		float mid = ((packed >> 8) & 255) / 255.0F;
+		float lo = (packed & 255) / 255.0F;
+		return """
+			#include <metal_stdlib>
+			using namespace metal;
+			vertex float4 seed_vertex(uint id [[vertex_id]]) {
+			    const float2 p[3] = {float2(-1,-1), float2(3,-1), float2(-1,3)};
+			    return float4(p[id], 0, 1);
+			}
+			struct Targets {
+			    float4 scene [[color(0)]];
+			    float4 albedo [[color(1)]];
+			    float4 normal [[color(2)]];
+			    float4 light [[color(3)]];
+			};
+			fragment Targets seed_fragment() {
+			    return {float4(144.0/255,96.0/255,48.0/255,1), float4(0.2,0.4,0.6,1),
+			            float4(0.5,0.5,0.8, %s), float4(0, 0, %s, %s)};
+			}
+			""".formatted(hi, mid, lo);
+	}
+
+	private static void assertReceiverPixel(final ByteBuffer pixels, final float viewDepth, final float fov, final String description) {
+		float uv = 0.5F / 32.0F;
+		float ndcX = uv * 2.0F - 1.0F;
+		float ndcY = 1.0F - uv * 2.0F;
+		float tanHalf = (float)Math.tan(fov * 0.5);
+		float x = ndcX * tanHalf * viewDepth;
+		float y = ndcY * tanHalf * viewDepth;
+		float z = -viewDepth;
+		assertBgraDelta(pixels, unorm8(x / 64.0F + 0.5F), unorm8(y / 64.0F + 0.5F), unorm8(z / 64.0F + 0.5F), 3, description);
+	}
+
+	private static byte unorm8(final float value) {
+		return (byte)Math.round(Math.min(1.0F, Math.max(0.0F, value)) * 255.0F);
+	}
+
+	private static String resourceText(final String path) throws IOException {
+		try (var input = MetalShaderTranslationSmoke.class.getResourceAsStream(path)) {
+			if (input == null) {
+				throw new IOException("Missing " + path);
+			}
+			return new String(input.readAllBytes(), StandardCharsets.UTF_8);
 		}
 	}
 
@@ -1354,6 +1653,19 @@ public final class MetalShaderTranslationSmoke {
 			}
 			if (!"gbuffer".equals(graph.passes().get(1).declaration().mergeWith())) {
 				throw new AssertionError("Resolve must merge_with gbuffer");
+			}
+			ShaderPack.Pass resolve = graph.passes().get(1).declaration();
+			if (!resolve.reads().contains("shadow_map") || !resolve.buffers().contains("shadow_frame")) {
+				throw new AssertionError("Resolve must declare shadow_map and shadow_frame: reads="
+					+ resolve.reads() + " buffers=" + resolve.buffers());
+			}
+			List<Object> debugViews = pack.manifest().options().stream()
+				.filter(option -> option.id().equals("debug_view"))
+				.findFirst()
+				.orElseThrow()
+				.values();
+			if (!debugViews.containsAll(List.of("receiver", "cascade", "visibility"))) {
+				throw new AssertionError("debug_view values were " + debugViews);
 			}
 			for (String id : List.of("gbuffer_albedo", "gbuffer_normal", "gbuffer_light")) {
 				ShaderGraphCompiler.TargetInfo info = graph.targets().get(id);

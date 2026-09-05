@@ -57,4 +57,37 @@ float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBi
     }
     return visibility / 9.0;
 }
+
+// Inverse of mc_write_gbuffer's 24-bit packing: linear positive view depth over [0, 1024].
+uint mc_unpack_view_depth_bits(float4 normal, float4 light) {
+    uint hi = uint(round(saturate(normal.a) * 255.0));
+    uint mid = uint(round(saturate(light.b) * 255.0));
+    uint lo = uint(round(saturate(light.a) * 255.0));
+    return (hi << 16) | (mid << 8) | lo;
+}
+
+float mc_unpack_view_depth(float4 normal, float4 light) {
+    return float(mc_unpack_view_depth_bits(normal, light)) * (1024.0 / 16777215.0);
+}
+
+// Raster ProjMat is OpenGL clip (Y-up). Geometry flips Y for Metal; screen UV is top-left.
+// Scale the unprojected ray so -view.z equals the packed linear view depth. Do not pass that
+// depth to mc_shadow_camera_relative, which expects hardware [0,1] depth.
+float3 mc_reconstruct_view_position(float2 uv, float viewDepth, float4x4 inverseProjection) {
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float4 viewH = inverseProjection * float4(ndc, 0.0, 1.0);
+    float w = abs(viewH.w) < 1e-8 ? 1e-8 : viewH.w;
+    float3 ray = viewH.xyz / w;
+    return ray * (viewDepth / max(-ray.z, 1e-8));
+}
+
+float3 mc_view_to_camera_relative(float3 viewPos, float4x4 viewToCameraRelative) {
+    return (viewToCameraRelative * float4(viewPos, 1.0)).xyz;
+}
+
+struct MCResolveCamera {
+    float4x4 inverseProjection;
+    float4x4 viewToCameraRelative;
+    float2 screenSize;
+};
 #endif

@@ -13,8 +13,12 @@ import java.util.regex.Pattern;
 /** An immutable, validated shader-pack manifest and its MSL sources. */
 public record ShaderPack(String id, Manifest manifest, Map<String, String> metalSources) {
 	private static final Pattern ID = Pattern.compile("[A-Za-z][A-Za-z0-9_.-]*");
-	/** Names a pack may reference but never declare; the engine binds these per frame. */
+	/** Host colour/depth attachments a pack may reference but never declare. */
 	private static final Set<String> RESERVED_TARGET_IDS = Set.of("scene", "depth", "drawable");
+	/** Host-sampled textures that are not render-target producers. */
+	public static final Set<String> EXTERNAL_TEXTURES = Set.of("shadow_map");
+	/** Host uniform buffers that are not render-target producers. */
+	public static final Set<String> EXTERNAL_BUFFERS = Set.of("shadow_frame");
 
 	public ShaderPack {
 		if (id == null || id.isBlank()) {
@@ -80,8 +84,10 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 			targets = immutableMap(targets);
 			for (Map.Entry<String, Target> target : targets.entrySet()) {
 				requireId(target.getKey(), "target");
-				if (RESERVED_TARGET_IDS.contains(target.getKey())) {
-					throw new IllegalArgumentException("Target ID '" + target.getKey() + "' is reserved for a host-supplied attachment");
+				if (RESERVED_TARGET_IDS.contains(target.getKey())
+					|| EXTERNAL_TEXTURES.contains(target.getKey())
+					|| EXTERNAL_BUFFERS.contains(target.getKey())) {
+					throw new IllegalArgumentException("Target ID '" + target.getKey() + "' is reserved for a host-supplied resource");
 				}
 				Objects.requireNonNull(target.getValue(), "target " + target.getKey());
 			}
@@ -199,8 +205,23 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 		List<String> writes,
 		List<String> tileReads,
 		String mergeWith,
-		String enabledBy
+		String enabledBy,
+		List<String> buffers
 	) {
+		public Pass(
+			final String id,
+			final PassKind kind,
+			final String source,
+			final List<String> geometry,
+			final List<String> reads,
+			final List<String> writes,
+			final List<String> tileReads,
+			final String mergeWith,
+			final String enabledBy
+		) {
+			this(id, kind, source, geometry, reads, writes, tileReads, mergeWith, enabledBy, List.of());
+		}
+
 		public Pass {
 			requireId(id, "pass");
 			Objects.requireNonNull(kind, "kind");
@@ -216,6 +237,7 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 			reads = immutableIds(reads, "read in pass '" + id + "'");
 			writes = immutableIds(writes, "write in pass '" + id + "'");
 			tileReads = immutableIds(tileReads, "tile read in pass '" + id + "'");
+			buffers = immutableIds(buffers == null ? List.of() : buffers, "buffer in pass '" + id + "'");
 			if (mergeWith != null) {
 				requireId(mergeWith, "merge_with pass");
 				if (mergeWith.equals(id)) {
@@ -231,6 +253,27 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 				throw new IllegalArgumentException(
 					"Pass '" + id + "' declares targets as both reads and tile_reads: " + duplicateReads
 				);
+			}
+			Set<String> bufferReads = new HashSet<>(reads);
+			bufferReads.retainAll(buffers);
+			if (!bufferReads.isEmpty()) {
+				throw new IllegalArgumentException(
+					"Pass '" + id + "' declares names as both reads and buffers: " + bufferReads
+				);
+			}
+			for (String buffer : buffers) {
+				if (EXTERNAL_TEXTURES.contains(buffer)) {
+					throw new IllegalArgumentException(
+						"Pass '" + id + "' declares external texture '" + buffer + "' as a buffer; use reads"
+					);
+				}
+			}
+			for (String read : reads) {
+				if (EXTERNAL_BUFFERS.contains(read)) {
+					throw new IllegalArgumentException(
+						"Pass '" + id + "' declares external buffer '" + read + "' as a read; use buffers"
+					);
+				}
 			}
 		}
 	}

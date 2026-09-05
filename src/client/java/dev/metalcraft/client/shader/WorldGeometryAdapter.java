@@ -11,12 +11,18 @@ import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.blaze3d.vertex.VertexFormatElement;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.metal.MetalBuffer;
+import dev.metalcraft.client.metal.MetalCommandBuffer;
+import dev.metalcraft.client.metal.MetalCommandQueue;
+import dev.metalcraft.client.metal.MetalDevice;
 import dev.metalcraft.client.metal.MetalGpuDevice;
 import dev.metalcraft.client.metal.MetalGpuTextureView;
 import dev.metalcraft.client.metal.MetalPassCensus;
 import dev.metalcraft.client.metal.MetalRenderPass;
 import dev.metalcraft.client.metal.MetalRenderPipeline;
+import dev.metalcraft.client.metal.MetalSampler;
 import dev.metalcraft.client.metal.MetalTexture;
+import dev.metalcraft.client.metal.MetalTextureView;
+import dev.metalcraft.client.shader.world.WorldShadowModule;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -32,6 +38,8 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
+import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import org.joml.Vector4f;
 import org.joml.Vector4fc;
 import org.slf4j.Logger;
@@ -98,14 +106,27 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final Function<String, Object> optionValue;
 	private final List<ShaderPack.Option> uniformOptions;
 	private final MetalBuffer uniforms;
+	private final MetalBuffer resolveCamera;
+	private final int shadowMapSlot;
+	private final int shadowFrameSlot;
+	private final int resolveCameraSlot;
 	private final Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
 	private final Set<String> declined = new LinkedHashSet<>();
+	private final Matrix4f inverseProjection = new Matrix4f();
+	private final Matrix4f viewToCameraRelative = new Matrix4f();
 	private List<Channel> channels;
 	private @Nullable RenderPass gbufferPass;
 	private @Nullable GpuTextureView sceneAttachment;
 	private @Nullable GpuTextureView depthAttachment;
 	private @Nullable MetalRenderPipeline resolvePipeline;
 	private MetalTexture.@Nullable Format resolveSceneFormat;
+	private Supplier<WorldShadowModule.@Nullable Frame> shadowFrameSupplier = () -> null;
+	private @Nullable MetalTexture unoccludedDepth;
+	private @Nullable MetalTextureView unoccludedDepthView;
+	private @Nullable MetalSampler unoccludedSampler;
+	private @Nullable MetalBuffer unoccludedFrame;
+	private boolean haveRasterProjection;
+	private boolean haveRasterView;
 	private boolean pendingResolve;
 	private boolean resolveUnavailable;
 	private boolean closed;
@@ -135,10 +156,48 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		this.uniformOptions = List.copyOf(uniformOptions);
 		this.optionValue = optionValue;
 		this.uniforms = device.metal().createBuffer(256L, MetalBuffer.StorageMode.SHARED);
+		this.resolveCamera = device.metal().createBuffer(160L, MetalBuffer.StorageMode.SHARED);
+		int textureSlot = 0;
+		int shadowMap = -1;
+		for (String read : resolvePass.reads()) {
+			if ("shadow_map".equals(read)) {
+				shadowMap = textureSlot;
+			}
+			textureSlot++;
+		}
+		int bufferSlot = 1;
+		int shadowFrame = -1;
+		for (String buffer : resolvePass.buffers()) {
+			if ("shadow_frame".equals(buffer)) {
+				shadowFrame = bufferSlot;
+			}
+			bufferSlot++;
+		}
+		this.shadowMapSlot = shadowMap;
+		this.shadowFrameSlot = shadowFrame;
+		this.resolveCameraSlot = bufferSlot;
 		this.channels = this.captureChannels();
 		this.writeUniforms();
+		this.writeResolveCamera();
+		if (this.shadowMapSlot >= 0 || this.shadowFrameSlot >= 0) {
+			this.createUnoccludedBindings();
+		}
 		device.setDeferredResolve(this::encodeMergedResolve);
+		device.setWorldUniformCapture(this::captureWorldUniform);
 		active = this;
+	}
+
+	public void setShadowFrameSupplier(final Supplier<WorldShadowModule.@Nullable Frame> supplier) {
+		this.shadowFrameSupplier = supplier == null ? () -> null : supplier;
+	}
+
+	/**
+	 * {@code projection} is the raster {@code ProjMat}; {@code view} maps camera-relative world to
+	 * view space. Reconstruction uses their inverses. A change flushes a pending resolve first.
+	 */
+	public void setRasterTransforms(final Matrix4fc projection, final Matrix4fc view) {
+		this.setRasterProjection(projection);
+		this.setRasterView(view);
 	}
 
 	public static @Nullable WorldGeometryAdapter active() {
@@ -177,6 +236,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		if (binding == null || binding.gbufferPass != pass) {
 			return pipeline;
 		}
+		binding.pendingResolve = true;
 		return binding.substitutionFor(pipeline).map(Substitution::pipeline).orElse(pipeline);
 	}
 
@@ -194,6 +254,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	public void beginFrame() {
 		this.pendingResolve = false;
 		this.gbufferPass = null;
+		this.haveRasterProjection = false;
+		this.haveRasterView = false;
 	}
 
 	void refreshChannels() {
@@ -272,12 +334,14 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 		try {
 			this.writeUniforms();
+			this.writeResolveCamera();
 			openPass.setScissor(0, 0, this.sceneAttachment.getWidth(0), this.sceneAttachment.getHeight(0));
 			openPass.setPipeline(this.resolvePipeline);
 			openPass.setUniformBuffer(0, this.uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
+			openPass.setUniformBuffer(this.resolveCameraSlot, this.resolveCamera, 0L, MetalRenderPass.STAGE_FRAGMENT);
+			this.bindShadowResources(openPass);
 			openPass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 			this.pendingResolve = false;
-			this.gbufferPass = null;
 			return true;
 		} catch (RuntimeException error) {
 			LOGGER.error("Shader pack '{}' failed to encode the merged resolve", this.packId, error);
@@ -470,6 +534,152 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 	}
 
+	private void writeResolveCamera() {
+		try (MetalBuffer.Mapping mapping = this.resolveCamera.map()) {
+			ByteBuffer bytes = mapping.bytes();
+			this.inverseProjection.get(0, bytes);
+			this.viewToCameraRelative.get(64, bytes);
+			int width = this.sceneAttachment == null ? 1 : this.sceneAttachment.getWidth(0);
+			int height = this.sceneAttachment == null ? 1 : this.sceneAttachment.getHeight(0);
+			bytes.putFloat(128, width);
+			bytes.putFloat(132, height);
+		}
+	}
+
+	private void captureWorldUniform(final String name, final MetalBuffer buffer, final long offset, final long size) {
+		if (!this.pendingResolve || this.closed || size < 64L) {
+			return;
+		}
+		Matrix4f matrix = new Matrix4f();
+		try (MetalBuffer.Mapping mapping = buffer.map(offset, 64L)) {
+			matrix.set(mapping.bytes());
+		} catch (RuntimeException ignored) {
+			return;
+		}
+		if (!matrix.isFinite()) {
+			return;
+		}
+		if ("Projection".equals(name)) {
+			this.setRasterProjection(matrix);
+		} else if ("ChunkSection".equals(name) || "DynamicTransforms".equals(name)) {
+			this.setRasterView(matrix);
+		}
+	}
+
+	private void setRasterProjection(final Matrix4fc projection) {
+		Matrix4f inverse = new Matrix4f(projection).invert();
+		if (!inverse.isFinite() || inverse.determinant() == 0.0F) {
+			return;
+		}
+		if (this.haveRasterProjection && this.inverseProjection.equals(inverse, 1.0e-5F)) {
+			return;
+		}
+		if (this.haveRasterProjection) {
+			this.flushPendingResolve();
+		}
+		this.inverseProjection.set(inverse);
+		this.haveRasterProjection = true;
+		this.writeResolveCamera();
+	}
+
+	private void setRasterView(final Matrix4fc view) {
+		Matrix4f inverse = new Matrix4f(view).invert();
+		if (!inverse.isFinite() || inverse.determinant() == 0.0F) {
+			return;
+		}
+		if (this.haveRasterView && this.viewToCameraRelative.equals(inverse, 1.0e-5F)) {
+			return;
+		}
+		if (this.haveRasterView) {
+			this.flushPendingResolve();
+		}
+		this.viewToCameraRelative.set(inverse);
+		this.haveRasterView = true;
+		this.writeResolveCamera();
+	}
+
+	private void flushPendingResolve() {
+		if (this.pendingResolve && this.resolvePipeline != null) {
+			this.device.resolveDeferredShaderPass();
+		}
+	}
+
+	private void bindShadowResources(final MetalRenderPass pass) {
+		WorldShadowModule.Frame frame = this.shadowFrameSupplier.get();
+		if (frame != null) {
+			if (this.shadowFrameSlot >= 0) {
+				frame.bindUniforms(pass, this.shadowFrameSlot, MetalRenderPass.STAGE_FRAGMENT);
+			}
+			if (this.shadowMapSlot >= 0) {
+				frame.bindDepth(pass, this.shadowMapSlot);
+			}
+			return;
+		}
+		if (this.unoccludedFrame == null || this.unoccludedDepthView == null || this.unoccludedSampler == null) {
+			return;
+		}
+		if (this.shadowFrameSlot >= 0) {
+			pass.setUniformBuffer(this.shadowFrameSlot, this.unoccludedFrame, 0L, MetalRenderPass.STAGE_FRAGMENT);
+		}
+		if (this.shadowMapSlot >= 0) {
+			pass.setTexture(this.shadowMapSlot, this.unoccludedDepthView, MetalRenderPass.STAGE_FRAGMENT);
+			pass.setSampler(this.shadowMapSlot, this.unoccludedSampler, MetalRenderPass.STAGE_FRAGMENT);
+		}
+	}
+
+	private void createUnoccludedBindings() {
+		MetalDevice metal = this.device.metal();
+		MetalTexture depth = metal.createTexture(MetalTexture.Descriptor.array(
+			MetalTexture.Format.DEPTH32_FLOAT, 4, 4, 2,
+			MetalTexture.USAGE_RENDER_TARGET | MetalTexture.USAGE_SHADER_READ
+		));
+		MetalTextureView view = null;
+		MetalSampler sampler = null;
+		MetalBuffer frame = null;
+		try {
+			view = depth.createView();
+			sampler = metal.createSampler(new MetalSampler.Descriptor(
+				MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE
+			));
+			frame = metal.createBuffer(WorldShadowModule.FRAME_BYTES, MetalBuffer.StorageMode.SHARED);
+			try (MetalBuffer.Mapping mapping = frame.map()) {
+				ByteBuffer bytes = mapping.bytes();
+				for (int index = 0; index < WorldShadowModule.FRAME_BYTES; index++) {
+					bytes.put(index, (byte)0);
+				}
+			}
+			try (MetalCommandQueue queue = metal.createCommandQueue();
+				 MetalCommandBuffer commands = queue.createCommandBuffer()) {
+				try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+					List.of(),
+					new MetalRenderPass.DepthAttachment(
+						depth, MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, 1.0
+					),
+					depth.descriptor().sliceCount()
+				))) {
+					// Layered clear to unoccluded depth.
+				}
+				commands.commitAndWait();
+			}
+			this.unoccludedDepth = depth;
+			this.unoccludedDepthView = view;
+			this.unoccludedSampler = sampler;
+			this.unoccludedFrame = frame;
+		} catch (RuntimeException error) {
+			if (frame != null) {
+				frame.close();
+			}
+			if (sampler != null) {
+				sampler.close();
+			}
+			if (view != null) {
+				view.close();
+			}
+			depth.close();
+			throw error;
+		}
+	}
+
 	@Override
 	public void close() {
 		if (this.closed) {
@@ -477,6 +687,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 		this.closed = true;
 		this.device.setDeferredResolve(null);
+		this.device.setWorldUniformCapture(null);
 		if (!this.declined.isEmpty()) {
 			LOGGER.info("Shader pack '{}' leaves {} pipeline(s) outside the G-buffer: {}",
 				this.packId, this.declined.size(), this.declined);
@@ -491,6 +702,23 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			this.resolvePipeline = null;
 		}
 		this.uniforms.close();
+		this.resolveCamera.close();
+		if (this.unoccludedSampler != null) {
+			this.unoccludedSampler.close();
+			this.unoccludedSampler = null;
+		}
+		if (this.unoccludedDepthView != null) {
+			this.unoccludedDepthView.close();
+			this.unoccludedDepthView = null;
+		}
+		if (this.unoccludedDepth != null) {
+			this.unoccludedDepth.close();
+			this.unoccludedDepth = null;
+		}
+		if (this.unoccludedFrame != null) {
+			this.unoccludedFrame.close();
+			this.unoccludedFrame = null;
+		}
 		if (active == this) {
 			active = null;
 		}

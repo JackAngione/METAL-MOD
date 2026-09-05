@@ -400,6 +400,9 @@ public final class ShaderPackRuntime implements AutoCloseable {
 						((Number)this.optionValueUnchecked("shadow_distance")).floatValue(), 0.6F,
 						((Number)this.optionValueUnchecked("shadow_caster_distance")).floatValue()),
 					this.pack.metalSources().get("shared/shadows.metal"), this.pack.metalSources().get("shadow.metal"));
+				this.worldGeometry.setShadowFrameSupplier(
+					() -> this.worldShadows == null ? null : this.worldShadows.currentFrame()
+				);
 			}
 		} catch (IOException | RuntimeException error) {
 			throw new IllegalStateException("Could not build world geometry adapter: " + error.getMessage(), error);

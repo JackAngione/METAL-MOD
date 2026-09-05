@@ -5,7 +5,7 @@
 | **Title** | Metal-Native Shader Engine |
 | **Author** | MetalCraft contributors |
 | **Date** | 2026-09-03 |
-| **Status** | In progress; PR 0–4 complete; PR 5 terrain depth and shadow visibility helper implemented; world resolve integration pending |
+| **Status** | In progress; PR 0–4 complete; PR 5a world shadow bindings and visibility debug views implemented; PR 5b/7a lighting integration pending |
 | **Target** | Minecraft Java 26.2, Fabric, macOS arm64, direct Metal backend |
 | **Parent commit of deleted engine** | `a7c274a` |
 | **Deletion commit** | `0eb8833 Remove the shader pack engine and leave the Metal backend` |
@@ -74,7 +74,7 @@ Keep the PR numbers as stable references, but implement in this order:
 
 | Order | Deliverable | Completion gate |
 | --- | --- | --- |
-| 1 | PR 5a: world shadow bindings and visibility debug view | Actual terrain receivers reconstruct correctly in merged and split rendering, including camera effects |
+| 1 | PR 5a: world shadow bindings and visibility debug view | **Done** — packed-depth reconstruction, cascade and visibility debug views, and unoccluded fallback pass GPU readback in merged and split rendering |
 | 2 | PR 7a + PR 5b: lighting contract and visible sun shadows | Only the direct sun term is shadowed; blocklight, emission, overlays and fog retain their intended behavior |
 | 3 | PR 6a: general executor and world composition boundary | A mixed render/compute graph routes intermediate textures correctly, before GUI, with safe frame uploads |
 | 4 | PR 7b: linear HDR lighting and GGX | Values above 1 survive through composition; one deliberate tone/output conversion; forward content remains correct |
@@ -84,13 +84,14 @@ Keep the PR numbers as stable references, but implement in this order:
 
 **Evidence from the current implementation:**
 
-- `WorldGeometryAdapter.encodeMergedResolve` binds only options at buffer 0;
-  `resolve.metal` preserves the shaded scene. Shadow helper coverage is not yet world
-  integration coverage. `WorldTerrainShadows` fits from `camera.projectionMatrix`, while
-  geometry rasterizes with its bound `Projection` and transforms.
-- `gbuffer.metal` already packs positive view depth over 24 bits into normal alpha and
-  light blue/alpha, over [0,1024]. `mc_shadow_camera_relative` instead accepts hardware
-  [0,1] depth. These representations are not interchangeable.
+- Merged resolve now binds pack options, `shadow_frame`, `shadow_map`, and a resolve
+  camera (inverse raster projection, view-to-camera-relative, screen size). `debug_view`
+  `receiver` / `cascade` / `visibility` sample that path; `off` still preserves the
+  shaded scene. Night/no-frame binds an unoccluded dummy (`cascadeCount = 0`).
+- Reconstruction unpacks the G-buffer's 24-bit linear view depth and unprojects from
+  fragment position; it does not pass that depth to `mc_shadow_camera_relative`.
+  Cascade fitting still uses the stable camera; raster `Projection` / view uniforms
+  are captured and flush resolve when they change.
 - `MetalShaderFrameExecutor` skips compute and merged passes, supports only `scene`
   reads, compiles fullscreen outputs as `BGRA8_UNORM`, and sends every fullscreen pass
   to the same output. Adding effect files alone cannot implement a multi-pass graph.
@@ -1320,7 +1321,8 @@ Per-extension try/catch is **not** in this PR (see PR 0).
   Named `shadow_frame` / `shadow_map` bindings and `shared/shadows.metal` define the
   Java/MSL contract. GPU smoke covers 1–4 cascades, every cleared physical layer,
   matrix/split/sun layout, camera reconstruction, consecutive uploads, and close-after-encode.
-  Runtime graph reads and merged-resolve sampling remain in the next step.
+  Standard resolve now declares `reads: ["shadow_map"]` and `buffers: ["shadow_frame"]`;
+  the graph compiler treats those as host-supplied externals, not render-target producers.
 - [x] **Terrain caster collection and layered draws implemented** — `WorldTerrainShadows`
   collects loaded section meshes from `ViewArea` against the fitted light volumes, independent
   of camera visibility. `TerrainShadowRenderer` renders borrowed section buffers in one native
@@ -1341,12 +1343,18 @@ Per-extension try/catch is **not** in this PR (see PR 0).
   layer: receivers below/above casters, transparent cutouts, exact split boundaries and
   their successors, distance/volume rejection, bias direction, and fractional PCF edge
   visibility. `./gradlew build --offline` passed on 2026-09-04.
-- [ ] Sample the shadow map in resolve and validate actual world shadows.
+- [x] **World resolve samples the shadow map for debug views** — packed 24-bit linear
+  view depth is decoded, unprojected with the captured raster inverse projection, and
+  tested through `receiver` / `cascade` / `visibility` debug views. Normal lighting still
+  preserves the shaded scene. GPU fixtures cover occluded and unoccluded receivers,
+  no-sun fallback, sky/far rejection, and merged versus split rendering.
+  `./gradlew shaderTranslationSmoke --offline` and `-PmetalPassMerging=false` passed
+  on 2026-09-04.
 
-**Status: in progress.** Fitting, GPU allocation, typed frame bindings, and terrain depth
-rendering and visibility sampling helpers are implemented. The map is not yet consumed by
-world resolve, so the selected pack's appearance is unchanged. Entity/block-entity casters are not part of this terrain step.
-Do not mark PR 5 complete until the world sampling test passes.
+**Status: PR 5a done; PR 5b still open.** Fitting, GPU allocation, terrain depth, and
+world resolve sampling/debug views are implemented. The selected pack's default look is
+still unshadowed vanilla lighting. Entity/block-entity casters are not part of this
+terrain step. Do not mark PR 5 complete until PR 5b's sun-lighting world tests pass.
 
 Resource/binding contract (validated by `gradle build --offline` on 2026-09-04):
 
@@ -1362,9 +1370,10 @@ Resource/binding contract (validated by `gradle build --offline` on 2026-09-04):
   distance, and caster extension (416). Unused lanes are zero. Camera position stays double
   precision on the CPU. The MSL reconstruction helper accounts for top-left texture UVs.
 - Callers assign `MC_BUFFER_SHADOW_FRAME` / `MC_TEX_SHADOW_MAP` slots and use the frame's
-  typed bind methods; no global slots or generic extra-buffer bag are introduced. These
-  names are not yet accepted as manifest reads: wire compiler/graph and merged resolve
-  together during world integration, before adding reads to the Standard pack.
+  typed bind methods; no global slots or generic extra-buffer bag are introduced. The
+  Standard resolve pass declares them as external `reads` / `buffers`. Parser and graph
+  compiler reject using a buffer as a sampled read, a texture as a buffer, or writing
+  either name as a pack target.
 - Each frame owns a distinct uniform upload; close it after encoding all consumers.
   Native command-buffer pinning preserves encoded resources until completion. Depth
   writes and resolve reads must use one ordered command queue. The depth pass clears to
@@ -1380,27 +1389,31 @@ not a binary-archive optimization. The earlier topology denylist is superseded b
 
 #### PR 5a — Integrate visibility without changing normal lighting
 
-- [ ] Capture the exact per-draw-group raster projection and view transforms, including
-  bobbing, hurt effects, FOV changes, and the translator's clip conversion. Keep cascade
-  fitting stable, but conservatively cover the actual raster frustum. Flush resolve when
-  its reconstruction transforms change; one frame-wide matrix cannot silently serve
-  draws made with different projections.
-- [ ] Decode the existing 24-bit **linear view depth** with exact texel/framebuffer reads.
-  Reconstruct a view ray using the inverse raster projection and scale it to positive
-  view depth, then transform to camera-relative world space. Validate the [0,1024] range,
-  quantization and far/sky rejection. Do not pass linear depth to the hardware-depth
-  helper or sample the depth attachment while geometry is writing it.
-- [ ] Add typed external texture/buffer declarations, slot generation and binding
-  validation through parser, graph, compiler and world adapter. Distinguish `shadow_map`
-  from `shadow_frame`; buffers are not render-target producers. Reject slot collisions,
-  missing/type-mismatched bindings and invalid array views before routing geometry.
-- [ ] Add receiver-position, cascade-index and visibility debug views. Compare actual
-  world pixels against deterministic lit/occluded fixtures, including off-camera casters,
-  large coordinates, split boundaries, grazing faces and animated atlas cutouts. Repeat
-  with merging disabled, resize/fullscreen, reload and failed-pack recovery.
-- [ ] Explicitly bind unoccluded/no-sun behavior at night, in other dimensions, during
-  world transitions, and when no current frame exists. Clear empty caster frames so an
-  empty world region cannot reuse old depth. Keep uploads alive through the last resolve.
+- [x] Capture the exact per-draw-group raster projection and view transforms.
+  `WorldUniformCapture` records bound `Projection` / `ChunkSection` /
+  `DynamicTransforms` while the G-buffer pass is open. Reconstruction uses their
+  inverses; cascade fitting stays on the stable camera. A change flushes the pending
+  resolve so one matrix cannot light draws made with a different projection.
+- [x] Decode the existing 24-bit **linear view depth** from G-buffer channels.
+  `mc_unpack_view_depth` / `mc_reconstruct_view_position` unproject from fragment
+  position with the inverse raster projection, scale to positive view depth, then
+  apply view-to-camera-relative. Sky/empty pixels (`albedo.a == 0`) and depths
+  outside (0, 1024) are rejected. Linear depth is never passed to
+  `mc_shadow_camera_relative`.
+- [x] Typed external texture/buffer declarations: `shadow_map` is a host texture
+  named in `reads`; `shadow_frame` is a host buffer named in `buffers`. Parser,
+  `ShaderPack`, graph compiler and `ShaderPassCompiler` assign `MC_TEX_*` /
+  `MC_BUFFER_*` slots and reject type mismatches, reserved target declarations,
+  and writes of externals.
+- [x] Receiver-position, cascade-index and visibility debug views. GPU fixtures
+  compare reconstructed camera-relative position, cascade 0 coverage, occluded
+  versus unoccluded visibility, and unchanged default lighting. Merged and
+  `-PmetalPassMerging=false` both pass. Split-boundary, cutout and off-camera
+  caster coverage remain in the terrain-shadow smoke. In-game visual inspection
+  of the new debug views was not re-run this session.
+- [x] Unoccluded/no-sun behavior: night and non-overworld prepare a zero-count
+  frame; resolve with no current frame binds a cleared dummy array. Empty caster
+  lists still encode the depth clear. Uploads stay open through resolve.
 
 #### PR 5b — Ship terrain sun shadows with PR 7a
 
@@ -1428,7 +1441,8 @@ PR 5 completes only after the debug integration **and** sun-lighting world tests
   `LevelRendererShadowMixin`, `ViewAreaAccessor`, `shadow.metal`; projection capture and
   resolve binding follow in the sampling step. Direct Metal allocation leaves Blaze3D arrays restricted.
 - **Tests:** actual layered terrain depth/readback in PR 5 (PR 1 only tested clears);
-  world terrain draw counters and lifecycle pass; world shadow sampling remains pending
+  world terrain draw counters and lifecycle pass; world resolve reconstruction and
+  visibility debug-view GPU fixtures. PR 5b sun-lighting world tests remain.
 - **Description:** Lift `MetalGpuDevice.createTexture` array reject **only** for this module's MetalDevice allocations, or keep using `MetalDevice` directly. No local cubes.
 
 ### PR 6 — Executor, world composition, then separate effect PRs

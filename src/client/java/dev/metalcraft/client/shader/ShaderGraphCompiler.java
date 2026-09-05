@@ -25,6 +25,8 @@ public final class ShaderGraphCompiler {
 	 * that it writes the world into Minecraft's attachment alongside its own G-buffer channels.
 	 */
 	public static final Set<String> RESERVED_TARGETS = Set.of("scene", "depth", "drawable");
+	public static final Set<String> EXTERNAL_TEXTURES = ShaderPack.EXTERNAL_TEXTURES;
+	public static final Set<String> EXTERNAL_BUFFERS = ShaderPack.EXTERNAL_BUFFERS;
 
 	public enum LoadAction {
 		LOAD,
@@ -181,6 +183,9 @@ public final class ShaderGraphCompiler {
 				addDependency(dependencies, edgeLabels, pass.mergeWith(), pass.id(), "merge_with");
 			}
 			for (String target : pass.reads()) {
+				if (EXTERNAL_TEXTURES.contains(target)) {
+					continue;
+				}
 				usages.get(target).sampled.add(pass.id());
 				validateSampledRead(manifest, pass, target, producers, roots, order);
 				addProducerDependency(dependencies, edgeLabels, producers, target, pass.id(), order);
@@ -307,18 +312,25 @@ public final class ShaderGraphCompiler {
 				throw new CompileException("Compute pass '" + pass.id() + "' cannot tile-read or merge");
 			}
 			for (String target : pass.reads()) {
-				validateReference(manifest, pass.id(), target, "read");
-				if (target.equals("drawable")) {
-					throw new CompileException("Pass '" + pass.id() + "' cannot sample reserved target 'drawable'");
-				}
+				validateRead(manifest, pass.id(), target);
 			}
 			for (String target : pass.tileReads()) {
 				validateReference(manifest, pass.id(), target, "tile-read");
 				if (target.equals("drawable")) {
 					throw new CompileException("Pass '" + pass.id() + "' cannot tile-read reserved target 'drawable'");
 				}
+				if (EXTERNAL_TEXTURES.contains(target) || EXTERNAL_BUFFERS.contains(target)) {
+					throw new CompileException(
+						"Pass '" + pass.id() + "' cannot tile-read external resource '" + target + "'"
+					);
+				}
 			}
 			for (String target : pass.writes()) {
+				if (EXTERNAL_TEXTURES.contains(target) || EXTERNAL_BUFFERS.contains(target)) {
+					throw new CompileException(
+						"Pass '" + pass.id() + "' cannot write external resource '" + target + "'"
+					);
+				}
 				validateReference(manifest, pass.id(), target, "write");
 				ShaderPack.Target declaration = manifest.targets().get(target);
 				if (pass.kind() == ShaderPack.PassKind.COMPUTE
@@ -326,8 +338,34 @@ public final class ShaderGraphCompiler {
 					throw new CompileException("Compute pass '" + pass.id() + "' cannot write attachment target '" + target + "'");
 				}
 			}
+			for (String buffer : pass.buffers()) {
+				if (!EXTERNAL_BUFFERS.contains(buffer)) {
+					throw new CompileException(
+						"Pass '" + pass.id() + "' declares unknown buffer '" + buffer + "'"
+					);
+				}
+			}
 			validateAttachmentCount(manifest, List.of(pass));
 		}
+	}
+
+	private static void validateRead(
+		final ShaderPack.Manifest manifest,
+		final String passId,
+		final String target
+	) {
+		if (EXTERNAL_BUFFERS.contains(target)) {
+			throw new CompileException(
+				"Pass '" + passId + "' declares external buffer '" + target + "' as a read; use buffers"
+			);
+		}
+		if (target.equals("drawable")) {
+			throw new CompileException("Pass '" + passId + "' cannot sample reserved target 'drawable'");
+		}
+		if (EXTERNAL_TEXTURES.contains(target)) {
+			return;
+		}
+		validateReference(manifest, passId, target, "read");
 	}
 
 	private static void validateReference(
@@ -336,6 +374,11 @@ public final class ShaderGraphCompiler {
 		final String target,
 		final String operation
 	) {
+		if (EXTERNAL_TEXTURES.contains(target) || EXTERNAL_BUFFERS.contains(target)) {
+			throw new CompileException(
+				"Pass '" + passId + "' declares a " + operation + " of external resource '" + target + "'"
+			);
+		}
 		if (!RESERVED_TARGETS.contains(target) && !manifest.targets().containsKey(target)) {
 			throw new CompileException("Pass '" + passId + "' declares a " + operation + " of unknown target '" + target + "'");
 		}

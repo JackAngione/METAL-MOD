@@ -97,6 +97,23 @@ public final class WorldShadowModule implements AutoCloseable {
 		return new Frame(buffer, cascades);
 	}
 
+	/**
+	 * A defined unoccluded frame: cascade count is zero, so sampling returns 1 without reading
+	 * yesterday's depth. Bind this when there is no sun, no world, or no current caster list.
+	 */
+	public Frame prepareUnoccludedFrame() {
+		this.requireOpen();
+		MetalBuffer buffer = this.depth.device().createBuffer(FRAME_BYTES, MetalBuffer.StorageMode.SHARED);
+		try (MetalBuffer.Mapping mapping = buffer.map()) {
+			ByteBuffer bytes = mapping.bytes();
+			for (int i = 0; i < FRAME_BYTES; i++) bytes.put(i, (byte)0);
+		} catch (RuntimeException error) {
+			buffer.close();
+			throw error;
+		}
+		return new Frame(buffer, List.of());
+	}
+
 	/** Borrowed bindings, valid while this module and frame are open. Slots come from the caller's layout. */
 	public final class Frame implements AutoCloseable {
 		private final MetalBuffer uniforms;

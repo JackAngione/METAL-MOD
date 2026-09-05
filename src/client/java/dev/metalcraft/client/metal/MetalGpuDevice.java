@@ -134,6 +134,16 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		this.commandEncoder.setDeferredResolve(hook);
 	}
 
+	private @Nullable WorldUniformCapture worldUniformCapture;
+
+	public void setWorldUniformCapture(final @Nullable WorldUniformCapture capture) {
+		this.worldUniformCapture = capture;
+	}
+
+	@Nullable WorldUniformCapture worldUniformCapture() {
+		return this.worldUniformCapture;
+	}
+
 	/**
 	 * Declares that a Blaze3D pipeline's programs are pack MSL rather than Minecraft's GLSL.
 	 */

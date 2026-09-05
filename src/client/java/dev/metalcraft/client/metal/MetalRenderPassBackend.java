@@ -187,8 +187,12 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void setUniform(final String name, final GpuBufferSlice value) {
-		if (!(value.buffer() instanceof MetalGpuBuffer)) throw new IllegalArgumentException("Uniform buffer does not belong to Metal");
+		if (!(value.buffer() instanceof MetalGpuBuffer metal)) throw new IllegalArgumentException("Uniform buffer does not belong to Metal");
 		this.uniforms.put(name, value);
+		WorldUniformCapture capture = this.device.worldUniformCapture();
+		if (capture != null) {
+			capture.capture(name, metal.metal(), value.offset(), value.length());
+		}
 	}
 
 	@Override

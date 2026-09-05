@@ -27,6 +27,12 @@ final class ShaderPassCompiler {
 		for (String read : pass.reads()) {
 			preamble.append("#define MC_TEX_").append(symbol(read)).append(' ').append(textureSlot++).append('\n');
 		}
+		// Buffer 0 is pack options. Declared host buffers follow, then the resolve camera.
+		int bufferSlot = 1;
+		for (String buffer : pass.buffers()) {
+			preamble.append("#define MC_BUFFER_").append(symbol(buffer)).append(' ').append(bufferSlot++).append('\n');
+		}
+		preamble.append("#define MC_BUFFER_RESOLVE_CAMERA ").append(bufferSlot).append('\n');
 		int colorIndex = 0;
 		for (String write : pass.writes()) {
 			preamble.append("#define MC_TARGET_").append(symbol(write)).append(' ').append(colorIndex++).append('\n');

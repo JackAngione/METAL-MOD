@@ -1,7 +1,7 @@
 {
   "format": 2,
   "name": "MetalCraft Standard",
-  "includes": ["shared/options.metal"],
+  "includes": ["shared/options.metal", "shared/shadows.metal"],
   "targets": {
     "gbuffer_albedo": {
       "format": "rgba8_unorm",
@@ -38,6 +38,8 @@
       "source": "resolve.metal",
       "merge_with": "gbuffer",
       "tile_reads": ["scene", "gbuffer_albedo", "gbuffer_normal", "gbuffer_light"],
+      "reads": ["shadow_map"],
+      "buffers": ["shadow_frame"],
       "writes": ["scene"]
     },
     {
@@ -71,7 +73,7 @@
       "id": "debug_view",
       "category": "debug",
       "type": "enum",
-      "values": ["off", "scene", "albedo", "normal", "light"],
+      "values": ["off", "scene", "albedo", "normal", "light", "receiver", "cascade", "visibility"],
       "default": "off",
       "apply": "uniform"
     },

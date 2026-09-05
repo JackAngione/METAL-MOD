@@ -23,10 +23,10 @@ final class ShaderManifestParser {
 		"format", "name", "targets", "passes", "options", "includes", "presets"
 	);
 	private static final Set<String> PASS_FIELDS_V1 = Set.of(
-		"id", "kind", "geometry", "reads", "writes", "tile_reads", "merge_with", "enabled_by"
+		"id", "kind", "geometry", "reads", "writes", "tile_reads", "merge_with", "enabled_by", "buffers"
 	);
 	private static final Set<String> PASS_FIELDS_V2 = Set.of(
-		"id", "kind", "source", "geometry", "reads", "writes", "tile_reads", "merge_with", "enabled_by"
+		"id", "kind", "source", "geometry", "reads", "writes", "tile_reads", "merge_with", "enabled_by", "buffers"
 	);
 
 	private ShaderManifestParser() {
@@ -118,6 +118,7 @@ final class ShaderManifestParser {
 				: List.of();
 			String mergeWith = pass.has("merge_with") ? string(pass.get("merge_with"), path + ".merge_with") : null;
 			String enabledBy = pass.has("enabled_by") ? string(pass.get("enabled_by"), path + ".enabled_by") : null;
+			List<String> buffers = pass.has("buffers") ? stringArray(pass.get("buffers"), path + ".buffers") : List.of();
 			if (writes.isEmpty()) {
 				throw new IllegalArgumentException("Pass '" + id + "' must write at least one target");
 			}
@@ -127,7 +128,7 @@ final class ShaderManifestParser {
 			if (kind == ShaderPack.PassKind.COMPUTE && (!tileReads.isEmpty() || mergeWith != null)) {
 				throw new IllegalArgumentException("Compute pass '" + id + "' cannot tile-read or merge");
 			}
-			passes.add(new ShaderPack.Pass(id, kind, source, geometry, reads, writes, tileReads, mergeWith, enabledBy));
+			passes.add(new ShaderPack.Pass(id, kind, source, geometry, reads, writes, tileReads, mergeWith, enabledBy, buffers));
 		}
 		return passes;
 	}
