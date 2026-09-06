@@ -1,5 +1,7 @@
 # Metal-Native Shader Engine for MetalCraft
 
+Water visual effects have a separate [implementation plan and agent progress tracker](WATER_EFFECTS_PLAN.md).
+
 | Field | Value |
 | --- | --- |
 | **Title** | Metal-Native Shader Engine |
