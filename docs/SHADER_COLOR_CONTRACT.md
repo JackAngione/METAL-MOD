@@ -101,3 +101,34 @@ programs, fading/cutouts and metadata. Build and GPU smoke pass; logs and detail
 scope are in `WATER_EFFECTS_PLAN.md`. Other forward producers and all coordinated
 world/Fabulous/sky/clear activation remain open, as does display validation. The live
 renderer is still legacy and the PR 7b / W2 acceptance gate remains unchecked.
+
+
+W2f producer extension (2026-09-06): opt-in, source-verified
+variants now cover sky, stars, position/color/texture, world border, glint and lightning.
+Compatibility RGB seeds are decoded before fog/attenuation; alpha and original discard
+ordering remain unchanged. Glint and lightning keep their distinct native blend policies.
+This does not activate live HDR. Remaining producers, world/Fabulous target routing and
+display validation still gate PR 7b / W2. See `WATER_EFFECTS_PLAN.md` for final evidence.
+GPU checks pass: 51 vanilla pipeline combinations compile in both modes; 216 new
+actual fragment draws validate independent numeric references, including special
+glint/lightning/overlay blend states. Build passed (`/tmp/water-w2f-build.log`);
+GPU log: `/tmp/water-w2f-forward-smoke.log`. These are offscreen checks.
+Standard-world water/HUD regression also passed in 40 seconds, with refreshed identity
+and half-exposure/HUD screenshots visually inspected; `/tmp/water-w2f-client.log`.
+Live rendering remains legacy; the HDR acceptance gate stays unchecked.
+
+
+W2h producer extension (2026-09-06): verified beam/crumbling/entity-shadow/lines/
+leash/portal/item/text/text-background and debug-point variants bring actual vanilla
+compilation coverage to 75 pipeline combinations in both modes. Added 264 fragment
+GPU draws validate crumbling multiplicative overlap, flat leash input, completed portal
+seed/fog, and text define/discard semantics. Prior forward checks remain. Smoke and
+build pass (`/tmp/water-w2h-forward-smoke.log`, `/tmp/water-w2h-build.log`).
+
+Live activation still requires explicit native G-buffer/resolve linear selection,
+world and cached-sky routing, linear clears, Fabulous intermediates/composition, and
+encoded outline-to-linear-world composition. Depth-only WATER_MASK needs verified
+handling; GUI, atlas maintenance and artistic lightmap paths retain their contracts.
+The live HDR / W2 gate remains unchecked; see `WATER_EFFECTS_PLAN.md`.
+Standard-world water/HUD regression passed in 40 seconds, with refreshed identity and
+half-exposure/HUD captures visually inspected; `/tmp/water-w2h-client.log`.

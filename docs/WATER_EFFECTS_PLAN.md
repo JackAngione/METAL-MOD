@@ -42,7 +42,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
-| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-05: live world-only grading and stored world depth implemented; exposure/HUD test passed. Explicit sRGB presentation tagging and corrected standard-world fixture pass; linear HDR targets/forward math and physical display validation remain open. |
+| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-06: world grade seam, stored HDR target APIs, opaque variants and expanded forward GPU coverage implemented. Standard-world regression passes. Coordinated live HDR routing and physical display validation remain open. |
 | [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
@@ -651,3 +651,108 @@ Final W2d/W2e regression (2026-09-06):
   visually inspected; the world darkens and HUD remains white. This is a legacy-route
   regression check, not live HDR validation.
 - `git diff --check` passed.
+
+
+### W2 remaining forward producers — claimed 2026-09-06 by `/root`
+
+- [x] W2f: extend verified forward variants to sky, stars, position/color/texture,
+  world border, glint and lightning producers,
+  preserving attenuation/fog ordering and testing actual GLSL on GPU. Owner `/root`;
+  `/root/forward_checks` owns the smoke fixture.
+- [x] W2g: audit remaining forward producers, sky routing and blend prerequisites.
+  Owner `/root/route_audit`; coordinator owns all tracker edits.
+
+W2 remains in progress. Live activation stays gated on complete producer coverage.
+
+W2g evidence (2026-09-06, `/root/route_audit`): audited actual 26.2 GLSL and mapped
+RenderPipelines/SkyRenderer bytecode (`/tmp/w2g-pipelines.txt`, `/tmp/w2g-sky.txt`).
+Sky uses sky, position_tex_color (End), position_color (sunrise/sunset), stars, and
+position_tex (celestial) programs; its cached RenderTarget still needs explicit routing.
+Glint uses SRC_COLOR/ONE RGB and ZERO/ONE alpha; lightning uses SRC_ALPHA/ONE,
+including alpha. Stars/celestial/world border use SRC_ALPHA/ONE RGB and ONE/ZERO alpha.
+These blend policies must survive conversion. Remaining unsupported producers after
+W2f include beacon beam, crumbling, entity shadow, lines, leash, End portal, text and
+text background, plus debug_point vertex support. Crumbling requires its own
+DST_COLOR/SRC_COLOR overlap check. This read-only audit completes W2g only; it does
+not validate live sky/Fabulous routing or complete W2.
+
+W2f implementation and GPU evidence (2026-09-06, `/root`, `/root/forward_checks`):
+`LinearWorldShaders` adds fingerprint-verified variants for nine program families,
+decoding completed compatibility RGB before fog/attenuation and preserving alpha and
+discard order. Nonfog programs do not require a fog helper. The live route remains
+legacy; arbitrary replacement sources still fail closed.
+
+`LinearWorldShadersSmoke` compiles 51 actual vanilla pipeline combinations in both
+modes and adds 216 actual fragment draws with independent CPU references in stored
+RGBA16_FLOAT targets. Checks include HDR RGB, transfer knees, zero/partial/full fog,
+four alpha values, sky's FogSkyEnd behavior, glint RGB fade with SRC_COLOR/ONE overlap
+and preserved destination alpha, lightning RGBA fade with additive SRC_ALPHA/ONE,
+and stars/world-border overlay blending. These controlled-varying fragment fixtures
+do not claim full-scene rendering or physical display validation.
+
+- [x] `./gradlew shaderTranslationSmoke` passed; `/tmp/water-w2f-forward-smoke.log`.
+- [x] `./gradlew build` passed; `/tmp/water-w2f-build.log`.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`
+  passed in 40 seconds with explicit NORMAL world generation and numeric exposure/HUD
+  assertions; `/tmp/water-w2f-client.log`. Visually inspected refreshed water identity
+  and half-exposure/HUD captures at the W1/W2 screenshot paths: water-only magenta
+  coverage remains correct, and the darkened world retains a white HUD. This is a
+  legacy-route regression check, not live HDR validation.
+- [x] `git diff --check` passed.
+
+Next: remaining beam/crumbling/shadow/line/leash/portal/text producers, then coordinated
+world/sky/clear/Fabulous routing and live HDR readback. W2 remains unchecked.
+
+
+### W2 additional forward producers — claimed 2026-09-06 by `/root`
+
+- [x] W2h: add verified beam, crumbling, entity shadow, lines, leash, portal, item and text
+  variants, plus debug_point vertex support. Owner `/root`; `/root/forward_checks`
+  owns smoke coverage and `/root/route_audit` audits the remaining routing boundary.
+  Coordinator serializes tracker edits. W2 remains in progress; activation is gated.
+
+W2h routing audit (2026-09-06, `/root/route_audit`): item shaders are actual world
+producers (`ItemFeatureRenderer` selects material item RenderTypes; item translucent
+uses ITEM_ENTITY_TARGET), so item coverage is included in W2h. WATER_MASK writes no
+color and needs verified depth-only handling. Outline generation stays encoded, but
+ENTITY_OUTLINE_BLIT needs an explicit encoded-to-linear composition boundary; its
+blit_screen shader is also used by TRACY_BLIT, so shader ID alone cannot determine
+its encoding. GUI, panorama, lightmap and atlas maintenance retain their contracts.
+
+The native G-buffer stand-ins and deferred resolve still lack live linear selection.
+`precompileLinearWorldPipeline` intentionally rejects native replacements; activation
+must supply an explicit linear native contract, not bypass this guard. Next coordinated
+steps are native G-buffer/resolve selection, full world plus cached sky target routing,
+linear clear color, Fabulous layers/composition/copies, outline composition, preflight
+before frame writes, and one grade handoff before hand/HUD. Source evidence:
+`/tmp/w2h-types.txt`, `/tmp/w2h-item.txt`, `/tmp/w2g-pipelines.txt`, `/tmp/w2g-sky.txt`.
+
+W2h implementation and GPU evidence (2026-09-06, `/root`, `/root/forward_checks`):
+`LinearWorldShaders` verifies and adapts beam, crumbling, entity shadow, lines, leash,
+portal, item, text and text-background programs, plus the debug_point vertex shader.
+Completed artistic portal layers and item overlay/lightmap seeds decode before fog.
+Text converts each output branch while retaining its distinct discard/modulator order.
+These source-verified variants remain opt-in; encoded auxiliary targets and live
+world routing are not changed by this increment.
+
+`LinearWorldShadersSmoke` now compiles 75 actual vanilla pipeline combinations in
+both modes. Another 264 fragment draws check crumbling DST_COLOR/SRC_COLOR RGB
+overlap with ONE/ZERO alpha; flat leash input; a completed two-layer portal seed
+and fog; six text define combinations (default/GUI/see-through, normal/grayscale);
+and two text-background variants. Low modulator alpha distinguishes discard before
+versus after modulation. Prior 216 simple-effect draws and particle checks remain.
+Beam, entity-shadow, lines and item receive compilation coverage here, not additional
+full-mesh numeric fixtures. This closes the bounded producer increment only.
+
+- [x] `./gradlew shaderTranslationSmoke` passed; `/tmp/water-w2h-forward-smoke.log`.
+- [x] `./gradlew build` passed; `/tmp/water-w2h-build.log`.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`
+  passed in 40 seconds using explicit NORMAL world generation and numeric exposure/HUD
+  assertions; `/tmp/water-w2h-client.log`. Visually inspected refreshed water identity
+  and half-exposure/HUD screenshots at the existing W1/W2 artifact paths. Water-only
+  coverage and the white HUD over a darkened world remain correct. This is a legacy
+  route regression, not live HDR acceptance.
+- [x] `git diff --check` passed.
+
+W2 remains unchecked. Next implementation boundary is the native linear G-buffer/resolve
+selection and coordinated target/encoding route recorded in the audit above.
