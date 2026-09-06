@@ -1723,3 +1723,13 @@ coverage. Cached color attachment PSO variants retain blend/depth/MRT state. Bui
 smoke and the standard-world water fixture pass. These APIs remain outside the live
 world route until opaque/forward/Fabulous color conversion is complete; PR 7b stays
 open. Full evidence and next action are in `WATER_EFFECTS_PLAN.md`.
+
+
+W2c opaque color preparation (2026-09-05): Standard now has opt-in linear seed,
+chunk-fade, fog and deferred fog-reconstruction semantics under `MC_SCENE_LINEAR_HDR`.
+The completed unfogged vanilla seed is decoded as the documented lightmap/brightness
+compatibility policy; alpha and metadata are unchanged. Production shared functions
+pass independent GPU references in both legacy and linear variants, including values
+above 1. Build and the standard-world water/exposure/HUD fixture pass; evidence is in
+`WATER_EFFECTS_PLAN.md`. Live activation, full linear geometry/forward/Fabulous coverage
+and actual display validation remain open; the HDR gate is still unchecked.

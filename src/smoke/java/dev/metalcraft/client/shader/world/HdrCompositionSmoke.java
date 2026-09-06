@@ -17,6 +17,8 @@ final class HdrCompositionSmoke {
 	private HdrCompositionSmoke() { }
 
 	static void run(final MetalDevice device) {
+		verifyOpaqueColor(device, false);
+		verifyOpaqueColor(device, true);
 		String color = resource("shared/color.metal");
 		String source = "#include <metal_stdlib>\nusing namespace metal;\n" + color + """
 			vertex float4 vs(uint id [[vertex_id]]) {
@@ -112,6 +114,66 @@ final class HdrCompositionSmoke {
 			}
 		}
 		System.out.println("HDR composition: stored HDR, linear fog, two forward overlaps, coverage alpha and Standard output transfer passed");
+	}
+
+	private static void verifyOpaqueColor(final MetalDevice device, final boolean linear) {
+		String source = "#include <metal_stdlib>\nusing namespace metal;\n"
+			+ (linear ? "#define MC_SCENE_LINEAR_HDR 1\n" : "")
+			+ resource("shared/shadows.metal")
+			+ resource("shared/lighting.metal").replace("#include \"shared/color.metal\"", resource("shared/color.metal"))
+			+ """
+			constant McFog fixtureFog = {float4(0.5, 0.25, 0.75, 0.6), 0, 10, 0, 10, 10, 10};
+			vertex float4 seedVertex(uint id [[vertex_id]]) {
+			    return float4(id == 1 ? 3.0 : -1.0, id == 2 ? 3.0 : -1.0, 0, 1);
+			}
+			fragment float4 seedFragment(float4 p [[position]]) {
+			    uint test = uint(p.x);
+			    float4 seed = mc_scene_seed(float4(2, 0.5, 0.02, 0.4));
+			    if (test == 0) return seed;
+			    if (test == 1) return mc_chunk_fade(seed, 0.25, fixtureFog);
+			    float4 fogged = mc_apply_fog(seed, 5, 5, fixtureFog);
+			    if (test == 2) return fogged;
+			    if (test == 3) return float4(mc_unfog(fogged.rgb, fixtureFog, 0.3), fogged.a);
+			    return float4(mc_unfog(fogged.rgb, fixtureFog, 1.0), fogged.a);
+			}
+			""";
+		try (var queue = device.createCommandQueue();
+			 var target = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA16_FLOAT, 5, 1, 1));
+			 var program = pipeline(device, source, "seedVertex", "seedFragment",
+				MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA16_FLOAT))) {
+			try (var commands = queue.createCommandBuffer()) {
+				try (var pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+					MetalRenderPass.ColorAttachment.clear(target, 0, 0, 0, 0)))) {
+					pass.setPipeline(program);
+					pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3);
+				}
+				commands.commitAndWait();
+			}
+			ByteBuffer pixels = target.readback(queue, 0).order(ByteOrder.nativeOrder());
+			double[] seed = {2, 0.5, 0.02}, fog = {0.5, 0.25, 0.75};
+			for (int x = 0; x < 5; x++) {
+				for (int c = 0; c < 4; c++) {
+					double expected;
+					if (c == 3) expected = x == 1 ? 0.4 * (0.6 * 0.75 + 0.25) : 0.4;
+					else {
+						double a = linear ? decode(seed[c]) : seed[c];
+						double b = linear ? decode(fog[c]) : fog[c];
+						expected = switch (x) {
+							case 1 -> a * 0.25 + b * 0.75;
+							case 2 -> a * 0.7 + b * 0.3;
+							case 4 -> b;
+							default -> a;
+						};
+					}
+					check("opaque color " + linear + "/" + x + "/" + c, expected,
+						Float.float16ToFloat(pixels.getShort((x * 4 + c) * 2)), 0.006);
+				}
+			}
+		}
+	}
+
+	private static double decode(final double value) {
+		return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
 	}
 
 	private static double[][] referenceComposition() {

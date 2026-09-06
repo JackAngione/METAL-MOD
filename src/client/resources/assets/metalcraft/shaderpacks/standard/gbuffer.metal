@@ -254,7 +254,7 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     // The order below is vanilla's: the visibility fade changes alpha, so the cutout test has to
     // see the faded value or a chunk fading in would cut out differently than it does today.
     float4 shaded = texel * in.tint * in.lightMapColor;
-    shaded = mix(fog.FogColor * float4(1.0, 1.0, 1.0, shaded.a), shaded, section.ChunkVisibility);
+    shaded = mc_chunk_fade(mc_scene_seed(shaded), section.ChunkVisibility, fog);
 #if MC_HAS_ALPHA_CUTOUT
     if (shaded.a < MC_ALPHA_CUTOUT) {
         discard_fragment();
@@ -325,7 +325,7 @@ fragment GBufferTargets gbuffer_block_fragment(
 #endif
 
     GBufferTargets out;
-    out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
+    out.scene = mc_apply_fog(mc_scene_seed(shaded), in.sphericalDistance, in.cylindricalDistance, fog);
     mc_write_gbuffer(
         out, (texel * in.tint * transforms.ColorModulator).rgb,
         mc_reconstruct_normal(in.worldPos), in.lightLevels, max(0.0, -in.worldPos.z)
@@ -486,7 +486,7 @@ fragment GBufferTargets gbuffer_entity_fragment(
 #endif
 
     GBufferTargets out;
-    out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
+    out.scene = mc_apply_fog(mc_scene_seed(shaded), in.sphericalDistance, in.cylindricalDistance, fog);
     float3 normal = length(in.normal) < 1e-8 ? mc_reconstruct_normal(in.worldPos) : normalize(in.normal);
     mc_write_gbuffer(out, albedo.rgb, normal, in.lightLevels, max(0.0, -in.worldPos.z));
     return out;

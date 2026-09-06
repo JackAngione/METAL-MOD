@@ -79,3 +79,13 @@ an independent UNORM output handoff are available through MetalGpuDevice; pipeli
 format variants preserve shader semantics rather than inferring color space. GPU host
 fixtures pass, but the live world graph still uses the legacy path. Forward source
 linearization and Fabulous conversion must precede activation.
+
+
+W2c opaque color preparation (2026-09-05): Standard now has opt-in linear seed,
+chunk-fade, fog and deferred fog-reconstruction semantics under `MC_SCENE_LINEAR_HDR`.
+The completed unfogged vanilla seed is decoded as the documented lightmap/brightness
+compatibility policy; alpha and metadata are unchanged. Production shared functions
+pass independent GPU references in both legacy and linear variants, including values
+above 1. Build and the standard-world water/exposure/HUD fixture pass; evidence is in
+`WATER_EFFECTS_PLAN.md`. Live activation, full linear geometry/forward/Fabulous coverage
+and actual display validation remain open; the HDR gate is still unchecked.

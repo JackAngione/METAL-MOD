@@ -542,3 +542,39 @@ and `gradeLinearWorld` are tested host APIs, not yet called by the live world gr
 Next: convert actual opaque/forward shader color/fog producers and Fabulous intermediates,
 then switch world rendering and its grade handoff together. No new water visual effect,
 live HDR acceptance or physical display measurement is claimed by these two steps.
+
+
+### W2 opaque producer increment — claimed 2026-09-05 by `/root`
+
+- [x] W2c: add an explicitly selected linear Standard opaque seed, chunk fade, fog and
+  deferred reconstruction variant, preserving legacy defaults and lightmap compatibility.
+  Validate shared production color math on GPU before handing off.
+- Live forward/Fabulous conversion and coordinated activation remain required; this
+  increment does not claim live HDR acceptance.
+
+W2c evidence (2026-09-05, `/root`): Standard `gbuffer.metal` converts the completed
+unfogged compatibility seed through `mc_scene_seed` before chunk fading/fog when
+`MC_SCENE_LINEAR_HDR` is defined. `shared/lighting.metal` uses the same decoded fog
+color for fading, fog application, unfogging and deferred recomposition. Alpha,
+cutout ordering, encoded albedo metadata and the default legacy path are preserved.
+The lightmap/cardinal/overlay seed remains Minecraft's artistic compatibility result;
+this does not claim physical illumination or independently linear overlay mixing.
+
+`HdrCompositionSmoke` now executes production shared functions in both variants and
+compares HDR readback to independent CPU references: seed RGB on both transfer branches
+and above 1, chunk visibility with non-unit fog alpha, partial fog, unfog round trip,
+and fully fogged fallback. This is shared-function GPU coverage, not a live linear
+G-buffer or forward routing test.
+
+- `./gradlew build`: passed, including new and existing GPU smoke coverage;
+  `/tmp/water-w2-opaque-build.log`.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed
+  in 40 seconds using the explicit NORMAL preset and numeric exposure/HUD assertions;
+  `/tmp/water-w2-opaque-client.log`. Refreshed
+  [half-exposure HUD capture](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png)
+  visually inspected: world darkens and HUD remains white.
+- `git diff --check`: passed.
+
+W2 remains in progress. Next: convert actual forward GLSL producers and Fabulous
+intermediates, verify the linear G-buffer variant through full geometry draws, then
+activate the world target/grade handoff coherently. Display validation remains open.
