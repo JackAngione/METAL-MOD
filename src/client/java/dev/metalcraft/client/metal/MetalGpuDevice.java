@@ -30,6 +30,7 @@ import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import java.nio.ShortBuffer;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.IdentityHashMap;
 import java.util.HashMap;
 import java.util.List;
@@ -52,6 +53,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private final DeviceInfo deviceInfo;
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> pipelineCache = new IdentityHashMap<>();
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> linearPipelineCache = new IdentityHashMap<>();
+	private final Map<RenderPipeline, Map<LinearWorldPostShaders.Semantic, MetalCompiledRenderPipeline>>
+		linearPostPipelineCache = new IdentityHashMap<>();
 	private final Map<RenderPipeline, NativeProgram> nativePipelines = new IdentityHashMap<>();
 	private final Map<ShaderKey, String> shaderSourceCache = new HashMap<>();
 	// Triangle-fan indices are a pure function of vertex count, and the pattern for a large fan
@@ -216,6 +219,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		if (legacy != null) legacy.close();
 		MetalCompiledRenderPipeline linear = this.linearPipelineCache.remove(pipeline);
 		if (linear != null) linear.close();
+		Map<LinearWorldPostShaders.Semantic, MetalCompiledRenderPipeline> post = this.linearPostPipelineCache.remove(pipeline);
+		if (post != null) post.values().forEach(MetalCompiledRenderPipeline::close);
 	}
 
 	public void resolveDeferredShaderPass() {
@@ -388,6 +393,43 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		return compiled;
 	}
 
+	/**
+	 * Prepares one explicitly declared, source-verified linear post operation. Shader identifiers
+	 * alone never select the semantic because the same source may participate in encoded post chains.
+	 */
+	public CompiledRenderPipeline precompileLinearWorldPostPipeline(final RenderPipeline pipeline,
+		final @Nullable ShaderSource shaderSource, final LinearWorldPostShaders.Semantic semantic) {
+		this.requireOpen();
+		if (pipeline == null || semantic == null) {
+			throw new NullPointerException("A linear post pipeline needs a pipeline and semantic");
+		}
+		if (this.nativePipelines.containsKey(pipeline)) {
+			throw new IllegalArgumentException("Native pipelines require a separate explicit post contract: " + pipeline.getLocation());
+		}
+		ShaderSource selected = shaderSource == null ? this.defaultShaderSource : shaderSource;
+		// Verify the current reload's sources even when this pipeline/semantic pair was compiled
+		// previously. A changed ShaderSource must never inherit an older semantic cache entry.
+		String vertex = selected.get(pipeline.getVertexShader(), ShaderType.VERTEX);
+		String fragment = selected.get(pipeline.getFragmentShader(), ShaderType.FRAGMENT);
+		if (vertex == null || fragment == null) {
+			throw new IllegalArgumentException("Missing linear world post sources for " + pipeline.getLocation());
+		}
+		vertex = LinearWorldPostShaders.vertex(semantic, pipeline.getVertexShader(), vertex);
+		fragment = LinearWorldPostShaders.fragment(semantic, pipeline.getFragmentShader(), fragment);
+		Map<LinearWorldPostShaders.Semantic, MetalCompiledRenderPipeline> variants =
+			this.linearPostPipelineCache.computeIfAbsent(pipeline,
+				ignored -> new EnumMap<>(LinearWorldPostShaders.Semantic.class));
+		MetalCompiledRenderPipeline cached = variants.get(semantic);
+		if (cached != null) return cached;
+		MetalCompiledRenderPipeline compiled = this.compilePostPipeline(pipeline, vertex, fragment);
+		if (!compiled.isValid()) {
+			compiled.close();
+			throw new IllegalArgumentException("Could not compile linear world post pipeline " + pipeline.getLocation());
+		}
+		variants.put(semantic, compiled);
+		return compiled;
+	}
+
 	@Override
 	public void clearPipelineCache() {
 		this.commandEncoder.finishPendingWork();
@@ -403,6 +445,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		this.pipelineCache.clear();
 		this.linearPipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 		this.linearPipelineCache.clear();
+		this.linearPostPipelineCache.values().forEach(cache -> cache.values().forEach(MetalCompiledRenderPipeline::close));
+		this.linearPostPipelineCache.clear();
 		if (this.shaderPackRuntime != null) {
 			this.shaderPackRuntime.reload();
 			if (this.shaderPackRuntime.frameWidth() > 0 && this.shaderPackRuntime.frameHeight() > 0) {
@@ -425,6 +469,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			this.pipelineCache.clear();
 			this.linearPipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.linearPipelineCache.clear();
+			this.linearPostPipelineCache.values().forEach(cache -> cache.values().forEach(MetalCompiledRenderPipeline::close));
+			this.linearPostPipelineCache.clear();
 			if (this.regionClear != null) {
 				this.regionClear.close();
 				this.regionClear = null;
@@ -560,6 +606,24 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		} catch (RuntimeException error) {
 			LOGGER.error("Couldn't compile shader-pack Metal pipeline {}", pipeline.getLocation(), error);
 			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
+		}
+	}
+
+	private MetalCompiledRenderPipeline compilePostPipeline(final RenderPipeline pipeline,
+		final String vertex, final String fragment) {
+		try {
+			String vertexWithBindings = Blaze3DMetalMappings.shaderWithResourceBindings(
+				GlslPreprocessor.injectDefines(vertex, pipeline.getShaderDefines()), pipeline);
+			String fragmentWithBindings = Blaze3DMetalMappings.shaderWithResourceBindings(
+				GlslPreprocessor.injectDefines(fragment, pipeline.getShaderDefines()), pipeline);
+			MetalShaderTranslator.PipelineTranslation shaders = MetalShaderTranslator.translatePipeline(
+				Blaze3DMetalMappings.vertexShaderWithLocations(vertexWithBindings, pipeline.getVertexFormatBindings()),
+				pipeline.getVertexShader().toDebugFileName(), fragmentWithBindings,
+				pipeline.getFragmentShader().toDebugFileName());
+			MetalRenderPipeline.Descriptor descriptor = Blaze3DMetalMappings.pipelineDescriptor(pipeline, shaders);
+			return MetalCompiledRenderPipeline.compile(this.metal, pipeline, descriptor, shaders);
+		} catch (RuntimeException error) {
+			throw new IllegalArgumentException("Could not compile linear world post pipeline " + pipeline.getLocation(), error);
 		}
 	}
 

@@ -16,7 +16,9 @@ import org.jspecify.annotations.Nullable;
 public final class WorldComposition {
 	/**
 	 * After the world graph (opaque exports, forward/translucent composition, Fabulous, particles,
-	 * clouds, weather, outlines) and before hand, underwater overlay, spectator chains, and HUD.
+	 * clouds, weather, outline generation/filtering) and before hand, underwater overlay,
+	 * final outline composition, spectator chains, and HUD. The final outline blit remains
+	 * an encoded overlay after grading; its intermediate is not a linear world producer.
 	 */
 	public static final Stage PACK_POST = Stage.WORLD_GRADE_AA;
 
@@ -33,7 +35,7 @@ public final class WorldComposition {
 		"LevelRenderer.addCloudsPass",
 		"LevelRenderer.addWeatherPass",
 		"LevelRenderer.addAlwaysOnTopPass",
-		"LevelRenderer.doEntityOutline / ENTITY_OUTLINE_POST_CHAIN_ID"
+		"LevelRenderer.render / ENTITY_OUTLINE_POST_CHAIN_ID (outline generation/filtering only)"
 	);
 
 	/**
@@ -43,6 +45,7 @@ public final class WorldComposition {
 	public static final List<String> AFTER_WORLD_SITES = List.of(
 		"GameRenderer.renderItemInHand",
 		"ScreenEffectRenderer.submitWater / submitFire (underwater and fire overlays)",
+		"GameRenderer.render → LevelRenderer.doEntityOutline (encoded final outline blit)",
 		"GameRenderer.checkEntityPostEffect / postEffectId (spectator)",
 		"GuiRenderer (HUD / 2D GUI)"
 	);

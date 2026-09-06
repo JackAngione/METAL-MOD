@@ -145,3 +145,28 @@ standard-world water/exposure/HUD regression passed in 40 seconds with inspected
 (`/tmp/water-w2i-client.log`). See WATER_EFFECTS_PLAN.md for task evidence and exact routing
 audit. Live world/sky/Fabulous/outline routing and physical display checks remain open;
 PR 7b / W2 remains unchecked. The live no-argument frame entry retains legacy semantics.
+
+
+W2 outline policy clarification (2026-09-06): retain Minecraft's final entity-outline
+blit as an encoded overlay after world grading, alongside the existing later screen
+composition. Mapped `GameRenderer.render:425` calls `doEntityOutline` after
+`renderLevel` returns; the world grade precedes its hand-depth clear at line 568.
+Outline generation/filtering occurs inside the world graph but keeps encoded auxiliary
+targets and legacy shaders. Do not promote those intermediates merely because their
+passes execute inside a future HDR scope. `WorldComposition` now records this distinction.
+Fabulous scene layers and its final copy still require an explicit linear contract.
+This policy preserves the current outline order; live HDR and display validation remain open.
+
+
+W2m/W2n/W2p post preparation (2026-09-06): explicit source-verified Fabulous composition
+and linear copy APIs now preserve stored HDR without extra decoding. A separate vanilla
+post-chain config validator rejects changed scene/depth inputs, targets and copy modulation.
+Actual post shaders pass GPU composition/copy, alpha/depth ordering and cache/source checks;
+eight graph mutations are rejected. `./gradlew build` passed (`/tmp/water-w2m-build.log`).
+These APIs are opt-in; no live HDR activation is claimed. W2 / PR 7b remains open for
+scoped routing, complete preflight/recovery, target promotion and physical display checks.
+Final outlines remain encoded overlays at their original post-grade position. See
+WATER_EFFECTS_PLAN.md for task evidence and the unresolved unseen-pipeline recovery policy.
+Standard-world lifecycle/water identity regression passed in 40 seconds with numeric
+exposure/HUD assertions and visually inspected refreshed captures (`/tmp/water-w2m-client.log`).
+This remains legacy-route evidence; the live HDR gate is unchecked.

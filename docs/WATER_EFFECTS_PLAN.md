@@ -42,7 +42,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
-| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-06: world grade seam, stored HDR target APIs, opaque variants and expanded forward GPU coverage implemented. Standard-world regression passes; explicit native G-buffer/resolve encoding selection now passes GPU checks. Coordinated live HDR routing and physical display validation remain open. |
+| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-06: world grade seam, stored HDR target APIs, opaque variants and expanded forward GPU coverage implemented. Standard-world regression passes; explicit native G-buffer/resolve encoding selection and verified Fabulous post contracts now pass GPU checks. Coordinated live HDR routing and physical display validation remain open. |
 | [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
@@ -827,3 +827,71 @@ complete fail-closed preflight for unseen dynamic pipelines; atomic activation r
 an unresolved requirement. No activation code or physical display acceptance is claimed.
 W2 stays unchecked; W3 remains gated on W2. Sol agents hit their usage limit after saving
 work; coordinator corrected the fixture, completed validation, and serialized this tracker.
+
+
+### W2 verified post composition — claimed 2026-09-06 by `/root`
+
+- [x] W2m: implement explicit source-verified linear-preserving Fabulous transparency
+  and copy pipeline contracts. Owner `/root/post_contract`; status done (evidence below).
+- [x] W2n: add actual post shader GPU fixtures for HDR preservation and layer ordering.
+  Owner `/root/post_checks`; status done (evidence below).
+- [ ] W2o: resolve atomic activation/preflight design against current frame execution.
+  Owner `/root`; status in progress; `/root/activation_audit` supplies a bounded audit.
+
+Coordinator serializes this tracker. W2 remains open and W3 gated; these preparation
+steps do not claim live activation or physical display validation.
+
+- [x] W2p: validate the actual Fabulous post-chain configuration before future
+  activation, rejecting changed inputs, targets and copy modulation. Owner `/root`;
+  status done (evidence below). Source verification alone does not establish texture semantics.
+
+
+W2m/W2n/W2p evidence (2026-09-06, `/root`, `/root/post_contract`, `/root/post_checks`):
+`LinearWorldPostShaders` and `MetalGpuDevice.precompileLinearWorldPostPipeline` add
+explicit Fabulous composition and linear copy semantics, fingerprinting the actual vanilla
+sources without inserting a second RGB decoder. The separate cache verifies current
+sources even on cache hits, rejects missing/replaced/mismatched/native programs, and
+retires alongside the existing caches. This API remains opt-in.
+
+`LinearWorldTransparencyConfig` separately validates the loaded vanilla two-pass graph: scene
+and depth input identities, nonpersistent full-size final target, pass order/output and
+identity copy modulation. It deliberately rejects unsupported resource replacements;
+shader approval alone cannot establish that a sampled texture contains linear scene color.
+The checker does not itself activate or promote any targets.
+
+GPU evidence: actual packaged screenquad/transparency/blit run against stored RGBA16_FLOAT
+textures. Independent CPU references check unsorted depth layers, premultiplied blending,
+alpha-zero exclusion with nonzero RGB, HDR red 1.75 surviving composition, and modulated
+copy RGB/alpha without another transfer. Sources changed on an existing cache identity
+and missing sources after legacy compilation are rejected; reload closes compiled variants.
+Eight mutations of the actual vanilla JSON graph are rejected. Integration fixed fixture
+API/uniform-name errors and its native sampler offset: inherited Globals uniforms occupy
+binding slots, so the fixture now derives offsets from the compiled layout.
+
+- [x] `./gradlew build`: passed including all Metal GPU smoke; `/tmp/water-w2m-build.log`.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`:
+  passed in 40 seconds using the explicit NORMAL preset; `/tmp/water-w2m-client.log`.
+  Numeric exposure/HUD assertions passed. Visually inspected refreshed
+  [water identity](../run/screenshots/0001_metalcraft-water-identity-water.png) and
+  [half-exposure/HUD](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png)
+  captures: magenta water coverage excludes glass/ice/slime/lava; darkened world retains
+  white HUD. This is a legacy-route regression, not live HDR acceptance.
+- [x] Final `git diff --check`: passed.
+
+W2o partial progress (2026-09-06): audit saved at `/tmp/water-w2o-activation.md`.
+Confirmed that an unseen pipeline can arrive after earlier HDR draws have been encoded;
+a prior-frame census cannot prove atomic readiness, and replaying LevelRenderer is unsafe.
+The audit proposes suppressing unsupported draws for one frame and forcing next-frame
+legacy. This is a possible degraded policy, **not** proof of the existing whole-frame
+fallback acceptance criterion; no such suppression or activation is implemented here.
+Next: establish a complete eligibility boundary or explicitly revise and validate the
+recovery policy before enabling scoped attachment routing. Reload-correct ShaderSource
+selection, actual dynamic PostChain pipeline identities, target promotion and session
+cleanup remain required. W2o stays unchecked.
+
+Outline policy is now explicit in `WorldComposition` and `SHADER_COLOR_CONTRACT.md`:
+keep generation/filtering encoded, and preserve the final outline overlay at mapped
+GameRenderer.render:425 after grade/hand/screen effects. Do not promote outline
+intermediates merely because generation runs inside the world graph. This resolves the
+outline scope choice without claiming any new live rendering. W2 remains unchecked;
+W3 stays gated pending coordinated HDR routing and live/display acceptance.
