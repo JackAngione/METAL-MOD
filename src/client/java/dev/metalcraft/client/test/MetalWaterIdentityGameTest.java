@@ -19,6 +19,11 @@ final class MetalWaterIdentityGameTest {
 
 	void run() {
 		var builder = this.context.worldBuilder().adjustSettings(settings -> {
+			// Fabric's consistent settings select FLAT before this callback.
+			var normal = settings.getSettings().worldgenLoadContext()
+				.lookupOrThrow(net.minecraft.core.registries.Registries.WORLD_PRESET)
+				.getOrThrow(net.minecraft.world.level.levelgen.presets.WorldPresets.NORMAL);
+			settings.setWorldType(new WorldCreationUiState.WorldTypeEntry(normal));
 			settings.setSeed("12345");
 			settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
 			settings.setAllowCommands(true);

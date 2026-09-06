@@ -42,7 +42,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
-| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-05: live world-only grading and stored world depth implemented; exposure/HUD test passed. Linear HDR targets/forward math and display contract remain open. |
+| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-05: live world-only grading and stored world depth implemented; exposure/HUD test passed. Explicit sRGB presentation tagging and corrected standard-world fixture pass; linear HDR targets/forward math and physical display validation remain open. |
 | [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
@@ -388,6 +388,10 @@ production shading from the legacy 8-bit path. No water performance budget is du
 
 ### W2 progress — live world grading seam (2026-09-05, `/root`)
 
+Continuation claimed by `/root` on 2026-09-05: establish explicit sRGB layer
+interpretation and rerun the standard-world water fixture. This is a display contract
+prerequisite; linear HDR composition and physical display verification remain open.
+
 - [x] Move pack execution to the end of the world graph, before hand-depth clear.
 - [x] Store world depth separately before later hand/HUD writes.
 - [x] Remove present-time pack execution, leaving one world grade and a presentation copy.
@@ -427,3 +431,31 @@ pipeline-cache reset fixed it, and the complete lifecycle run then passed. Logs 
 `/tmp/water-w2-build.log`, `/tmp/water-w2-client.log`, and `/tmp/water-w2-lifecycle.log`.
 Visually inspected the half-exposure scene with white HUD. W2 remains unchecked; next is
 coordinated linear world/forward target and shader conversion, not a post-only decoder.
+
+
+### W2 continuation — explicit presentation contract and standard-world correction
+
+2026-09-05, owner `/root`:
+
+- [x] Set `MCMetalSurface`'s `CAMetalLayer.colorspace` to `kCGColorSpaceSRGB`.
+  Keep BGRA8Unorm and the presentation copy unchanged: these bytes already contain
+  encoded world/hand/HUD color. The future HDR grade must encode once before this seam.
+- [x] Correct `MetalWaterIdentityGameTest` to explicitly select `WorldPresets.NORMAL`.
+  Bytecode audit found Fabric's default consistent settings select FLAT. Earlier W1/W2
+  runs therefore did not satisfy the standard-world requirement. The new standard-world
+  run supersedes those visual checks; W1 identity/design acceptance still passes.
+- [x] `./gradlew build` passed after both changes (including shader GPU smoke).
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true` passed
+  in 42 seconds with the explicit NORMAL preset and the numeric exposure/HUD assertion.
+  Visually inspected the refreshed baseline, water diagnostic, restored, and half-exposure
+  HUD captures at the same artifact paths above. Water-only identity and restoration pass;
+  glass, ice, slime and lava remain unchanged. The fixture platform is elevated in a normal
+  generated world; the captures do not constitute a natural shoreline comparison.
+- [ ] Actual compositor/display verification with reference patches remains open:
+  framebuffer screenshots do not measure physical display output.
+- [ ] Coordinated RGBA16_FLOAT world/forward/Fabulous targets, linear fog/blending and
+  live HDR readback remain the next implementation task. W2 remains in progress.
+
+Logs: `/tmp/water-w2-display-build.log`,
+`/tmp/water-w2-display-standard-client.log`. The first continuation client run used the
+old flat default and is not the standard-world validation evidence.

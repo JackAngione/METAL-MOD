@@ -1696,3 +1696,11 @@ The controlled water scene additionally checks half world exposure with a white 
 title. This completes the live world-only insertion prerequisite; world color remains
 8-bit legacy, so the HDR/linear forward gate above remains unchecked. See the
 [water W2 progress and evidence](WATER_EFFECTS_PLAN.md) for validation and screenshots.
+
+
+W2 presentation continuation (2026-09-05): `MCMetalSurface` now explicitly tags its
+BGRA8Unorm layer as sRGB, without another shader transfer. Build/GPU smoke and the
+water fixture pass; the fixture now explicitly selects NORMAL because Fabric's default
+was flat. Refreshed water identity and exposure/HUD captures were visually reviewed.
+See `WATER_EFFECTS_PLAN.md` for commands, logs and evidence. This establishes layer
+interpretation only; physical display verification and linear HDR composition remain open.
