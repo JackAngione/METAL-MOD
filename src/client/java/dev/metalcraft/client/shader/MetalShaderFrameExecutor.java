@@ -32,6 +32,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 	private final UniformRing uniforms;
 	private final List<ExecutablePass> passes;
 	private final boolean readsDepth;
+	private final boolean supportsLinearScene;
 	private @Nullable MetalTexture boundScene;
 	private @Nullable MetalTextureView boundSceneView;
 	private @Nullable MetalTexture boundOutput;
@@ -41,7 +42,8 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 	private record ExecutablePass(
 		ShaderGraphCompiler.CompiledPass compiled,
 		@Nullable MetalRenderPipeline render,
-		@Nullable MetalComputePipeline compute
+		@Nullable MetalComputePipeline compute,
+		@Nullable MetalRenderPipeline linearRender
 	) implements AutoCloseable {
 		ShaderPack.Pass declaration() {
 			return this.compiled.declaration();
@@ -52,6 +54,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			if (this.render != null) {
 				this.render.close();
 			}
+			if (this.linearRender != null) this.linearRender.close();
 			if (this.compute != null) {
 				this.compute.close();
 			}
@@ -67,6 +70,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 	) throws ShaderPackLoader.LoadException {
 		Objects.requireNonNull(graph, "graph");
 		this.allocator = Objects.requireNonNull(allocator, "allocator");
+		this.supportsLinearScene = ShaderPackRuntime.BUILTIN_ID.equals(pack.id());
 		this.optionValue = Objects.requireNonNull(optionValue, "optionValue");
 		this.uniformOptions = pack.manifest().options().stream()
 			.filter(option -> option.apply() == ShaderPack.ApplyMode.UNIFORM)
@@ -146,6 +150,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		final FrameBindings bindings,
 		final @Nullable MetalTexture testingPost
 	) {
+		if (bindings.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB && !this.supportsLinearScene) return false;
 		MetalTexture post = this.allocator.target("post_color");
 		if (!matchesPostColor(post, bindings.width(), bindings.height())) {
 			return false;
@@ -212,7 +217,8 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			new MetalRenderPass.Descriptor(colors, null, 0),
 			MetalPassCensus.kindFor("MetalCraft shader: " + pass.declaration().id())
 		)) {
-			render.setPipeline(pass.render());
+			render.setPipeline(bindings.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB
+				&& pass.linearRender() != null ? pass.linearRender() : pass.render());
 			int slot = 0;
 			for (String read : pass.declaration().reads()) {
 				MetalTextureView view = this.viewFor(read, bindings, testingPost);
@@ -410,18 +416,22 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		final Map<String, Object> values
 	) throws ShaderPackLoader.LoadException {
 		if (pass.declaration().kind() == ShaderPack.PassKind.COMPUTE) {
-			return new ExecutablePass(pass, null, ShaderPassCompiler.compileCompute(device, pack, pass.declaration(), values));
+			return new ExecutablePass(pass, null, ShaderPassCompiler.compileCompute(device, pack, pass.declaration(), values), null);
 		}
 		List<MetalRenderPipeline.ColorTarget> colors = new ArrayList<>();
 		for (String write : pass.declaration().writes()) {
 			ShaderPack.Target target = pack.manifest().targets().get(write);
 			colors.add(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.valueOf(target.format().name())));
 		}
-		return new ExecutablePass(
-			pass,
-			ShaderPassCompiler.compileFullscreen(device, pack, pass.declaration(), values, colors),
-			null
-		);
+		MetalRenderPipeline render = ShaderPassCompiler.compileFullscreen(device, pack, pass.declaration(), values, colors);
+		try {
+			MetalRenderPipeline linear = ShaderPackRuntime.BUILTIN_ID.equals(pack.id()) && pass.declaration().id().equals("grade")
+				? ShaderPassCompiler.compileFullscreen(device, pack, pass.declaration(), values, colors, true) : null;
+			return new ExecutablePass(pass, render, null, linear);
+		} catch (RuntimeException | ShaderPackLoader.LoadException error) {
+			render.close();
+			throw error;
+		}
 	}
 
 	static int[] threadgroup2d(final MetalComputePipeline pipeline) {

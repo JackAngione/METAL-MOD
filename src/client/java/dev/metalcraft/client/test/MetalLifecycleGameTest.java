@@ -101,7 +101,12 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		}
 
 		try (ShaderLifecycleSelection selection = new ShaderLifecycleSelection(context);
-			TestSingleplayerContext world = context.worldBuilder().create()) {
+			TestSingleplayerContext world = context.worldBuilder().adjustSettings(settings -> {
+				var normal = settings.getSettings().worldgenLoadContext()
+					.lookupOrThrow(net.minecraft.core.registries.Registries.WORLD_PRESET)
+					.getOrThrow(net.minecraft.world.level.levelgen.presets.WorldPresets.NORMAL);
+				settings.setWorldType(new WorldCreationUiState.WorldTypeEntry(normal));
+			}).create()) {
 			context.waitFor(client -> client.level != null && client.player != null);
 			context.waitTicks(10);
 			context.getInput().lookAt(0.0F, 30.0F);

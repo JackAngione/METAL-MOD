@@ -80,6 +80,13 @@ public final class WorldComposition {
 		final MetalTextureView worldDepthView,
 		final @Nullable Matrix4fc worldProjection
 	) {
+		return world(scene, sceneView, width, height, worldDepth, worldDepthView, worldProjection,
+			FrameBindings.ColorEncoding.LEGACY_ENCODED);
+	}
+
+	public static FrameBindings world(final MetalTexture scene, final MetalTextureView sceneView,
+		final int width, final int height, final MetalTexture worldDepth, final MetalTextureView worldDepthView,
+		final @Nullable Matrix4fc worldProjection, final FrameBindings.ColorEncoding colorEncoding) {
 		return new FrameBindings(
 			scene,
 			sceneView,
@@ -90,7 +97,8 @@ public final class WorldComposition {
 			worldProjection,
 			worldDepth.descriptor().width(),
 			worldDepth.descriptor().height(),
-			PACK_POST
+			PACK_POST,
+			colorEncoding
 		);
 	}
 }

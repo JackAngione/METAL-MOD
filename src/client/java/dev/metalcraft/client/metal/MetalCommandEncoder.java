@@ -152,7 +152,9 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
 		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
 		MetalGpuTextureView sizeView = firstColorView != null ? firstColorView : depthView;
-		this.renderPassBackend.reset(this.renderPass, area, sizeView.getWidth(0), sizeView.getHeight(0), depthAttachment != null);
+		this.renderPassBackend.reset(this.renderPass, area, sizeView.getWidth(0), sizeView.getHeight(0), depthAttachment != null,
+			colorAttachments.isEmpty() || colorAttachments.getFirst() == null ? null
+				: ((MetalTexture)colorAttachments.getFirst().target()).descriptor().format());
 		return this.renderPassBackend;
 	}
 

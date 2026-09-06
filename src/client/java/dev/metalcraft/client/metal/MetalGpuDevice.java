@@ -66,6 +66,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	/** Built on first use; most sessions that never recycle an item-atlas slot never compile it. */
 	private MetalRegionClear regionClear;
 	private MetalWorldGrade worldGrade;
+	private MetalWorldTargets linearWorldTargets;
 	private final @Nullable ShaderPackRuntime shaderPackRuntime;
 
 	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource) {
@@ -121,6 +122,32 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			this.shaderPackRuntime.markFailed("World grading failed: " + error.getMessage(), error);
 			LOGGER.error("World grading failed; preserving the world scene", error);
 		}
+	}
+
+	/** Allocate world resources only when a caller is ready to render every producer in linear space. */
+	public MetalWorldTargets prepareLinearWorldTargets(final int width, final int height) {
+		this.requireOpen();
+		if (this.linearWorldTargets == null) this.linearWorldTargets = new MetalWorldTargets(this);
+		// End a deferred pass before resize may retire the attachments it references.
+		this.commandEncoder.commands();
+		this.linearWorldTargets.resize(width, height);
+		return this.linearWorldTargets;
+	}
+
+	/** Explicit linear producer handoff. The caller must have finished the whole world graph. */
+	public void gradeLinearWorld(final GpuTextureView output) {
+		this.requireOpen();
+		if (this.shaderPackRuntime == null || !this.shaderPackRuntime.isActive() || this.linearWorldTargets == null) {
+			throw new IllegalStateException("Linear world grading requires active pack and prepared world targets");
+		}
+		if (!(output instanceof MetalGpuTextureView destination) || destination.attachment().device() != this.metal) {
+			throw new IllegalArgumentException("World output must belong to this Metal device");
+		}
+		dev.metalcraft.client.shader.WorldGeometryAdapter.resolveOpaque();
+		if (this.worldGrade == null) this.worldGrade = new MetalWorldGrade();
+		this.worldGrade.encode(this, this.commandEncoder.commands(), this.shaderPackRuntime,
+			this.linearWorldTargets.color(), this.linearWorldTargets.depth(), destination,
+			dev.metalcraft.client.shader.FrameBindings.ColorEncoding.LINEAR_SRGB);
 	}
 
 	/** Borrowed native resources for world modules; ownership stays with Blaze3D. */
@@ -337,6 +364,10 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			this.worldGrade.close();
 			this.worldGrade = null;
 		}
+		if (this.linearWorldTargets != null) {
+			this.linearWorldTargets.close();
+			this.linearWorldTargets = null;
+		}
 		this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 		this.pipelineCache.clear();
 		if (this.shaderPackRuntime != null) {
@@ -356,6 +387,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 				this.shaderPackRuntime.close();
 			}
 			if (this.worldGrade != null) this.worldGrade.close();
+			if (this.linearWorldTargets != null) this.linearWorldTargets.close();
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.pipelineCache.clear();
 			if (this.regionClear != null) {
@@ -465,16 +497,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 				pipeline.getFragmentShader().toDebugFileName()
 			);
 			MetalRenderPipeline.Descriptor descriptor = Blaze3DMetalMappings.pipelineDescriptor(pipeline, shaders);
-			MetalRenderPipeline withoutDepth = this.metal.createRenderPipeline(new MetalRenderPipeline.Descriptor(
-				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
-				descriptor.colorTargets(), null, descriptor.vertexDescriptor(), MetalRenderPipeline.DepthState.DISABLED, descriptor.rasterState()
-			));
-			MetalRenderPipeline.Descriptor depthDescriptor = pipeline.wantsDepthTexture() ? descriptor : new MetalRenderPipeline.Descriptor(
-				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
-				descriptor.colorTargets(), MetalTexture.Format.DEPTH32_FLOAT, descriptor.vertexDescriptor(), descriptor.depthState(), descriptor.rasterState()
-			);
-			MetalRenderPipeline withDepth = this.metal.createRenderPipeline(depthDescriptor);
-			return new MetalCompiledRenderPipeline(pipeline, withDepth, withoutDepth, shaders);
+			return MetalCompiledRenderPipeline.compile(this.metal, pipeline, descriptor, shaders);
 		} catch (RuntimeException error) {
 			LOGGER.error("Couldn't compile direct Metal pipeline {}", pipeline.getLocation(), error);
 			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
@@ -482,28 +505,11 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	}
 
 	private MetalCompiledRenderPipeline compileNativePipeline(final RenderPipeline pipeline, final NativeProgram program) {
-		MetalRenderPipeline withoutDepth = null;
 		try {
 			MetalRenderPipeline.Descriptor descriptor = Blaze3DMetalMappings.pipelineDescriptor(
-				pipeline, program.source(), program.vertexFunction(), program.source(), program.fragmentFunction()
-			);
-			withoutDepth = this.metal.createRenderPipeline(new MetalRenderPipeline.Descriptor(
-				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
-				descriptor.colorTargets(), null, descriptor.vertexDescriptor(), MetalRenderPipeline.DepthState.DISABLED,
-				descriptor.rasterState()
-			));
-			MetalRenderPipeline.Descriptor depthDescriptor = pipeline.wantsDepthTexture() ? descriptor : new MetalRenderPipeline.Descriptor(
-				descriptor.vertexSource(), descriptor.vertexFunction(), descriptor.fragmentSource(), descriptor.fragmentFunction(),
-				descriptor.colorTargets(), MetalTexture.Format.DEPTH32_FLOAT, descriptor.vertexDescriptor(), descriptor.depthState(),
-				descriptor.rasterState()
-			);
-			return new MetalCompiledRenderPipeline(
-				pipeline, this.metal.createRenderPipeline(depthDescriptor), withoutDepth, null
-			);
+				pipeline, program.source(), program.vertexFunction(), program.source(), program.fragmentFunction());
+			return MetalCompiledRenderPipeline.compile(this.metal, pipeline, descriptor, null);
 		} catch (RuntimeException error) {
-			if (withoutDepth != null) {
-				withoutDepth.close();
-			}
 			LOGGER.error("Couldn't compile shader-pack Metal pipeline {}", pipeline.getLocation(), error);
 			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
 		}

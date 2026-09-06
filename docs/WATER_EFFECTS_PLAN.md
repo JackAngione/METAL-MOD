@@ -494,3 +494,51 @@ fixed-format depth/depthless pipeline variants; world forward variants need both
 linear fragment semantics and RGBA16_FLOAT targets. Coordinate these with the
 Standard G-buffer/resolve and Fabulous intermediates before activating HDR grading.
 No live HDR, physical display or performance acceptance is claimed by this increment.
+
+
+### W2 target and pipeline increment — claimed 2026-09-05 by `/root`
+
+- [x] W2a: own distinct stored RGBA16_FLOAT world color / D32 depth, support resize
+  and retirement, and grade explicitly linear world input into the existing encoded
+  output attachment. Test the host executor handoff, allocation lifetime and alias checks.
+- [x] W2b: select/cache attachment-format variants of Blaze3D pipelines, preserving
+  depth state, blend factors, write masks, MRT channels and primitive topology. Test
+  actual backend draws into HDR and legacy targets plus cache release.
+
+Both host-mechanics steps are implemented and pass GPU smoke. They establish host mechanics; vanilla forward shader
+linearization and activation of the live world route are still required before W2
+can be marked complete. No W3 task is claimed while W2 remains unfinished.
+
+
+W2a/W2b evidence (2026-09-05, `/root`):
+
+- `MetalWorldTargets` owns stored single-sample RGBA16_FLOAT color and D32_FLOAT
+  depth at caller-supplied world extents, with render/sample/copy usage. Same-size calls
+  reuse attachments; replacement allocation is transactional; resize/reload/device close
+  release views and textures. Commands retain native resources until GPU completion.
+- `FrameBindings.ColorEncoding` defaults existing callers to LEGACY_ENCODED. Explicit
+  LINEAR_SRGB requires HDR storage at the world seam. Standard's executor owns both
+  grade variants; other packs reject linear input. `gradeLinearWorld` grades separate
+  world targets into a distinct UNORM output; mismatched extents/aliasing are rejected.
+- `MetalCompiledRenderPipeline` caches depth/depthless color-slot-zero format variants.
+  Descriptor copies retain blend factors, masks, auxiliary MRT formats and primitive
+  topology. Failed pair construction closes the first PSO; cache clear closes variants.
+- `WorldHdrTargetsSmoke` exercises actual Blaze3D backend draws with synthetic linear
+  producers, both depth/depthless passes, alpha blending and host grade output readback.
+  HDR red remains 2; encoded output matches independent values. Sizes 9x3, 5x3, 9x3
+  cover odd extents, reuse and resize. Alias rejection and reload retirement pass.
+  This test does not execute Minecraft forward shaders or Fabulous composition.
+- `./gradlew build` passed including new HDR host coverage, prior composition/transfer
+  tests and legacy shader smoke. Log: `/tmp/water-w2-target-build.log`.
+- Standard-world water fixture passed in 41 seconds with exposure/HUD assertions.
+  Command: `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`.
+  Log: `/tmp/water-w2-target-client.log`; screenshots use the W1/W2 artifact paths above.
+
+The general lifecycle fixture now explicitly selects NORMAL too (its prior default was
+flat). `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true` passed
+in 36 seconds; log `/tmp/water-w2-target-lifecycle.log`. The half-exposure/HUD capture
+was visually inspected. `git diff --check` passed. W2 remains unchecked: `prepareLinearWorldTargets`
+and `gradeLinearWorld` are tested host APIs, not yet called by the live world graph.
+Next: convert actual opaque/forward shader color/fog producers and Fabulous intermediates,
+then switch world rendering and its grade handoff together. No new water visual effect,
+live HDR acceptance or physical display measurement is claimed by these two steps.

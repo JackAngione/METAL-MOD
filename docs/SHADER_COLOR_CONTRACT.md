@@ -70,3 +70,12 @@ two coverage-blended forward draws with linear fog, and the actual grade shader 
 independent CPU values. This extends isolated transfer tests to synthetic composition;
 it does not satisfy the live HDR routing requirement. Build and the legacy standard-world
 water/HUD fixture pass; detailed logs and progress are in `WATER_EFFECTS_PLAN.md`.
+
+
+W2 host mechanics (2026-09-05): FrameBindings now explicitly distinguishes legacy
+encoded input from LINEAR_SRGB. Standard's executor compiles both grade variants and
+selects the latter only for the explicit linear contract. Stored HDR world targets and
+an independent UNORM output handoff are available through MetalGpuDevice; pipeline
+format variants preserve shader semantics rather than inferring color space. GPU host
+fixtures pass, but the live world graph still uses the legacy path. Forward source
+linearization and Fabulous conversion must precede activation.

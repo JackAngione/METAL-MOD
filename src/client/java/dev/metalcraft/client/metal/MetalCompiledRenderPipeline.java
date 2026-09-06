@@ -3,6 +3,8 @@ package dev.metalcraft.client.metal;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.CompiledRenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -11,6 +13,43 @@ final class MetalCompiledRenderPipeline implements CompiledRenderPipeline, AutoC
 	private final RenderPipeline info;
 	private final @Nullable MetalRenderPipeline withDepth;
 	private final @Nullable MetalRenderPipeline withoutDepth;
+	private final @Nullable MetalDevice device;
+	private final MetalRenderPipeline.@Nullable Descriptor descriptor;
+	private final EnumMap<MetalTexture.Format, Variants> colorVariants = new EnumMap<>(MetalTexture.Format.class);
+
+	private record Variants(MetalRenderPipeline withDepth, MetalRenderPipeline withoutDepth) implements AutoCloseable {
+		@Override
+		public void close() {
+			this.withDepth.close();
+			this.withoutDepth.close();
+		}
+	}
+
+	/** Compile both depth variants atomically; lazy color variants keep the same shader semantics. */
+	static MetalCompiledRenderPipeline compile(final MetalDevice device, final RenderPipeline info,
+		final MetalRenderPipeline.Descriptor descriptor,
+		final MetalShaderTranslator.@Nullable PipelineTranslation shaders) {
+		Variants variants = compileVariants(device, descriptor);
+		return new MetalCompiledRenderPipeline(info, variants.withDepth(), variants.withoutDepth(), shaders, device, descriptor);
+	}
+
+	private static Variants compileVariants(final MetalDevice device, final MetalRenderPipeline.Descriptor descriptor) {
+		MetalRenderPipeline withoutDepth = device.createRenderPipeline(withDepth(descriptor, false));
+		try {
+			return new Variants(device.createRenderPipeline(withDepth(descriptor, true)), withoutDepth);
+		} catch (RuntimeException error) {
+			withoutDepth.close();
+			throw error;
+		}
+	}
+
+	private static MetalRenderPipeline.Descriptor withDepth(final MetalRenderPipeline.Descriptor source, final boolean depth) {
+		return new MetalRenderPipeline.Descriptor(source.vertexSource(), source.vertexFunction(),
+			source.fragmentSource(), source.fragmentFunction(), source.colorTargets(),
+			depth ? MetalTexture.Format.DEPTH32_FLOAT : null, source.vertexDescriptor(),
+			depth ? source.depthState() : MetalRenderPipeline.DepthState.DISABLED,
+			source.rasterState(), source.inputPrimitiveTopology());
+	}
 	/**
 	 * The pipeline's flattened binding layout, resolved once here.
 	 *
@@ -39,6 +78,15 @@ final class MetalCompiledRenderPipeline implements CompiledRenderPipeline, AutoC
 		final @Nullable MetalRenderPipeline withoutDepth,
 		final MetalShaderTranslator.@Nullable PipelineTranslation shaders
 	) {
+		this(info, withDepth, withoutDepth, shaders, null, null);
+	}
+
+	private MetalCompiledRenderPipeline(final RenderPipeline info,
+		final @Nullable MetalRenderPipeline withDepth, final @Nullable MetalRenderPipeline withoutDepth,
+		final MetalShaderTranslator.@Nullable PipelineTranslation shaders, final @Nullable MetalDevice device,
+		final MetalRenderPipeline.@Nullable Descriptor descriptor) {
+		this.device = device;
+		this.descriptor = descriptor;
 		this.info = info;
 		this.withDepth = withDepth;
 		this.withoutDepth = withoutDepth;
@@ -101,6 +149,29 @@ final class MetalCompiledRenderPipeline implements CompiledRenderPipeline, AutoC
 		return selected;
 	}
 
+	/** Adapt only color slot zero; auxiliary G-buffer formats, blend and write masks stay fixed. */
+	MetalRenderPipeline metal(final boolean hasDepth, final MetalTexture.@Nullable Format colorFormat) {
+		if (!this.isValid()) throw new IllegalStateException("Metal pipeline is closed or invalid");
+		if (colorFormat == null || this.descriptor == null || this.descriptor.colorTargets().isEmpty()
+			|| this.descriptor.colorTargets().getFirst().format() == colorFormat) return this.metal(hasDepth);
+		if (this.descriptor.colorTargets().getFirst().format() == null) {
+			throw new IllegalArgumentException("Cannot add an undeclared color output to a Metal pipeline");
+		}
+		Variants variants = this.colorVariants.get(colorFormat);
+		if (variants == null) {
+			var colors = new ArrayList<>(this.descriptor.colorTargets());
+			var first = colors.getFirst();
+			colors.set(0, new MetalRenderPipeline.ColorTarget(colorFormat, first.writeMask(), first.blendState()));
+			var adjusted = new MetalRenderPipeline.Descriptor(this.descriptor.vertexSource(), this.descriptor.vertexFunction(),
+				this.descriptor.fragmentSource(), this.descriptor.fragmentFunction(), colors,
+				this.descriptor.depthStencilFormat(), this.descriptor.vertexDescriptor(), this.descriptor.depthState(),
+				this.descriptor.rasterState(), this.descriptor.inputPrimitiveTopology());
+			variants = compileVariants(this.device, adjusted);
+			this.colorVariants.put(colorFormat, variants);
+		}
+		return hasDepth ? variants.withDepth() : variants.withoutDepth();
+	}
+
 	@Override
 	public boolean isValid() {
 		return this.withoutDepth != null && !this.withoutDepth.isClosed() && this.withDepth != null && !this.withDepth.isClosed();
@@ -108,6 +179,8 @@ final class MetalCompiledRenderPipeline implements CompiledRenderPipeline, AutoC
 
 	@Override
 	public void close() {
+		this.colorVariants.values().forEach(Variants::close);
+		this.colorVariants.clear();
 		if (this.withDepth != null) this.withDepth.close();
 		if (this.withoutDepth != null && this.withoutDepth != this.withDepth) this.withoutDepth.close();
 	}

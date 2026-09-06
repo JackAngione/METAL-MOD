@@ -1,6 +1,7 @@
 package dev.metalcraft.client.metal;
 
 import dev.metalcraft.client.shader.ShaderPackRuntime;
+import dev.metalcraft.client.shader.FrameBindings;
 import dev.metalcraft.client.shader.WorldComposition;
 import java.util.List;
 
@@ -13,18 +14,35 @@ final class MetalWorldGrade implements AutoCloseable {
 
 	void encode(final MetalGpuDevice device, final MetalCommandBuffer commands,
 		final ShaderPackRuntime runtime, final MetalGpuTextureView scene, final MetalGpuTextureView worldDepth) {
+		this.encode(device, commands, runtime, scene, worldDepth, scene, FrameBindings.ColorEncoding.LEGACY_ENCODED);
+	}
+
+	void encode(final MetalGpuDevice device, final MetalCommandBuffer commands, final ShaderPackRuntime runtime,
+		final MetalGpuTextureView scene, final MetalGpuTextureView worldDepth, final MetalGpuTextureView output,
+		final FrameBindings.ColorEncoding encoding) {
 		int width = scene.getWidth(0), height = scene.getHeight(0);
-		this.prepare(device.metal(), width, height, scene.attachment().descriptor().format());
+		if (output.getWidth(0) != width || output.getHeight(0) != height
+			|| worldDepth.getWidth(0) != width || worldDepth.getHeight(0) != height) {
+			throw new IllegalArgumentException("World grade color, depth and output extents must match");
+		}
+		if (encoding == FrameBindings.ColorEncoding.LINEAR_SRGB
+			&& (scene.attachment() == output.attachment()
+				|| scene.attachment().descriptor().format() != MetalTexture.Format.RGBA16_FLOAT
+				|| (output.attachment().descriptor().format() != MetalTexture.Format.RGBA8_UNORM
+					&& output.attachment().descriptor().format() != MetalTexture.Format.BGRA8_UNORM))) {
+			throw new IllegalArgumentException("Linear HDR grade requires a distinct encoded UNORM output");
+		}
+		this.prepare(device.metal(), width, height, output.attachment().descriptor().format());
 		runtime.resizeToScene(width, height);
 		commands.copyTexture(worldDepth.attachment(), this.depth, 0, 0, 0, 0, 0, width, height);
 		if (!runtime.executor().orElseThrow().encode(commands, WorldComposition.world(
-			scene.attachment(), scene.metal(), width, height, this.depth, this.depthView, null))) {
+			scene.attachment(), scene.metal(), width, height, this.depth, this.depthView, null, encoding))) {
 			throw new IllegalStateException("World grade inputs are unavailable");
 		}
 		MetalTexture post = runtime.target("post_color");
 		try (MetalTextureView source = post.createView();
 			 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
-				 new MetalRenderPass.ColorAttachment(scene.attachment(), MetalRenderPass.LoadAction.DONT_CARE,
+				 new MetalRenderPass.ColorAttachment(output.attachment(), MetalRenderPass.LoadAction.DONT_CARE,
 					 MetalRenderPass.StoreAction.STORE, 0, 0, 0, 0)))) {
 			pass.setPipeline(this.copy);
 			pass.setTexture(0, source, MetalRenderPass.STAGE_FRAGMENT);

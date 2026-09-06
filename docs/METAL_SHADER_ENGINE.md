@@ -1713,3 +1713,11 @@ Standard tone/output shader against CPU references. `./gradlew build` and the ex
 standard-world water/HUD client test pass. See `WATER_EFFECTS_PLAN.md` for evidence.
 The PR 7b live HDR gate remains unchecked; synthetic draws do not establish live
 forward/Fabulous conversion or physical display output.
+
+
+W2 host target/pipeline steps (2026-09-05): stored HDR world target ownership, explicit
+linear FrameBindings and separate encoded output handoff now have real backend GPU
+coverage. Cached color attachment PSO variants retain blend/depth/MRT state. Build/GPU
+smoke and the standard-world water fixture pass. These APIs remain outside the live
+world route until opaque/forward/Fabulous color conversion is complete; PR 7b stays
+open. Full evidence and next action are in `WATER_EFFECTS_PLAN.md`.

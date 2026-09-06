@@ -65,6 +65,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	private int outputWidth;
 	private int outputHeight;
 	private boolean hasDepth;
+	private MetalTexture.@Nullable Format colorFormat;
 	private MetalCompiledRenderPipeline pipeline;
 	private MetalGpuBuffer indexBuffer;
 	private MetalRenderPass.IndexType indexType;
@@ -97,13 +98,15 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		final RenderPass.RenderArea area,
 		final int width,
 		final int height,
-		final boolean depth
+		final boolean depth,
+		final MetalTexture.@Nullable Format colorFormat
 	) {
 		this.metal = pass;
 		this.renderArea = area;
 		this.outputWidth = width;
 		this.outputHeight = height;
 		this.hasDepth = depth;
+		this.colorFormat = colorFormat;
 		this.recording = null;
 		this.uniforms.clear();
 		this.textures.clear();
@@ -165,7 +168,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		if (this.pipeline != compiled) {
 			this.pipeline = compiled;
 			this.clearBoundSlots();
-			this.pass().setPipeline(compiled.metal(this.hasDepth));
+			this.pass().setPipeline(compiled.metal(this.hasDepth, this.colorFormat));
 		}
 	}
 
