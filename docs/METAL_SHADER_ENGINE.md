@@ -1704,3 +1704,12 @@ water fixture pass; the fixture now explicitly selects NORMAL because Fabric's d
 was flat. Refreshed water identity and exposure/HUD captures were visually reviewed.
 See `WATER_EFFECTS_PLAN.md` for commands, logs and evidence. This establishes layer
 interpretation only; physical display verification and linear HDR composition remain open.
+
+
+W2 HDR output preparation (2026-09-05): Standard grade has an explicit linear-scene
+variant, currently disabled by the live host. `HdrCompositionSmoke` validates HDR
+store/load, linear fog, two transparency overlaps, coverage alpha, and the actual
+Standard tone/output shader against CPU references. `./gradlew build` and the explicit
+standard-world water/HUD client test pass. See `WATER_EFFECTS_PLAN.md` for evidence.
+The PR 7b live HDR gate remains unchecked; synthetic draws do not establish live
+forward/Fabulous conversion or physical display output.

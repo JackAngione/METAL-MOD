@@ -60,3 +60,13 @@ it does not prove HDR survives live forward composition or presentation.
 and a stored depth snapshot precede hand-depth clear; present only copies the finished
 main scene. World and forward storage/math are still legacy 8-bit. The remaining HDR
 contract above is unchanged; the seam is not evidence of live HDR or display calibration.
+
+
+W2 preparation (2026-09-05): Standard `grade.metal` now has an explicit
+`MC_SCENE_LINEAR_HDR` variant for a future linear producer. It applies exposure and
+optional ACES before sRGB encoding; display inversion follows encoding. The live host
+does not enable this variant. `HdrCompositionSmoke` tests real RGBA16_FLOAT store/load,
+two coverage-blended forward draws with linear fog, and the actual grade shader against
+independent CPU values. This extends isolated transfer tests to synthetic composition;
+it does not satisfy the live HDR routing requirement. Build and the legacy standard-world
+water/HUD fixture pass; detailed logs and progress are in `WATER_EFFECTS_PLAN.md`.

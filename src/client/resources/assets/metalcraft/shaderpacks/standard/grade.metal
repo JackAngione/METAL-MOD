@@ -1,6 +1,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
+#if MC_SCENE_LINEAR_HDR
+#include "shared/color.metal"
+#endif
+
 #ifdef MC_PASS_GRADE
 
 struct GradeVaryings {
@@ -31,15 +35,27 @@ fragment float4 grade_fragment(
 ) {
     float3 sampled = sceneTex.sample(sceneSampler, in.uv).rgb;
     if (options.debugView == 1) {
+#if MC_SCENE_LINEAR_HDR
+        return float4(mc_linear_to_srgb(sampled), 1.0);
+#else
         return float4(sampled, 1.0);
+#endif
     }
     float3 color = sampled * options.exposure;
-#if MC_OPTION_INVERT
+#if MC_OPTION_INVERT && !MC_SCENE_LINEAR_HDR
     color = float3(1.0) - color;
 #endif
     if (options.tonemap == 1) {
         color = acesFitted(color);
     }
+#if MC_SCENE_LINEAR_HDR
+    // Only enable after every world producer supplies linear scene color.
+    // Hand/HUD and presentation consume encoded RGB after this one transfer.
+    color = mc_linear_to_srgb(color);
+#if MC_OPTION_INVERT
+    color = float3(1.0) - color;
+#endif
+#endif
     return float4(color, 1.0);
 }
 

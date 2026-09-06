@@ -65,6 +65,7 @@ public final class WorldLightingModuleSmoke {
 		}
 		System.out.println("Lighting frame: McFog layout and identity fog upload passed");
 		runColorTransfer(device);
+		HdrCompositionSmoke.run(device);
 	}
 
 	/** Check the production transfer helpers against independent reference values in an HDR target. */

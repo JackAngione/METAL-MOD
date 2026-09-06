@@ -459,3 +459,38 @@ coordinated linear world/forward target and shader conversion, not a post-only d
 Logs: `/tmp/water-w2-display-build.log`,
 `/tmp/water-w2-display-standard-client.log`. The first continuation client run used the
 old flat default and is not the standard-world validation evidence.
+
+
+W2 next increment claimed by `/root` (2026-09-05): add the explicit linear-input
+grade variant and an independent GPU opaque/forward/fog/output composition fixture.
+The live graph must continue using legacy input until all participating producers
+can switch together. The following validation passed; W2 remains in progress.
+
+- [x] Add `MC_SCENE_LINEAR_HDR` to Standard's grade shader. When explicitly compiled
+  for linear input it applies exposure/optional ACES, then sRGB output transfer once.
+  Invert operates on encoded display color in this variant. Scene debug encodes without
+  exposure/tonemap. With the define absent, legacy grading behavior is unchanged.
+- [x] Add `HdrCompositionSmoke` to the normal shader smoke suite. Three separate Metal
+  encoders store/load an RGBA16_FLOAT opaque seed and two forward draws. Independent
+  CPU references check eight pixels containing HDR RGB, linear fog and alpha coverage
+  0/0.25/0.5/1, including the distinct RGB/alpha blend factors used by transparency.
+  The actual Standard grade shader is then checked in 12 exposure/tonemap/invert
+  combinations into BGRA8_UNORM (two-byte tolerance). These are synthetic GPU draws,
+  not Minecraft forward shader routing or Fabulous validation.
+- [x] `./gradlew build` passed including the new GPU fixture and existing legacy grade
+  tests. Log: `/tmp/water-w2-hdr-build.log`.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true` passed
+  in 41 seconds with the explicit standard-world preset and exposure/HUD assertions.
+  Log: `/tmp/water-w2-hdr-client.log`. Refreshed half-exposure/HUD capture visually
+  inspected at the artifact path above. This run still uses legacy world color.
+- [ ] Wire the live HDR producers and host selection of the grade variant together.
+  The host does not define `MC_SCENE_LINEAR_HDR` yet. Never enable it just because
+  an attachment is floating point: the producer's color encoding must be known.
+
+Next implementation boundary: `GameRenderer.mainRenderTarget` owns the legacy main
+attachment and is reused for hand/HUD; a world-only HDR attachment must hand off to it
+before the existing grade seam. `MetalGpuDevice.compilePipeline` currently creates
+fixed-format depth/depthless pipeline variants; world forward variants need both
+linear fragment semantics and RGBA16_FLOAT targets. Coordinate these with the
+Standard G-buffer/resolve and Fabulous intermediates before activating HDR grading.
+No live HDR, physical display or performance acceptance is claimed by this increment.
