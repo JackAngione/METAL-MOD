@@ -327,6 +327,7 @@ public final class MetalShaderTranslationSmoke {
 			dev.metalcraft.client.shader.world.WorldLightingModuleSmoke.run(device);
 			assertMemorylessPassMerge();
 			WorldHdrTargetsSmoke.run();
+			LinearWorldShadersSmoke.run();
 			assertIdentityGradePack(device);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(
 				mappedDescriptor.vertexSource(), mappedDescriptor.vertexFunction(), mappedDescriptor.fragmentSource(), mappedDescriptor.fragmentFunction(),

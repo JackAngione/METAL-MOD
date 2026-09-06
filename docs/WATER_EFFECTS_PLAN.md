@@ -578,3 +578,76 @@ G-buffer or forward routing test.
 W2 remains in progress. Next: convert actual forward GLSL producers and Fabulous
 intermediates, verify the linear G-buffer variant through full geometry draws, then
 activate the world target/grade handoff coherently. Display validation remains open.
+
+
+### W2 forward and geometry increment — claimed 2026-09-05 by `/root`
+
+- [x] W2d: audit and implement explicit, fail-closed linear variants of supported
+  forward GLSL producers, with numeric GPU coverage. Owner `/root`; read-only forward
+  and Fabulous audits delegated to `/root/forward_audit` and `/root/fabulous_audit`.
+- [x] W2e: exercise the actual Standard linear geometry shaders with HDR output.
+  Owner `/root/opaque_geometry`; coordinator serializes tracker updates.
+- Live HDR activation remains gated on complete producer and intermediate coverage.
+
+W2e evidence (2026-09-06, `/root/opaque_geometry`): `StandardGeometryHdrSmoke`
+executes 30 actual terrain/block/entity vertex and fragment draws across legacy and
+linear variants. Stored HDR scene and three metadata MRT readbacks check seed transfer,
+partial fog, terrain chunk fade, alpha cutout (including fade-before-cutout), and
+encoded albedo/material preservation. `./gradlew shaderTranslationSmoke` passed;
+`/tmp/water-w2-geometry-smoke.log`. This closes the bounded offscreen geometry check;
+entity overlay/cardinal combinations, live route and display remain unvalidated.
+
+Parallel mapped-source audit (`/root/fabulous_audit`, `/root/forward_audit`):
+
+- Scope routing around the complete `LevelRenderer.render` call from `GameRenderer`.
+  The frame graph imports main target early but also fetches it in a deferred clear;
+  redirecting only the initial import is insufficient. `SkyRenderer` caches the original
+  RenderTarget, so an accessor-only override on GameRenderer also misses sky draws.
+- `LevelRenderer.render` creates one RGBA8 descriptor for five Fabulous layers;
+  `PostChain.addToFrame` independently creates the transparency chain's internal final
+  target. Both must become HDR only for the explicitly active linear world chain.
+  `transparency.fsh` consumes premultiplied layer RGB: preserve its composition math,
+  and do not decode its sampled linear intermediate textures again. Its blit stays linear.
+- Decode the world clear fog RGB too. Keep encoded outline/postprocessing targets and
+  subsequent hand/HUD outside that contract. Restore world routing exception-safely.
+- Deferred pool reuse compares format; persistent PostChain target reuse checks only
+  size and would need format-aware retirement if generalized beyond vanilla's nonpersistent
+  transparency final target.
+- Remaining forward programs include sky, stars, position/text variants, glint, lightning,
+  world border and other effects. Glint/lightning need conversion before attenuation;
+  generic final-output decoding is not an acceptable replacement. Unsupported source
+  replacements must keep the entire world on legacy rendering, not mix spaces.
+
+W2d implementation and GPU evidence (2026-09-06, `/root`, `/root/forward_audit`):
+
+`LinearWorldShaders` verifies expanded Minecraft 26.2 vertex/fragment fingerprints for
+terrain, block, entity, particle and clouds before adapting them. It decodes completed
+compatibility seeds before fog, terrain chunk fade before fog, and cloud RGB before
+alpha-only distance attenuation. Alpha and lightmap compatibility semantics remain intact.
+Fingerprints preserve token spacing and preprocessor line boundaries; a `++i` to `+ +i`
+source mutation is rejected. Unknown/replaced sources and missing/failed programs throw.
+`MetalGpuDevice.precompileLinearWorldPipeline` owns a distinct semantic cache, retired
+on reload/close and invalidated when registering a native replacement. Existing draw
+selection remains legacy; attachment-format variants do not imply linear semantics.
+
+`LinearWorldShadersSmoke` compiles 30 actual vanilla static pipeline combinations in
+both modes and checks source rejection, cache isolation/reuse and retirement. Its
+actual transformed particle fragment GPU draws check HDR seed, RGB transfer knees,
+zero/partial/full fog, alpha discard, and straight-alpha overlap against independent
+CPU references. `./gradlew shaderTranslationSmoke` passed;
+`/tmp/water-w2-forward-smoke.log`. `./gradlew build` also passed;
+`/tmp/water-w2-forward-build.log`.
+
+These completed substeps cover only the explicitly supported forward programs. W2
+remains in progress: remaining producers, Fabulous/sky/clear routing and coordinated
+activation are still required. No live HDR or physical display acceptance is claimed.
+
+Final W2d/W2e regression (2026-09-06):
+
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true` passed in
+  40 seconds with explicit NORMAL world generation and numeric exposure/HUD assertions;
+  `/tmp/water-w2-forward-client.log`. Refreshed
+  [half-exposure HUD capture](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png)
+  visually inspected; the world darkens and HUD remains white. This is a legacy-route
+  regression check, not live HDR validation.
+- `git diff --check` passed.

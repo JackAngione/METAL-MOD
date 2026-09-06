@@ -89,3 +89,15 @@ pass independent GPU references in both legacy and linear variants, including va
 above 1. Build and the standard-world water/exposure/HUD fixture pass; evidence is in
 `WATER_EFFECTS_PLAN.md`. Live activation, full linear geometry/forward/Fabulous coverage
 and actual display validation remain open; the HDR gate is still unchecked.
+
+
+W2d/W2e preparation (2026-09-06): source-verified terrain/block/entity/particle/cloud
+GLSL linear variants now compile through an explicit separate MetalGpuDevice cache.
+Unknown/replaced sources fail closed; format selection alone still changes no semantics.
+Thirty actual vanilla pipeline combinations compile in both modes; actual transformed
+particle GPU draws validate HDR, fog, alpha and overlap against independent references.
+Thirty production Standard geometry draws additionally verify the opt-in linear G-buffer
+programs, fading/cutouts and metadata. Build and GPU smoke pass; logs and detailed
+scope are in `WATER_EFFECTS_PLAN.md`. Other forward producers and all coordinated
+world/Fabulous/sky/clear activation remain open, as does display validation. The live
+renderer is still legacy and the PR 7b / W2 acceptance gate remains unchecked.

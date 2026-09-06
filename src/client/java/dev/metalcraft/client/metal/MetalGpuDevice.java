@@ -50,6 +50,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private final MetalCommandEncoder commandEncoder;
 	private final DeviceInfo deviceInfo;
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> pipelineCache = new IdentityHashMap<>();
+	private final Map<RenderPipeline, MetalCompiledRenderPipeline> linearPipelineCache = new IdentityHashMap<>();
 	private final Map<RenderPipeline, NativeProgram> nativePipelines = new IdentityHashMap<>();
 	private final Map<ShaderKey, String> shaderSourceCache = new HashMap<>();
 	// Triangle-fan indices are a pure function of vertex count, and the pattern for a large fan
@@ -193,6 +194,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		if (pipeline == null || program == null) {
 			throw new NullPointerException("A native Metal pipeline needs both a Blaze3D pipeline and a program");
 		}
+		MetalCompiledRenderPipeline linear = this.linearPipelineCache.remove(pipeline);
+		if (linear != null) linear.close();
 		this.nativePipelines.put(pipeline, program);
 	}
 
@@ -357,6 +360,17 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		return this.pipelineCache.computeIfAbsent(pipeline, ignored -> this.compilePipeline(pipeline, selected));
 	}
 
+	/**
+	 * Prepares verified linear world semantics in a cache separate from legacy draw selection.
+	 * Callers must gate the entire world before using these variants; HDR storage alone is insufficient.
+	 * Unsupported or resource-replaced shader sources throw rather than silently selecting legacy math.
+	 */
+	public CompiledRenderPipeline precompileLinearWorldPipeline(final RenderPipeline pipeline, final @Nullable ShaderSource shaderSource) {
+		this.requireOpen();
+		ShaderSource selected = shaderSource == null ? this.defaultShaderSource : shaderSource;
+		return this.linearPipelineCache.computeIfAbsent(pipeline, ignored -> this.compilePipeline(pipeline, selected, true));
+	}
+
 	@Override
 	public void clearPipelineCache() {
 		this.commandEncoder.finishPendingWork();
@@ -370,6 +384,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		}
 		this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 		this.pipelineCache.clear();
+		this.linearPipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
+		this.linearPipelineCache.clear();
 		if (this.shaderPackRuntime != null) {
 			this.shaderPackRuntime.reload();
 			if (this.shaderPackRuntime.frameWidth() > 0 && this.shaderPackRuntime.frameHeight() > 0) {
@@ -390,6 +406,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			if (this.linearWorldTargets != null) this.linearWorldTargets.close();
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
 			this.pipelineCache.clear();
+			this.linearPipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
+			this.linearPipelineCache.clear();
 			if (this.regionClear != null) {
 				this.regionClear.close();
 				this.regionClear = null;
@@ -473,17 +491,27 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	}
 
 	private MetalCompiledRenderPipeline compilePipeline(final RenderPipeline pipeline, final ShaderSource shaderSource) {
+		return this.compilePipeline(pipeline, shaderSource, false);
+	}
+
+	private MetalCompiledRenderPipeline compilePipeline(final RenderPipeline pipeline, final ShaderSource shaderSource, final boolean linear) {
 		NativeProgram program = this.nativePipelines.get(pipeline);
 		if (program != null) {
+			if (linear) throw new IllegalArgumentException("Native pipelines require their own explicit linear contract");
 			return this.compileNativePipeline(pipeline, program);
 		}
 		String vertex = this.resolveShader(pipeline.getVertexShader(), ShaderType.VERTEX, pipeline.getShaderDefines(), shaderSource);
 		String fragment = this.resolveShader(pipeline.getFragmentShader(), ShaderType.FRAGMENT, pipeline.getShaderDefines(), shaderSource);
 		if (vertex == null || fragment == null) {
+			if (linear) throw new IllegalArgumentException("Missing linear world sources for " + pipeline.getLocation());
 			LOGGER.error("Couldn't find Metal shader sources for pipeline {}", pipeline.getLocation());
 			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
 		}
 
+		if (linear) {
+			LinearWorldShaders.verify(pipeline.getVertexShader(), ".vsh", vertex);
+			fragment = LinearWorldShaders.fragment(pipeline.getFragmentShader(), fragment);
+		}
 		try {
 			String vertexWithDefines = GlslPreprocessor.injectDefines(vertex, pipeline.getShaderDefines());
 			String vertexWithBindings = Blaze3DMetalMappings.shaderWithResourceBindings(vertexWithDefines, pipeline);
@@ -499,6 +527,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			MetalRenderPipeline.Descriptor descriptor = Blaze3DMetalMappings.pipelineDescriptor(pipeline, shaders);
 			return MetalCompiledRenderPipeline.compile(this.metal, pipeline, descriptor, shaders);
 		} catch (RuntimeException error) {
+			if (linear) throw new IllegalArgumentException("Could not compile linear world pipeline " + pipeline.getLocation(), error);
 			LOGGER.error("Couldn't compile direct Metal pipeline {}", pipeline.getLocation(), error);
 			return new MetalCompiledRenderPipeline(pipeline, null, null, null);
 		}

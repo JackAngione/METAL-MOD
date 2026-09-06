@@ -17,6 +17,7 @@ final class HdrCompositionSmoke {
 	private HdrCompositionSmoke() { }
 
 	static void run(final MetalDevice device) {
+		StandardGeometryHdrSmoke.run(device);
 		verifyOpaqueColor(device, false);
 		verifyOpaqueColor(device, true);
 		String color = resource("shared/color.metal");
