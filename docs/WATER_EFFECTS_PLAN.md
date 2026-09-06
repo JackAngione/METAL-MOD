@@ -42,7 +42,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
-| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-06: world grade seam, stored HDR target APIs, opaque variants and expanded forward GPU coverage implemented. Standard-world regression passes. Coordinated live HDR routing and physical display validation remain open. |
+| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-06: world grade seam, stored HDR target APIs, opaque variants and expanded forward GPU coverage implemented. Standard-world regression passes; explicit native G-buffer/resolve encoding selection now passes GPU checks. Coordinated live HDR routing and physical display validation remain open. |
 | [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
@@ -756,3 +756,74 @@ full-mesh numeric fixtures. This closes the bounded producer increment only.
 
 W2 remains unchecked. Next implementation boundary is the native linear G-buffer/resolve
 selection and coordinated target/encoding route recorded in the audit above.
+
+
+### W2 native linear selection — claimed 2026-09-06 by `/root`
+
+- [x] W2i: add explicit matching linear native G-buffer/resolve selection with format
+  guards and cache retirement. Owner `/root`; status done (evidence below).
+- [x] W2j: declare native pipeline color semantics and test linear-cache rejection,
+  selection and retirement. Owner `/root/native_contract`; status done (evidence below).
+- [x] W2k: GPU-check production adapter/resolve encoding selection, HDR storage and
+  legacy restoration. Owner `/root/adapter_checks`; status done (evidence below).
+- [x] W2l: audit concrete world/sky/Fabulous activation hooks and preflight gaps.
+  Owner `/root/activation_audit`; status done (evidence below).
+
+Coordinator serializes tracker changes. Live activation and display acceptance remain
+open; these substeps must not mark W2 complete without its full evidence.
+
+W2i–W2k evidence (2026-09-06, `/root`, `/root/native_contract`, `/root/adapter_checks`):
+`WorldGeometryAdapter.beginFrame(ColorEncoding)` selects Standard geometry and merged
+resolve together, requires RGBA16_FLOAT for explicit linear scenes, flushes pending
+resolve before switching, and retires native stand-ins and resolve pipelines. The
+no-argument live entry remains legacy. Compilation/encoding failures in linear mode
+throw; unsupported forward producers still require the future whole-world preflight.
+`MetalGpuDevice.NativeProgram` carries explicit encoding, with the old constructor
+retaining legacy semantics. Native linear-cache admission requires LINEAR_SRGB;
+replacement, forgetting and reload retire cached programs. Debug resolve outputs decode
+encoded metadata colors for the later linear world grade; metadata attachments stay encoded.
+
+GPU integration exposed a pre-existing flag-value error: ShaderPassCompiler emits
+MC_SCENE_LINEAR_HDR=0 for legacy sources, while shared/lighting.metal used #ifdef.
+Changed those guards to #if so zero actually selects legacy seed/fog math. Adapter
+selection replaces that generated zero declaration with one rather than adding a
+conflicting definition. This correction is included in the standard-world regression.
+
+`NativeColorContractSmoke` checks native legacy rejection, linear admission/cache reuse,
+replacement/forget retirement, and failed-compilation recovery. The production adapter
+fixture checks a pending legacy albedo resolve is encoded before mode-switch retirement,
+actual native terrain stand-in linear compilation, HDR seed RGB 2 surviving resolve,
+linear albedo-debug numeric transfer, RGBA8 rejection, and legacy-on-float semantics
+and debug restoration. Existing 30 full geometry GPU draws and forward fixtures pass.
+These checks do not constitute live linear routing or new water surface effects.
+
+- [x] `./gradlew build`: passed, including Metal GPU smoke; `/tmp/water-w2i-build.log`.
+  The final run includes strengthened pending-resolve and legacy-restoration assertions.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`:
+  passed in 40 seconds using the explicit NORMAL preset; `/tmp/water-w2i-client.log`.
+  Numeric exposure/HUD checks passed. Visually inspected refreshed
+  [identity capture](../run/screenshots/0001_metalcraft-water-identity-water.png) and
+  [half-exposure/HUD capture](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png):
+  water-only magenta coverage and white HUD over darkened world remain correct.
+- [x] `git diff --check`: passed.
+
+W2l evidence (2026-09-06, `/root/activation_audit`, verified by `/root`): saved audit at
+`/tmp/water-w2l-activation-audit.md`; coordinator checked the mapped source jar directly.
+Concrete activation boundaries: GameRenderer.renderLevel calls LevelRenderer.render at
+line 562, before hand-depth clear at 568; cached SkyRenderer.renderTarget is assigned at
+76; LevelRenderer creates the five RGBA8 Fabulous targets at 181–190; PostChain.addToFrame
+creates RGBA8 internal descriptors at 133–135 and builds dynamic pipeline objects at
+97. Static pipeline enumeration alone cannot preflight these post pipelines. The final
+entity-outline blit is later, in GameRenderer.render at 425, after renderLevel and the
+current grade seam. This refines earlier broad outline-order notes: outline production
+is inside the world graph, but final outline composition is outside the current seam.
+
+Next: implement a scoped, exception-safe whole-world session with explicit main/sky
+attachment routing, linear clear/copy handling, Fabulous target promotion and verified
+linear-preserving post shaders, and an explicit outline composition policy. Keep outline
+intermediate color encoded unless all outline producers and filters receive a coordinated
+contract; widening them alone is not sufficient. A prior-frame pipeline census is not a
+complete fail-closed preflight for unseen dynamic pipelines; atomic activation remains
+an unresolved requirement. No activation code or physical display acceptance is claimed.
+W2 stays unchecked; W3 remains gated on W2. Sol agents hit their usage limit after saving
+work; coordinator corrected the fixture, completed validation, and serialized this tracker.

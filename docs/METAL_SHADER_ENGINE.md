@@ -1776,3 +1776,16 @@ handling; GUI, atlas maintenance and artistic lightmap paths retain their contra
 The live HDR / W2 gate remains unchecked; see `WATER_EFFECTS_PLAN.md`.
 Standard-world water/HUD regression passed in 40 seconds, with refreshed identity and
 half-exposure/HUD captures visually inspected; `/tmp/water-w2h-client.log`.
+
+
+W2i–W2l native selection (2026-09-06): Standard's adapter now explicitly selects matching
+linear geometry and merged resolve programs, requires HDR storage in linear mode, and
+retires both semantic caches on mode changes/native replacement. Native programs declare
+encoding before linear-cache admission. Shared lighting now tests the HDR flag's value
+with #if; the host's legacy zero define must not enable linear seed/fog math. GPU checks
+cover pending-resolve flush, native contract rejection/reuse/retirement, HDR seed storage,
+linear debug transfer and legacy restoration. Build passed (`/tmp/water-w2i-build.log`);
+standard-world water/exposure/HUD regression passed in 40 seconds with inspected captures
+(`/tmp/water-w2i-client.log`). See WATER_EFFECTS_PLAN.md for task evidence and exact routing
+audit. Live world/sky/Fabulous/outline routing and physical display checks remain open;
+PR 7b / W2 remains unchecked. The live no-argument frame entry retains legacy semantics.

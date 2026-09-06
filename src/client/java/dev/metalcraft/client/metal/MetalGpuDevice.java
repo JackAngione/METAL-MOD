@@ -23,6 +23,7 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.MetalCraftPlatform;
+import dev.metalcraft.client.shader.FrameBindings;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -194,27 +195,27 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		if (pipeline == null || program == null) {
 			throw new NullPointerException("A native Metal pipeline needs both a Blaze3D pipeline and a program");
 		}
-		MetalCompiledRenderPipeline linear = this.linearPipelineCache.remove(pipeline);
-		if (linear != null) linear.close();
+		this.retirePipeline(pipeline);
 		this.nativePipelines.put(pipeline, program);
 	}
 
 	public void forgetNativePipeline(final RenderPipeline pipeline) {
 		this.nativePipelines.remove(pipeline);
-		MetalCompiledRenderPipeline compiled = this.pipelineCache.remove(pipeline);
-		if (compiled != null) {
-			compiled.close();
-		}
+		this.retirePipeline(pipeline);
 	}
 
 	void forgetNativePipelines() {
 		for (RenderPipeline pipeline : this.nativePipelines.keySet()) {
-			MetalCompiledRenderPipeline compiled = this.pipelineCache.remove(pipeline);
-			if (compiled != null) {
-				compiled.close();
-			}
+			this.retirePipeline(pipeline);
 		}
 		this.nativePipelines.clear();
+	}
+
+	private void retirePipeline(final RenderPipeline pipeline) {
+		MetalCompiledRenderPipeline legacy = this.pipelineCache.remove(pipeline);
+		if (legacy != null) legacy.close();
+		MetalCompiledRenderPipeline linear = this.linearPipelineCache.remove(pipeline);
+		if (linear != null) linear.close();
 	}
 
 	public void resolveDeferredShaderPass() {
@@ -236,10 +237,15 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		return new MetalGpuTextureView(gpu, 0, texture.descriptor().mipLevels(), view);
 	}
 
-	public record NativeProgram(String source, String vertexFunction, String fragmentFunction) {
+	public record NativeProgram(String source, String vertexFunction, String fragmentFunction,
+		FrameBindings.ColorEncoding colorEncoding) {
+		public NativeProgram(final String source, final String vertexFunction, final String fragmentFunction) {
+			this(source, vertexFunction, fragmentFunction, FrameBindings.ColorEncoding.LEGACY_ENCODED);
+		}
+
 		public NativeProgram {
-			if (source == null || vertexFunction == null || fragmentFunction == null) {
-				throw new NullPointerException("A native Metal program needs a source and both entry points");
+			if (source == null || vertexFunction == null || fragmentFunction == null || colorEncoding == null) {
+				throw new NullPointerException("A native Metal program needs a source, both entry points, and a color encoding");
 			}
 		}
 	}
@@ -367,8 +373,19 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	 */
 	public CompiledRenderPipeline precompileLinearWorldPipeline(final RenderPipeline pipeline, final @Nullable ShaderSource shaderSource) {
 		this.requireOpen();
+		NativeProgram nativeProgram = this.nativePipelines.get(pipeline);
+		if (nativeProgram != null && nativeProgram.colorEncoding() != FrameBindings.ColorEncoding.LINEAR_SRGB) {
+			throw new IllegalArgumentException("Native pipeline does not declare linear-sRGB output: " + pipeline.getLocation());
+		}
 		ShaderSource selected = shaderSource == null ? this.defaultShaderSource : shaderSource;
-		return this.linearPipelineCache.computeIfAbsent(pipeline, ignored -> this.compilePipeline(pipeline, selected, true));
+		MetalCompiledRenderPipeline compiled = this.linearPipelineCache.computeIfAbsent(
+			pipeline, ignored -> this.compilePipeline(pipeline, selected, true));
+		if (!compiled.isValid()) {
+			this.linearPipelineCache.remove(pipeline);
+			compiled.close();
+			throw new IllegalArgumentException("Could not compile linear world pipeline " + pipeline.getLocation());
+		}
+		return compiled;
 	}
 
 	@Override
@@ -497,7 +514,9 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private MetalCompiledRenderPipeline compilePipeline(final RenderPipeline pipeline, final ShaderSource shaderSource, final boolean linear) {
 		NativeProgram program = this.nativePipelines.get(pipeline);
 		if (program != null) {
-			if (linear) throw new IllegalArgumentException("Native pipelines require their own explicit linear contract");
+			if (linear && program.colorEncoding() != FrameBindings.ColorEncoding.LINEAR_SRGB) {
+				throw new IllegalArgumentException("Native pipelines require an explicit linear-sRGB contract");
+			}
 			return this.compileNativePipeline(pipeline, program);
 		}
 		String vertex = this.resolveShader(pipeline.getVertexShader(), ShaderType.VERTEX, pipeline.getShaderDefines(), shaderSource);

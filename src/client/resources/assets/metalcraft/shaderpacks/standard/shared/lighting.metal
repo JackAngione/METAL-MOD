@@ -1,7 +1,7 @@
 #ifndef MC_LIGHTING_METAL
 #define MC_LIGHTING_METAL
 
-#ifdef MC_SCENE_LINEAR_HDR
+#if MC_SCENE_LINEAR_HDR
 #include "shared/color.metal"
 #endif
 // G-buffer and deferred lighting contract (PR 7a). No occupancy, point lights, or GGX.
@@ -48,7 +48,7 @@ struct McFog {
 // Lightmap/brightness and cardinal light remain artistic multipliers, not radiance.
 // Alpha and G-buffer metadata never pass through the RGB transfer.
 static inline float4 mc_scene_seed(float4 encoded) {
-#ifdef MC_SCENE_LINEAR_HDR
+#if MC_SCENE_LINEAR_HDR
     return float4(mc_srgb_to_linear(encoded.rgb), encoded.a);
 #else
     return encoded;

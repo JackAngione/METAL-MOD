@@ -131,6 +131,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private boolean pendingResolve;
 	private boolean resolveUnavailable;
 	private boolean closed;
+	private FrameBindings.ColorEncoding colorEncoding = FrameBindings.ColorEncoding.LEGACY_ENCODED;
 	private final Vector4f fogColor = new Vector4f();
 	private float fogEnvironmentalStart = WorldLightingModule.DISABLED_FOG_DISTANCE;
 	private float fogEnvironmentalEnd = WorldLightingModule.DISABLED_FOG_DISTANCE;
@@ -257,6 +258,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		final List<RenderPipeline> pipelines
 	) {
 		WorldGeometryAdapter binding = active();
+		if (binding != null) binding.validateSceneEncoding(color);
 		if (binding == null || depth == null || pipelines.isEmpty()) {
 			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 		}
@@ -294,6 +296,32 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	}
 
 	public void beginFrame() {
+		this.beginFrame(FrameBindings.ColorEncoding.LEGACY_ENCODED);
+	}
+
+	/**
+	 * Selects matching geometry and deferred lighting semantics before world rendering begins.
+	 * The caller must first preflight all forward producers and route the entire world coherently.
+	 * A floating-point attachment alone never selects this contract. The live caller stays legacy
+	 * until the sky, forward, Fabulous and output boundaries are ready together.
+	 */
+	public void beginFrame(final FrameBindings.ColorEncoding encoding) {
+		if (this.closed) throw new IllegalStateException("World geometry adapter is closed");
+		if (encoding == null) throw new NullPointerException("encoding");
+		if (encoding == FrameBindings.ColorEncoding.LINEAR_SRGB && !ShaderPackRuntime.BUILTIN_ID.equals(this.packId)) {
+			throw new IllegalArgumentException("Only Standard declares linear world geometry semantics");
+		}
+		// Submit a pending resolve with its original semantics before retiring its programs.
+		this.flushPendingResolve();
+		if (this.pendingResolve) {
+			throw new IllegalStateException("Close the current world pass before beginning another frame");
+		}
+		if (this.colorEncoding != encoding) {
+			this.forgetSubstitutions();
+			this.clearResolvePipeline();
+			this.colorEncoding = encoding;
+			this.resolveUnavailable = false;
+		}
 		this.pendingResolve = false;
 		this.gbufferPass = null;
 		this.haveRasterProjection = false;
@@ -302,6 +330,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 
 	void refreshChannels() {
 		this.channels = this.captureChannels();
+		this.clearResolvePipeline();
+	}
+
+	private void clearResolvePipeline() {
 		if (this.resolvePipeline != null) {
 			this.resolvePipeline.close();
 		}
@@ -343,12 +375,16 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			resolveOpaque();
 		}
 		if (this.resolveUnavailable) {
+			if (this.colorEncoding == FrameBindings.ColorEncoding.LINEAR_SRGB) {
+				throw new IllegalStateException("Linear world resolve is unavailable");
+			}
 			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 		}
 		try {
 			this.ensureResolvePipeline(color);
 		} catch (RuntimeException error) {
 			this.resolveUnavailable = true;
+			if (this.colorEncoding == FrameBindings.ColorEncoding.LINEAR_SRGB) throw error;
 			LOGGER.error("Shader pack '{}' could not compile its resolve; using vanilla geometry until reload", this.packId, error);
 			resolveOpaque();
 			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
@@ -402,11 +438,26 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			LOGGER.error("Shader pack '{}' failed to encode the merged resolve", this.packId, error);
 			this.pendingResolve = false;
 			this.gbufferPass = null;
+			if (this.colorEncoding == FrameBindings.ColorEncoding.LINEAR_SRGB) throw error;
 			return false;
 		}
 	}
 
+	private void validateSceneEncoding(final GpuTextureView scene) {
+		if (this.colorEncoding == FrameBindings.ColorEncoding.LINEAR_SRGB
+			&& (!(scene instanceof MetalGpuTextureView metalView)
+				|| metalView.attachment().descriptor().format() != MetalTexture.Format.RGBA16_FLOAT)) {
+			throw new IllegalArgumentException("Linear world geometry requires RGBA16_FLOAT scene storage");
+		}
+	}
+
+	private String encodedSource(final String source) {
+		return this.colorEncoding == FrameBindings.ColorEncoding.LINEAR_SRGB
+			? source.replace("#define MC_SCENE_LINEAR_HDR 0\n", "#define MC_SCENE_LINEAR_HDR 1\n") : source;
+	}
+
 	private void ensureResolvePipeline(final GpuTextureView scene) {
+		this.validateSceneEncoding(scene);
 		MetalTexture.Format sceneFormat = scene instanceof MetalGpuTextureView metalView
 			? metalView.attachment().descriptor().format()
 			: MetalTexture.Format.RGBA8_UNORM;
@@ -418,10 +469,11 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		for (Channel channel : this.channels) {
 			targets.add(MetalRenderPipeline.ColorTarget.opaque(channel.view().attachment().descriptor().format()));
 		}
+		String selectedSource = this.encodedSource(this.resolveSource);
 		MetalRenderPipeline replacement = this.device.metal().createRenderPipeline(new MetalRenderPipeline.Descriptor(
-			this.resolveSource,
+			selectedSource,
 			"resolve_vertex",
-			this.resolveSource,
+			selectedSource,
 			"resolve_fragment",
 			targets,
 			MetalTexture.Format.DEPTH32_FLOAT,
@@ -490,14 +542,19 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			this.device.registerNativePipeline(stand, new MetalGpuDevice.NativeProgram(
 				this.programSource(pipeline, program, material, slots, transforms),
 				program.entryPoint(this.passId, "vertex"),
-				program.entryPoint(this.passId, "fragment")
+				program.entryPoint(this.passId, "fragment"),
+				this.colorEncoding
 			));
 			if (!this.device.precompilePipeline(stand, null).isValid()) {
 				this.device.forgetNativePipeline(stand);
+				if (this.colorEncoding == FrameBindings.ColorEncoding.LINEAR_SRGB) {
+					throw new IllegalStateException("Could not compile linear geometry for " + pipeline.getLocation());
+				}
 				return Optional.empty();
 			}
 			return Optional.of(new Substitution(stand, program, material));
 		} catch (RuntimeException error) {
+			if (this.colorEncoding == FrameBindings.ColorEncoding.LINEAR_SRGB) throw error;
 			LOGGER.error("Shader pack '{}' could not stand in for pipeline {}", this.packId, pipeline.getLocation(), error);
 			return Optional.empty();
 		}
@@ -566,7 +623,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		for (Material value : Material.values()) {
 			preamble.append("#define MC_MATERIAL_").append(value.name()).append(' ').append(value.ordinal()).append('\n');
 		}
-		return preamble + this.source;
+		return this.encodedSource(preamble + this.source);
 	}
 
 	private void writeUniforms(final MetalBuffer uniforms) {
@@ -738,6 +795,13 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 	}
 
+	private void forgetSubstitutions() {
+		for (Optional<Substitution> substitution : this.substitutions.values()) {
+			substitution.ifPresent(value -> this.device.forgetNativePipeline(value.pipeline()));
+		}
+		this.substitutions.clear();
+	}
+
 	@Override
 	public void close() {
 		if (this.closed) {
@@ -750,10 +814,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			LOGGER.info("Shader pack '{}' leaves {} pipeline(s) outside the G-buffer: {}",
 				this.packId, this.declined.size(), this.declined);
 		}
-		for (Optional<Substitution> substitution : this.substitutions.values()) {
-			substitution.ifPresent(value -> this.device.forgetNativePipeline(value.pipeline()));
-		}
-		this.substitutions.clear();
+		this.forgetSubstitutions();
 		this.gbufferPass = null;
 		if (this.resolvePipeline != null) {
 			this.resolvePipeline.close();
