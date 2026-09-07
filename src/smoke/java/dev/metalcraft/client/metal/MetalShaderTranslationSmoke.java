@@ -328,6 +328,9 @@ public final class MetalShaderTranslationSmoke {
 			assertMemorylessPassMerge();
 			WorldHdrTargetsSmoke.run();
 			OpaqueSnapshotSmoke.run();
+			WaterForwardPipelineSmoke.run();
+			dev.metalcraft.client.shader.water.WaterVertexMetadataSmoke.run();
+			dev.metalcraft.client.shader.water.WaterFrameInputsSmoke.run();
 			LinearWorldSessionSmoke.run();
 			LinearWorldActivationSmoke.run();
 			LinearWorldReloadSourceSmoke.run();

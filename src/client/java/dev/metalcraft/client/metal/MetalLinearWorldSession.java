@@ -1,6 +1,7 @@
 package dev.metalcraft.client.metal;
 
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import dev.metalcraft.client.shader.water.WaterFrameInputs;
 import com.mojang.blaze3d.shaders.ShaderSource;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
@@ -53,6 +54,11 @@ public final class MetalLinearWorldSession implements AutoCloseable {
 	private final Token token;
 	private final Set<RenderPipeline> approved = Collections.newSetFromMap(new IdentityHashMap<>());
 	private boolean poisoned;
+	private @Nullable WaterFrameInputs waterFrameInputs;
+	private @Nullable MetalBuffer waterFrameBuffer;
+	private int waterDraws;
+	void recordWaterDraw() { this.waterDraws++; }
+	int waterDraws() { return this.waterDraws; }
 	private boolean closed;
 
 	MetalLinearWorldSession(final MetalGpuDevice device, final Token token) {
@@ -62,6 +68,27 @@ public final class MetalLinearWorldSession implements AutoCloseable {
 
 	public Token token() {
 		return this.token;
+	}
+
+	public void waterFrameInputs(final @Nullable WaterFrameInputs inputs) {
+		this.requireOpen();
+		if (this.waterFrameBuffer != null) throw new IllegalStateException("Water frame inputs are already bound");
+		this.waterFrameInputs = inputs;
+	}
+
+	@Nullable MetalBuffer waterFrameBuffer() {
+		if (this.waterFrameInputs() == null) return null;
+		if (this.waterFrameBuffer == null) {
+			MetalBuffer next = this.device.metal().createBuffer(WaterFrameInputs.UNIFORM_BYTES, MetalBuffer.StorageMode.SHARED);
+			try (MetalBuffer.Mapping mapping = next.map()) { this.waterFrameInputs.write(mapping.bytes()); }
+			catch (RuntimeException error) { next.close(); throw error; }
+			this.waterFrameBuffer = next;
+		}
+		return this.waterFrameBuffer;
+	}
+
+	public @Nullable WaterFrameInputs waterFrameInputs() {
+		return this.closed || this.poisoned ? null : this.waterFrameInputs;
 	}
 
 	public boolean isPoisoned() {
@@ -129,5 +156,7 @@ public final class MetalLinearWorldSession implements AutoCloseable {
 		if (this.closed) return;
 		this.closed = true;
 		this.device.endLinearWorld(this);
+		if (this.waterFrameBuffer != null) this.waterFrameBuffer.close();
+		this.waterFrameBuffer = null;
 	}
 }

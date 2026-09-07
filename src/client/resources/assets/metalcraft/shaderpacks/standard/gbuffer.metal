@@ -59,6 +59,12 @@ struct McLighting {
 
 // ---- The attachments a world draw writes -------------------------------------------------------
 
+#ifdef MC_WATER_FORWARD
+// Typed sidecar binding: 32 bytes per original vertex, independent of sorted indices.
+struct WaterVertexMetadata { float4 normalMaterial; float4 flow; };
+struct WaterDraw { uint baseVertex; uint vertexCount; uint debugIdentity; uint reserved; };
+#endif
+
 struct GBufferTargets {
     float4 scene  [[color(MC_TARGET_SCENE)]];
     float4 albedo [[color(MC_TARGET_GBUFFER_ALBEDO)]];
@@ -79,6 +85,10 @@ struct GBufferVaryings {
     float2 lightLevels;
     float sphericalDistance;
     float cylindricalDistance;
+#ifdef MC_WATER_FORWARD
+    float waterMaterial [[flat]];
+    float3 waterFlow;
+#endif
 };
 
 // Fog, octahedral encode/decode, material IDs and the sun-term split live in shared/lighting.metal.
@@ -177,6 +187,11 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     constant McGlobals &globals [[buffer(MC_SLOT_GLOBALS)]],
     texture2d<float> lightMap [[texture(MC_SLOT_SAMPLER2)]],
     sampler lightSampler [[sampler(MC_SLOT_SAMPLER2)]]
+#ifdef MC_WATER_FORWARD
+    , uint vertexId [[vertex_id]]
+    , device const WaterVertexMetadata *waterMetadata [[buffer(14)]]
+    , constant WaterDraw &waterDraw [[buffer(15)]]
+#endif
 ) {
     float3 relative = in.Position + float3(section.ChunkPosition - globals.CameraBlockPos) + globals.CameraOffset;
     float3 viewPos = (section.ModelViewMat * float4(relative, 1.0)).xyz;
@@ -187,6 +202,15 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     out.worldPos = viewPos;
     out.normal = float3(0.0);
     out.tint = in.Color;
+#ifdef MC_WATER_FORWARD
+    uint localVertex = vertexId - waterDraw.baseVertex;
+    WaterVertexMetadata metadata = localVertex < waterDraw.vertexCount
+        ? waterMetadata[localVertex] : WaterVertexMetadata{float4(0.0), float4(0.0)};
+    out.waterMaterial = metadata.normalMaterial.w;
+    out.normal = metadata.normalMaterial.xyz;
+    out.waterFlow = metadata.flow.xyz;
+    if (waterDraw.debugIdentity != 0 && out.waterMaterial == 1.0) out.tint.rgb = float3(1.0, 0.0, 1.0);
+#endif
     out.lightMapColor = mc_sample_lightmap(lightMap, lightSampler, uv2);
     out.uv = in.UV0;
     out.lightLevels = saturate(uv2 / 240.0);
@@ -237,7 +261,11 @@ static inline float4 mc_sample_rgss(texture2d<float> atlas, sampler atlasSampler
     return mix(mc_sample_nearest(atlas, atlasSampler, uv, pixelSize, du, dv, texelScreenSize), rgss, blendFactor);
 }
 
+#ifdef MC_WATER_FORWARD
+fragment float4 gbuffer_terrain_fragment(
+#else
 fragment GBufferTargets gbuffer_terrain_fragment(
+#endif
     GBufferVaryings in [[stage_in]],
     constant McFog &fog [[buffer(MC_SLOT_FOG)]],
     constant McChunkSection &section [[buffer(MC_SLOT_TRANSFORMS)]],
@@ -261,6 +289,9 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     }
 #endif
 
+#ifdef MC_WATER_FORWARD
+    return mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
+#else
     GBufferTargets out;
     out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
     // Albedo is the surface before the light hits it, so the lightmap and the fog stay out of it.
@@ -268,6 +299,7 @@ fragment GBufferTargets gbuffer_terrain_fragment(
         out, (texel * in.tint).rgb, mc_reconstruct_normal(in.worldPos), in.lightLevels, max(0.0, -in.worldPos.z)
     );
     return out;
+#endif
 }
 
 #endif // MC_PROGRAM_TERRAIN

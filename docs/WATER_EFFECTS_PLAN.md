@@ -43,7 +43,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
 | [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
-| [ ] | W3 | Water routing and stable frame inputs | W1, W2 | /root | in progress | 2026-09-07: stored HDR/depth snapshots wired before translucency; GPU, standard-world water and shader lifecycle checks pass. Production metadata/uniforms and depth debug acceptance remain open; see W3 initial increment. |
+| [ ] | W3 | Water routing and stable frame inputs | W1, W2 | /root | in progress | 2026-09-07: opaque snapshots, production per-vertex metadata/forward routing and immutable frame bindings implemented; actual GPU routing, standard-world identity and lifecycle tests pass. Depth debug views and full transparency/resize acceptance remain open; see W3 production increment. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
 | [ ] | W6 | Shoreline foam and underwater appearance | W5 | unassigned | not started | Implement foam and one underwater fog policy. |
@@ -1157,3 +1157,88 @@ views. W3 remains in progress: native/half live depth views, explicit Fabulous/o
 water comparisons, resize/world-change acceptance and production water GPU routing fixtures
 are still required. No new water surface shading or performance acceptance is claimed.
 The added stored pair costs 12 bytes per world pixel before allocation alignment.
+
+
+### W3 production metadata increment — claimed 2026-09-07 by `/root`
+
+Snapshot progress committed as `bcdc436`. Coordinator serializes tracker and shared registration.
+
+- [x] W3c: collect explicit per-vertex water identity, face normal and flow alongside
+  unmodified BLOCK vertices during compilation; focused metadata fixtures. Owner `/root/metadata`.
+- [x] W3d: transport compiled metadata through section lifetime and bind per sorted draw
+  with a defined missing-data fallback. Owner `/root`.
+- [x] W3e: establish immutable typed projection/camera/time water frame input contract
+  with focused validity/precision fixtures. Owner `/root/frame_inputs`.
+
+Keep W3 unchecked until production routing, depth diagnostics and live acceptance pass.
+
+- [x] W3f: GPU fixture for actual forward water pipeline with mixed sidecar identity,
+  nonzero original base vertex and sorted indices. Owner `/root/snapshots`.
+
+W3d implementation refinement: store managed immutable metadata on the compiled mesh
+before existing vertex/index publication; attach its owner directly to each Draw during
+`prepareChunkRenders`. Admit a private-to-the-mesh, immutable shared Metal buffer before
+its first water draw. This synchronous CPU upload needs no new asynchronous publication
+callback, does not touch vanilla vertex heaps, and avoids global buffer-offset registries.
+Cancellation/mesh retirement closes the owner; index-only resorting preserves it. Missing
+or retired metadata keeps the original forward pipeline. Per-draw original base vertex
+is bound with the sidecar; draw indices and reversed lists remain unchanged.
+
+W3c–W3e partial progress (2026-09-07, `/root` with Sol medium agents): compiled
+sections now carry explicit water sidecars (32 bytes/original vertex: normal/material,
+flow/padding) into immutable per-mesh Metal buffers. Draw metadata follows the original
+`RenderPass.Draw` through list reversal; shader lookup subtracts the current original
+base vertex. Non-water gaps are explicitly zero. Original BLOCK tint/UV/light bytes and
+indices stay unchanged, including index-only resorting. Cancellation/retirement closes
+metadata with the compiled mesh. No frame-loop GPU readback or upload wait was introduced.
+
+The Standard forward variant preserves original terrain blend/depth/cull state and shared
+atlas/light/fog math, and only routes draws with available metadata and healthy captured
+frame inputs. Non-water fragments retain the same compatibility shading. `WaterRoutingDebug`
+uses the actual shader material stream to show water-only magenta; the legacy vertex RGB
+probe is disabled during the updated client fixture. Per-draw metadata/base/count use
+explicit slots 14/15; frame inputs use buffer 13; opaque snapshot textures use 12/13.
+Water-bearing draw groups currently bypass command batching to retire immutable per-draw
+uniforms only after native encoding; benchmark/optimization remains open.
+
+Actual raster projection is captured at the first `ProjectionMatrixBuffer.getBuffer` in
+`GameRenderer.renderLevel` after camera effects. Frame data copies that projection and its
+inverse, extracted camera position/submersion and game time. The 176-byte uniform owns
+projection/inverse, split camera position, bounded animation seconds and submerged flag;
+it is written once per world session and retired after encoding. Time wraps at 1024 seconds;
+future wave functions must be periodic at that boundary. Missing/invalid projection selects
+the original forward path. These inputs are bound for future effects; no animation,
+refraction, absorption or foam is implemented in this increment.
+
+Initial validation: compile and full build passed; `/tmp/water-w3-routing-build.log`.
+Updated standard-world production identity fixture passed in 39 seconds, followed by the
+same test with immutable frame binding enabled in 39 seconds (`/tmp/water-w3-frame-client.log`).
+Visually inspected production magenta capture: water-only coverage excludes glass/ice/slime/lava.
+Final fixture/lifecycle validation and final tracker checkboxes follow when complete.
+
+W3c–W3f completion evidence (2026-09-07, `/root`, `/root/metadata`,
+`/root/frame_inputs`, `/root/snapshots`; subagents GPT-5.6 Sol medium):
+
+- [x] `./gradlew build`: final pass including actual forward water GPU fixture;
+  `/tmp/water-w3f-build.log`, 11 seconds. `WaterForwardPipelineSmoke` calls the actual
+  adapter pipeline with 28-byte BLOCK vertices, base vertex 2, mixed water/glass IDs,
+  overlapping reordered indices, debug on/off and HDR blend reference checks.
+  Metadata and immutable frame serialization/precision/invalid-input fixtures also pass.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed
+  with actual metadata routing and frame-uniform binding in explicit NORMAL world;
+  `/tmp/water-w3-frame-client.log`, 39 seconds. Successful production draw count,
+  water-only identity/restoration, session scope and linear exposure/HUD asserted.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed
+  with opaque texture bindings and frame retirement in place; 40 seconds,
+  `/tmp/water-w3-routing-lifecycle.log`.
+- [x] Visually inspected refreshed production identity and restored captures at the W3a
+  artifact paths. Pool, flowing/falling water and waterlogged water are magenta only
+  under shader diagnostic; glass/ice/slime/lava stay unchanged; restored water is blue.
+- [x] `git diff --check`: passed. Earlier compile errors were fixture/mixin Java casts,
+  corrected before these passing runs. Subagents resumed successfully after usage-limit retry.
+
+W3 is still unchecked. Next acceptance work: surface/opaque depth debug shader views at
+native and half resolution, explicit ordinary/Fabulous comparisons and resize/world-change
+coverage. Opaque textures and stable frame data are bound but await depth/effect consumers;
+GPU binding alone is not proof of reconstruction or visual effects. These substep completions
+establish production identity/routing and frame ownership, not the entire W3 acceptance gate.

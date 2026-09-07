@@ -27,7 +27,12 @@
     "WindowFramebufferAccessor",
     "WindowRenderResolutionMixin",
     "LevelRendererShadowMixin",
-    "ViewAreaAccessor"
+    "ViewAreaAccessor",
+    "BufferBuilderAccessor",
+    "SectionCompilerResultsWaterMixin",
+    "CompiledSectionMeshWaterMixin",
+    "RenderPassWaterDrawMixin",
+    "LevelRendererWaterDrawMixin"
   ],
   "injectors": {
     "defaultRequire": 1

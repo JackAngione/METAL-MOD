@@ -112,6 +112,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final int resolveCameraSlot;
 	private final int lightingFrameSlot;
 	private final Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
+	private final Map<RenderPipeline, Optional<RenderPipeline>> waterSubstitutions = new IdentityHashMap<>();
 	private final Set<String> declined = new LinkedHashSet<>();
 	private final Matrix4f inverseProjection = new Matrix4f();
 	private final Matrix4f viewToCameraRelative = new Matrix4f();
@@ -514,6 +515,36 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		return built;
 	}
 
+	/** Forward water shares vanilla terrain coverage, sorting and color semantics. */
+	public Optional<RenderPipeline> waterPipeline(final RenderPipeline pipeline) {
+		if (this.closed || this.colorEncoding != FrameBindings.ColorEncoding.LINEAR_SRGB
+			|| !ShaderPackRuntime.BUILTIN_ID.equals(this.packId)
+			|| programFor(pipeline) != Program.TERRAIN || !hasVertexElements(pipeline, Program.TERRAIN)
+			|| !isBlended(pipeline) || !Program.TERRAIN.implementedDefines().containsAll(declaredDefines(pipeline))) {
+			return Optional.empty();
+		}
+		return this.waterSubstitutions.computeIfAbsent(pipeline, original -> {
+			Map<String, Integer> slots = resourceSlots(original);
+			if (!slots.keySet().containsAll(List.of("Projection", "Fog", "Globals", "ChunkSection", "Sampler0", "Sampler2"))
+				|| slots.values().stream().anyMatch(slot -> slot >= 8)) return Optional.empty();
+			RenderPipeline stand = this.standIn(original, Program.TERRAIN, Material.WATER, true);
+			try {
+				this.device.registerNativePipeline(stand, new MetalGpuDevice.NativeProgram(
+					"#define MC_WATER_FORWARD 1\n" + this.programSource(original, Program.TERRAIN, Material.WATER, slots, "ChunkSection"),
+					"gbuffer_terrain_vertex", "gbuffer_terrain_fragment", FrameBindings.ColorEncoding.LINEAR_SRGB));
+				if (!this.device.precompileLinearWorldPipeline(stand, null).isValid()) {
+					this.device.forgetNativePipeline(stand);
+					return Optional.empty();
+				}
+				return Optional.of(stand);
+			} catch (RuntimeException error) {
+				this.device.forgetNativePipeline(stand);
+				LOGGER.error("Water forward pipeline unavailable; retaining baseline terrain", error);
+				return Optional.empty();
+			}
+		});
+	}
+
 	private Optional<Substitution> build(final RenderPipeline pipeline) {
 		Program program = programFor(pipeline);
 		if (program == null || !hasVertexElements(pipeline, program) || isBlended(pipeline)) {
@@ -573,6 +604,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	}
 
 	private RenderPipeline standIn(final RenderPipeline pipeline, final Program program, final Material material) {
+		return this.standIn(pipeline, program, material, false);
+	}
+
+	private RenderPipeline standIn(final RenderPipeline pipeline, final Program program, final Material material, final boolean water) {
 		RenderPipeline.Builder builder = RenderPipeline.builder()
 			.withLocation(Identifier.parse("metalcraft:gbuffer/"
 				+ program.name().toLowerCase(Locale.ROOT) + "_" + material.name().toLowerCase(Locale.ROOT)
@@ -593,7 +628,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			}
 		}
 		builder = builder.withColorTargetState(0, pipeline.getColorTargetState());
-		for (int index = 0; index < this.channels.size(); index++) {
+		for (int index = 0; !water && index < this.channels.size(); index++) {
 			builder = builder.withColorTargetState(index + 1, new ColorTargetState(
 				Optional.empty(),
 				this.channels.get(index).view().gpuFormat(),
@@ -812,6 +847,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			substitution.ifPresent(value -> this.device.forgetNativePipeline(value.pipeline()));
 		}
 		this.substitutions.clear();
+		for (Optional<RenderPipeline> water : this.waterSubstitutions.values()) {
+			water.ifPresent(this.device::forgetNativePipeline);
+		}
+		this.waterSubstitutions.clear();
 	}
 
 	@Override

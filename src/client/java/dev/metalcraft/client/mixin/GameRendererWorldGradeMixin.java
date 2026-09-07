@@ -13,6 +13,11 @@ import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.joml.Matrix4fc;
+import org.joml.Matrix4f;
+import org.joml.Vector3d;
+import net.minecraft.client.renderer.ProjectionMatrixBuffer;
+import net.minecraft.world.level.material.FogType;
+import dev.metalcraft.client.shader.water.WaterFrameInputs;
 import org.joml.Vector4f;
 import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
@@ -27,6 +32,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 abstract class GameRendererWorldGradeMixin {
 	@Unique
 	private MetalLinearWorldActivation.@Nullable Frame metalcraft$linearWorld;
+
+	@Unique private @Nullable Matrix4f metalcraft$waterProjection;
+
+	@Redirect(method = "renderLevel", at = @At(value = "INVOKE", ordinal = 0,
+		target = "Lnet/minecraft/client/renderer/ProjectionMatrixBuffer;getBuffer(Lorg/joml/Matrix4f;)Lcom/mojang/blaze3d/buffers/GpuBufferSlice;"))
+	private GpuBufferSlice metalcraft$captureWaterProjection(final ProjectionMatrixBuffer buffer, final Matrix4f projection) {
+		this.metalcraft$waterProjection = new Matrix4f(projection);
+		return buffer.getBuffer(projection);
+	}
 
 	@Redirect(
 		method = "renderLevel",
@@ -66,12 +80,19 @@ abstract class GameRendererWorldGradeMixin {
 			gpu, color, depth, fabulous);
 		this.metalcraft$linearWorld = frame;
 		try {
+			if (gpu != null && gpu.linearWorldSession() != null) {
+				gpu.linearWorldSession().waterFrameInputs(WaterFrameInputs.create(this.metalcraft$waterProjection,
+					new Vector3d(cameraState.pos.x, cameraState.pos.y, cameraState.pos.z),
+					self.gameRenderState().levelRenderState.gameTime, deltaTracker.getGameTimeDeltaPartialTick(false),
+					cameraState.fogType == FogType.WATER).orElse(null));
+			}
 			levelRenderer.render(resourceAllocator, deltaTracker, renderOutline, cameraState,
 				modelViewMatrix, terrainFog, fogColor, shouldRenderSky);
 		} catch (Throwable error) {
 			this.metalcraft$linearWorld = null;
 			throw error;
 		} finally {
+			this.metalcraft$waterProjection = null;
 			frame.close();
 		}
 	}

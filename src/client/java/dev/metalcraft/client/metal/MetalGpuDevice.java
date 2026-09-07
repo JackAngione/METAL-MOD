@@ -80,6 +80,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private @Nullable MetalLinearWorldSession linearWorldSession;
 	private @Nullable MetalOpaqueSnapshotOwner opaqueSnapshots;
 	private boolean lastWorldHadOpaqueWaterInputs;
+	private int lastWorldWaterDraws;
+	public int lastWorldWaterDraws() { return this.lastWorldWaterDraws; }
 	private @Nullable ShaderSource reloadShaderSource;
 	private final Map<RenderPipeline, LinearWorldPostShaders.Semantic> linearPostContracts = new IdentityHashMap<>();
 
@@ -183,6 +185,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			throw new IllegalStateException("A linear world session is already active");
 		}
 		this.lastWorldHadOpaqueWaterInputs = false;
+		this.lastWorldWaterDraws = 0;
 		if (knownPipelines == null || knownPost == null) {
 			throw new NullPointerException("Linear world preflight collections are required");
 		}
@@ -262,6 +265,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 
 	void endLinearWorld(final MetalLinearWorldSession session) {
 		if (this.linearWorldSession != session) return;
+		this.lastWorldWaterDraws = session.isPoisoned() ? 0 : session.waterDraws();
 		this.lastWorldHadOpaqueWaterInputs = !session.isPoisoned()
 			&& this.opaqueSnapshots != null && this.opaqueSnapshots.current().isPresent();
 		if (session.isPoisoned()) this.forceLegacyFrame = true;

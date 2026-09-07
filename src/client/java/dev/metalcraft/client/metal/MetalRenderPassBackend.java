@@ -12,6 +12,10 @@ import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderPassBackend;
 import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTextureView;
+import dev.metalcraft.client.shader.WorldGeometryAdapter;
+import dev.metalcraft.client.shader.water.WaterDrawSource;
+import dev.metalcraft.client.shader.water.WaterMeshBinding;
+import dev.metalcraft.client.shader.water.WaterRoutingDebug;
 import java.nio.IntBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
@@ -67,6 +71,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	private boolean hasDepth;
 	private MetalTexture.@Nullable Format colorFormat;
 	private MetalCompiledRenderPipeline pipeline;
+	private RenderPipeline originalPipeline;
 	private MetalGpuBuffer indexBuffer;
 	private MetalRenderPass.IndexType indexType;
 	private int debugGroups;
@@ -117,6 +122,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		this.textures.clear();
 		this.clearBoundSlots();
 		this.pipeline = null;
+		this.originalPipeline = null;
 		this.indexBuffer = null;
 		this.indexType = null;
 		this.debugGroups = 0;
@@ -168,6 +174,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void setPipeline(final RenderPipeline pipeline) {
+		this.originalPipeline = pipeline;
 		MetalCompiledRenderPipeline compiled;
 		if (this.hdrOwned) {
 			MetalLinearWorldSession session = this.device.linearWorldSession();
@@ -288,14 +295,41 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		final T uniformArgument
 	) {
 		if (this.discardDraws) return;
-		MetalCommandStream batch = BATCHING ? this.beginRecording() : null;
+		RenderPipeline baseline = this.originalPipeline;
+		WorldGeometryAdapter geometry = WorldGeometryAdapter.active();
+		boolean waterEligible = geometry != null && this.device.opaqueWaterInputs().isPresent()
+			&& this.device.linearWorldSession().waterFrameInputs() != null
+			&& draws.stream().anyMatch(draw -> ((Object)draw) instanceof WaterDrawSource source && source.metalcraft$waterMesh() != null);
+		// Per-draw immutable uniforms are retired after encoding; don't defer their native binds.
+		MetalCommandStream batch = BATCHING && !waterEligible ? this.beginRecording() : null;
 		try {
 			for (RenderPass.Draw<T> draw : draws) {
 				BiConsumer<T, RenderPass.UniformUploader> uploader = draw.uniformUploaderConsumer();
 				if (uploader != null) uploader.accept(uniformArgument, this::setUniform);
 				this.setIndexBuffer(draw.indexBuffer() == null ? defaultIndexBuffer : draw.indexBuffer(), draw.indexType() == null ? defaultIndexType : draw.indexType());
 				this.setVertexBuffer(draw.slot(), draw.vertexBuffer().slice());
-				this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
+				WaterMeshBinding water = waterEligible && ((Object)draw) instanceof WaterDrawSource source ? source.metalcraft$waterMesh() : null;
+				MetalBuffer metadata = water == null ? null : water.upload(this.device.metal());
+				RenderPipeline selected = metadata == null ? baseline : geometry.waterPipeline(baseline).orElse(baseline);
+				if (selected != this.originalPipeline) this.setPipeline(selected);
+				if (selected != baseline) {
+					try (MetalBuffer waterDraw = this.device.metal().createBuffer(16, MetalBuffer.StorageMode.SHARED)) {
+						try (MetalBuffer.Mapping mapping = waterDraw.map()) {
+							mapping.bytes().putInt(draw.baseVertex()).putInt(water.vertexCount())
+								.putInt(WaterRoutingDebug.enabled() ? 1 : 0).putInt(0);
+						}
+						this.device.linearWorldSession().recordWaterDraw();
+						this.encodeUniformBuffer(13, this.device.linearWorldSession().waterFrameBuffer(), 0, MetalRenderPass.STAGE_VERTEX | MetalRenderPass.STAGE_FRAGMENT);
+						var opaque = this.device.opaqueWaterInputs().orElseThrow();
+						this.encodeTexture(12, opaque.color().metal(), MetalRenderPass.STAGE_FRAGMENT);
+						this.encodeTexture(13, opaque.depth().metal(), MetalRenderPass.STAGE_FRAGMENT);
+						this.encodeUniformBuffer(14, metadata, 0, MetalRenderPass.STAGE_VERTEX);
+						this.encodeUniformBuffer(15, waterDraw, 0, MetalRenderPass.STAGE_VERTEX);
+						this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
+					}
+				} else {
+					this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
+				}
 			}
 		} finally {
 			// Cleared before the batch is submitted, so a draw that threw part-way discards what it
@@ -303,6 +337,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			this.recording = null;
 		}
 		if (batch != null) this.submitBatch(batch);
+		if (this.originalPipeline != baseline) this.setPipeline(baseline);
 	}
 
 	@Override

@@ -8,6 +8,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import dev.metalcraft.client.shader.world.WaterIdentityDebug;
+import dev.metalcraft.client.shader.water.WaterRoutingDebug;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.world.level.gamerules.GameRules;
@@ -34,6 +35,8 @@ final class MetalWaterIdentityGameTest {
 			settings.getGameRules().set(GameRules.ADVANCE_WEATHER, false, null);
 		});
 		boolean originalDebug = WaterIdentityDebug.enabled();
+		boolean originalRoutingDebug = WaterRoutingDebug.enabled();
+		WaterIdentityDebug.setEnabled(false);
 		java.util.Map<String, Object> originalOptions = new java.util.LinkedHashMap<>();
 		String originalPack = this.context.computeOnClient(client -> ShaderPackRuntime.active().selectedPackId());
 		try (var world = builder.create()) {
@@ -84,6 +87,7 @@ final class MetalWaterIdentityGameTest {
 			assertWorldOnlyGrade(restored, graded);
 		} finally {
 			WaterIdentityDebug.setEnabled(originalDebug);
+			WaterRoutingDebug.setEnabled(originalRoutingDebug);
 			this.context.runOnClient(client -> {
 				originalOptions.forEach((id, value) -> ShaderPackRuntime.active().setOption(id, value));
 				ShaderPackRuntime.active().selectPack(originalPack);
@@ -95,8 +99,8 @@ final class MetalWaterIdentityGameTest {
 	private Path capture(final boolean enabled, final String name) {
 		boolean[] rebuilt = {false};
 		this.context.runOnClient(client -> {
-			if (WaterIdentityDebug.enabled() != enabled) {
-				WaterIdentityDebug.setEnabled(enabled);
+			if (WaterRoutingDebug.enabled() != enabled) {
+				WaterRoutingDebug.setEnabled(enabled);
 				client.levelExtractor.allChanged();
 				rebuilt[0] = true;
 			}
@@ -109,6 +113,9 @@ final class MetalWaterIdentityGameTest {
 			var device = MetalGpuDevices.current();
 			if (device == null || !device.lastWorldHadOpaqueWaterInputs()) {
 				throw new AssertionError("Opaque water inputs were not captured in the live HDR world");
+			}
+			if (device.lastWorldWaterDraws() == 0) {
+				throw new AssertionError("Production water metadata did not reach a forward draw");
 			}
 			if (device.opaqueWaterInputs().isPresent()) {
 				throw new AssertionError("Opaque water inputs escaped the world session");
