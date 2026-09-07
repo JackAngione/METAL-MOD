@@ -47,6 +47,7 @@ public final class WaterFrameInputsSmoke {
 			throw new AssertionError("Smoke mutation did not execute");
 		}
 		assertGpuLayout(input, expectedProjection);
+		assertSkyInputs();
 
 		float last = WaterFrameInputs.create(reverseZProjection(), new Vector3d(),
 			WaterFrameInputs.ANIMATION_PERIOD_TICKS - 1, 1.0F, false).orElseThrow().animationSeconds();
@@ -72,6 +73,40 @@ public final class WaterFrameInputsSmoke {
 		assertRejected(reverseZProjection(), new Vector3d(), Float.NaN, "Non-finite partial tick");
 		assertRejected(reverseZProjection(), new Vector3d(), -0.01F, "Negative partial tick");
 		assertRejected(reverseZProjection(), new Vector3d(), 1.01F, "Oversized partial tick");
+	}
+
+	private static void assertSkyInputs() {
+		var base = WaterFrameInputs.create(reverseZProjection(), new Vector3d(), 0L, 0.0F, false).orElseThrow();
+		var sky = new net.minecraft.client.renderer.state.level.SkyRenderState();
+		sky.skybox = net.minecraft.world.level.dimension.DimensionType.Skybox.OVERWORLD;
+		sky.skyColor = 0xff80a0ff;
+		sky.sunAngle = 0.0F;
+		sky.rainBrightness = 1.0F;
+		var noon = base.withSky(sky);
+		ByteBuffer bytes = ByteBuffer.allocate(WaterFrameInputs.UNIFORM_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+		noon.write(bytes);
+		if (bytes.getFloat(180) != 1.0F || bytes.getFloat(188) != 1.0F || bytes.getFloat(204) != 1.0F
+			|| Math.abs(bytes.getFloat(192) - dev.metalcraft.client.shader.SceneColor.srgbToLinear(128 / 255.0F)) > 1e-6F) {
+			throw new AssertionError("Extracted noon lighting GPU layout/linear color incorrect");
+		}
+		sky.rainBrightness = 0.0F;
+		bytes.clear(); base.withSky(sky).write(bytes);
+		if (bytes.getFloat(188) != 0.0F) throw new AssertionError("Rain did not suppress sun");
+		sky.sunAngle = (float)Math.PI;
+		sky.rainBrightness = 1.0F;
+		bytes.clear(); base.withSky(sky).write(bytes);
+		if (bytes.getFloat(188) != 0.0F || bytes.getFloat(200) > 0.021F) {
+			throw new AssertionError("Night retained daytime lighting");
+		}
+		sky.skybox = net.minecraft.world.level.dimension.DimensionType.Skybox.END;
+		bytes.clear(); base.withSky(sky).write(bytes);
+		for (int offset = 176; offset < 208; offset += 4) {
+			if (bytes.getFloat(offset) != 0.0F) throw new AssertionError("Nonstandard sky retained normal lighting");
+		}
+		bytes.clear(); noon.write(bytes);
+		if (bytes.getFloat(188) != 1.0F) throw new AssertionError("Mutable sky escaped immutable frame capture");
+		bytes.clear(); base.write(bytes);
+		if (bytes.getFloat(188) != 0.0F) throw new AssertionError("withSky mutated source frame");
 	}
 
 	private static Matrix4f reverseZProjection() {

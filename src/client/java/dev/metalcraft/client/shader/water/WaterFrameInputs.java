@@ -29,9 +29,10 @@ public final class WaterFrameInputs {
 	/**
 	 * GPU layout in bytes: projection mat4 at 0, inverse projection mat4 at 64,
 	 * camera-world high float4 at 128, camera-world residual float4 at 144, animation
-	 * seconds float at 160, submerged uint at 164, and eight padding bytes at 168.
+	 * seconds float at 160, submerged uint at 164, eight padding bytes at 168,
+	 * sun direction/energy float4 at 176, linear sky RGB/validity float4 at 192.
 	 */
-	public static final int UNIFORM_BYTES = 176;
+	public static final int UNIFORM_BYTES = 208;
 
 	private static final float MIN_HOMOGENEOUS_W = 1.0e-7F;
 
@@ -42,6 +43,7 @@ public final class WaterFrameInputs {
 	private final double cameraZ;
 	private final float animationSeconds;
 	private final boolean cameraSubmerged;
+	private float sunX, sunY, sunEnergy, environmentR, environmentG, environmentB, normalSky;
 
 	private WaterFrameInputs(final Matrix4f projection, final Matrix4f inverseProjection,
 		final Vector3dc cameraWorldPosition, final float animationSeconds, final boolean cameraSubmerged) {
@@ -81,6 +83,24 @@ public final class WaterFrameInputs {
 		if (seconds >= ANIMATION_PERIOD_SECONDS) seconds -= ANIMATION_PERIOD_SECONDS;
 		return Optional.of(new WaterFrameInputs(projectionCopy, inverse, cameraWorldPosition,
 			(float)seconds, cameraSubmerged));
+	}
+
+	/** Copies extracted sky values; unavailable/nonstandard skies have no invented sun or sky. */
+	public WaterFrameInputs withSky(final net.minecraft.client.renderer.state.level.SkyRenderState sky) {
+		WaterFrameInputs copy = new WaterFrameInputs(new Matrix4f(this.projection),
+			new Matrix4f(this.inverseProjection), this.cameraWorldPosition(), this.animationSeconds, this.cameraSubmerged);
+		if (sky.skybox != net.minecraft.world.level.dimension.DimensionType.Skybox.OVERWORLD
+			|| !Float.isFinite(sky.sunAngle) || !Float.isFinite(sky.rainBrightness)) return copy;
+		copy.normalSky = 1.0F;
+		copy.sunX = -(float)Math.sin(sky.sunAngle);
+		copy.sunY = (float)Math.cos(sky.sunAngle);
+		float daylight = Math.clamp(copy.sunY * 4.0F, 0.0F, 1.0F);
+		copy.sunEnergy = daylight * Math.clamp(sky.rainBrightness, 0.0F, 1.0F);
+		float environmentScale = 0.02F + 0.98F * daylight;
+		copy.environmentR = dev.metalcraft.client.shader.SceneColor.srgbToLinear(((sky.skyColor >>> 16) & 255) / 255.0F) * environmentScale;
+		copy.environmentG = dev.metalcraft.client.shader.SceneColor.srgbToLinear(((sky.skyColor >>> 8) & 255) / 255.0F) * environmentScale;
+		copy.environmentB = dev.metalcraft.client.shader.SceneColor.srgbToLinear((sky.skyColor & 255) / 255.0F) * environmentScale;
+		return copy;
 	}
 
 	/** Returns a fresh mutable copy; the frame's stored projection cannot escape. */
@@ -130,6 +150,10 @@ public final class WaterFrameInputs {
 		bytes.putFloat(start + 160, this.animationSeconds);
 		bytes.putInt(start + 164, this.cameraSubmerged ? 1 : 0);
 		bytes.putLong(start + 168, 0L);
+		bytes.putFloat(start + 176, this.sunX).putFloat(start + 180, this.sunY)
+			.putFloat(start + 184, 0.0F).putFloat(start + 188, this.sunEnergy);
+		bytes.putFloat(start + 192, this.environmentR).putFloat(start + 196, this.environmentG)
+			.putFloat(start + 200, this.environmentB).putFloat(start + 204, this.normalSky);
 		destination.position(start + UNIFORM_BYTES);
 	}
 

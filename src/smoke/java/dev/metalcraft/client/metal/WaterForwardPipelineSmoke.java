@@ -90,7 +90,8 @@ final class WaterForwardPipelineSmoke {
 				writeSortedIndices(indices);
 				writeMetadata(metadata);
 				writeUniforms(projection, section, globals, fog);
-				writeDraw(baselineDraw, 0);
+				// Mode 4 is the explicit W3/vanilla-compatible baseline; mode 0 enables W4 effects.
+				writeDraw(baselineDraw, 4);
 				writeDraw(identityDraw, 1);
 				draw(queue, pipeline, baseline, atlasView, lightmapView, sampler, vertices, indices,
 					metadata, projection, section, globals, fog, baselineDraw, waterFrame,

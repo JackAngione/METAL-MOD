@@ -72,6 +72,8 @@ struct WaterFrameUniform {
     float animationSeconds;
     uint cameraSubmerged;
     float2 pad;
+    float4 sunDirectionEnergy;
+    float4 environment;
 };
 // Linear view-depth debug encoding. Reverse-Z device 0 (clear/sky) reconstructs to the far plane.
 constant float MC_WATER_DEBUG_DEPTH_RANGE = 32.0;
@@ -114,6 +116,8 @@ struct GBufferVaryings {
 #ifdef MC_WATER_FORWARD
     float waterMaterial [[flat]];
     float3 waterFlow;
+    float3 waterNormalWorld;
+    float3 waterPeriodicWorldPosition;
 #endif
 };
 
@@ -233,8 +237,9 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     WaterVertexMetadata metadata = localVertex < waterDraw.vertexCount
         ? waterMetadata[localVertex] : WaterVertexMetadata{float4(0.0), float4(0.0)};
     out.waterMaterial = metadata.normalMaterial.w;
-    out.normal = metadata.normalMaterial.xyz;
+    out.waterNormalWorld = metadata.normalMaterial.xyz;
     out.waterFlow = metadata.flow.xyz;
+    out.waterPeriodicWorldPosition = mc_water_periodic_world_position(section.ChunkPosition, in.Position);
     if (waterDraw.debugMode == 1u && out.waterMaterial == 1.0) out.tint.rgb = float3(1.0, 0.0, 1.0);
 #endif
     out.lightMapColor = mc_sample_lightmap(lightMap, lightSampler, uv2);
@@ -306,7 +311,7 @@ fragment GBufferTargets gbuffer_terrain_fragment(
 #endif
 ) {
 #ifdef MC_WATER_FORWARD
-    if (in.waterMaterial == 1.0 && waterDraw.debugMode >= 2u) {
+    if (in.waterMaterial == 1.0 && waterDraw.debugMode >= 2u && waterDraw.debugMode <= 3u) {
         float2 extent = float2(float(opaqueDepth.get_width()), float(opaqueDepth.get_height()));
         float2 pixel = clamp(in.position.xy, float2(0.0), max(extent - 1.0, float2(0.0)));
         uint2 coord = uint2(pixel);
@@ -340,6 +345,25 @@ fragment GBufferTargets gbuffer_terrain_fragment(
 #endif
 
 #ifdef MC_WATER_FORWARD
+    if (in.waterMaterial == 1.0 && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u)) {
+        float3 normalWorld = mc_water_animated_normal(
+            in.waterNormalWorld, in.waterFlow, in.waterPeriodicWorldPosition,
+            waterFrame.animationSeconds, 1.0
+        );
+        if (waterDraw.debugMode == 5u) {
+            return float4(normalWorld * 0.5 + 0.5, 1.0);
+        }
+        float3x3 viewRotation = float3x3(
+            section.ModelViewMat[0].xyz,
+            section.ModelViewMat[1].xyz,
+            section.ModelViewMat[2].xyz
+        );
+        float3 viewToCameraWorld = transpose(viewRotation) * -in.worldPos;
+        shaded = float4(mc_water_reflection(
+            shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+            waterFrame.sunDirectionEnergy, waterFrame.environment
+        ), shaded.a);
+    }
     return mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
 #else
     GBufferTargets out;

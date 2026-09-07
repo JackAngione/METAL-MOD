@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import dev.metalcraft.client.shader.world.WaterIdentityDebug;
 import dev.metalcraft.client.shader.water.WaterRoutingDebug;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.world.level.gamerules.GameRules;
 
@@ -48,7 +49,7 @@ final class MetalWaterIdentityGameTest {
 		boolean originalHalfResolution = MetalCraftConfig.halfResolution();
 		boolean originalFabulous = this.context.computeOnClient(client -> client.options.improvedTransparency().get());
 		WaterIdentityDebug.setEnabled(false);
-		WaterRoutingDebug.setMode(WaterRoutingDebug.Mode.OFF);
+		WaterRoutingDebug.setMode(WaterRoutingDebug.Mode.BASELINE);
 		java.util.Map<String, Object> originalOptions = new java.util.LinkedHashMap<>();
 		String originalPack = this.context.computeOnClient(client -> ShaderPackRuntime.active().selectedPackId());
 		try (var world = builder.create()) {
@@ -91,15 +92,15 @@ final class MetalWaterIdentityGameTest {
 				}
 			});
 			int[] nativeSnapshot = new int[2];
-			Path baseline = this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-identity-baseline", false);
+			Path baseline = this.capture(WaterRoutingDebug.Mode.BASELINE, "metalcraft-water-identity-baseline", false);
 			Path water = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-water", false);
-			Path restored = this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-identity-restored", false);
+			Path restored = this.capture(WaterRoutingDebug.Mode.BASELINE, "metalcraft-water-identity-restored", false);
 			assertWaterIdentity(baseline, water, restored);
 			Path surface = this.capture(WaterRoutingDebug.Mode.SURFACE_DEPTH, "metalcraft-water-surface-depth", false);
 			Path opaque = this.capture(WaterRoutingDebug.Mode.OPAQUE_DEPTH, "metalcraft-water-opaque-depth", false);
 			assertDepthViews(surface, opaque, restored);
 			this.context.runOnClient(client -> {
-				WaterRoutingDebug.setMode(WaterRoutingDebug.Mode.OFF);
+				WaterRoutingDebug.setMode(WaterRoutingDebug.Mode.BASELINE);
 				client.gui.hud.getChat().clearMessages(true);
 			});
 			this.context.waitTicks(12);
@@ -122,7 +123,7 @@ final class MetalWaterIdentityGameTest {
 			assertWaterIdentity(baseline, half, restored);
 			this.assertSnapshotSmallerThan(nativeSnapshot);
 			this.setHalfResolution(false);
-			this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-identity-native-restored", false);
+			this.capture(WaterRoutingDebug.Mode.BASELINE, "metalcraft-water-identity-native-restored", false);
 
 			this.context.getInput().resizeWindow(RESIZED_WIDTH, RESIZED_HEIGHT);
 			this.context.waitFor(client -> client.getWindow().getWidth() == RESIZED_WIDTH
@@ -133,6 +134,8 @@ final class MetalWaterIdentityGameTest {
 			world.getServer().runCommand("fill -10 181 2 -8 181 4 minecraft:water");
 			this.context.waitTicks(40);
 			this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-world-change", false);
+
+			this.captureW4Comparisons(world);
 
 			this.setFabulous(true);
 			Path fabulous = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-fabulous", true);
@@ -158,6 +161,93 @@ final class MetalWaterIdentityGameTest {
 				client.levelExtractor.allChanged();
 			});
 		}
+	}
+
+	/**
+	 * Deterministic W4 visual matrix in the same NORMAL world as the routing checks.
+	 * Daylight and animation samples use explicit game times while ADVANCE_TIME remains disabled.
+	 */
+	private void captureW4Comparisons(final TestSingleplayerContext world) {
+		world.getServer().runCommand("fill 0 180 20 32 180 44 minecraft:white_concrete");
+		world.getServer().runCommand("fill 9 181 24 23 182 38 minecraft:stone hollow");
+		world.getServer().runCommand("fill 10 182 25 22 182 37 minecraft:air");
+		// This still-water surface crosses the x=16 chunk boundary.
+		world.getServer().runCommand("fill 10 181 25 22 181 37 minecraft:water");
+		// A raised source/channel produces flowing top faces and a vertical waterfall together.
+		world.getServer().runCommand("fill 25 181 25 30 184 35 minecraft:stone");
+		world.getServer().runCommand("fill 25 185 25 25 186 35 minecraft:stone");
+		world.getServer().runCommand("fill 30 185 25 30 186 35 minecraft:stone");
+		world.getServer().runCommand("fill 26 185 25 29 185 25 minecraft:stone");
+		world.getServer().runCommand("fill 26 185 26 29 185 26 minecraft:water");
+		// Build and light the sealed cave before freezing simulation for paired captures.
+		world.getServer().runCommand("fill 38 180 22 58 190 42 minecraft:stone hollow");
+		world.getServer().runCommand("fill 40 181 24 56 181 40 minecraft:water");
+		world.getServer().runCommand("fill 40 182 24 56 188 40 minecraft:air");
+		world.getServer().runCommand("setblock 48 182 25 minecraft:torch");
+		world.getServer().runCommand("time set 6000");
+		world.getServer().runCommand("weather clear");
+		world.getServer().runCommand("tp @a 16 194 52 180 35");
+		this.context.getInput().lookAt(180, 35);
+		this.context.waitTicks(80);
+		world.getServer().runCommand("tick freeze");
+
+		Path noonBaseline = this.capture(WaterRoutingDebug.Mode.BASELINE,
+			"metalcraft-water-w4-noon-baseline", false);
+		Path noonT0 = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w4-noon-effect-t0", false);
+		Path normalsT0 = this.capture(WaterRoutingDebug.Mode.NORMALS,
+			"metalcraft-water-w4-noon-normals-t0", false);
+		world.getServer().runCommand("tick step 40");
+		this.context.waitTicks(45);
+		Path noonT1 = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w4-noon-effect-t1", false);
+		Path normalsT1 = this.capture(WaterRoutingDebug.Mode.NORMALS,
+			"metalcraft-water-w4-noon-normals-t1", false);
+		assertVisualDifference(noonBaseline, noonT0, 50, "W4 noon effect did not differ from baseline");
+		assertVisualDifference(noonT0, noonT1, 25, "W4 water normals did not animate between fixed times");
+		// Unit-normal perturbations encode to small color changes; depth debug's >80 RGB
+		// threshold cannot measure them. Restrict this check to the central still-water pool.
+		if (differentSamples(normalsT0, normalsT1, 0.40, 0.59, 12) < 100) {
+			throw new AssertionError("W4 normal debug did not animate on the still-water pool");
+		}
+
+		// Keep time fixed while translating the camera so world-anchored waves can be compared to blocks.
+		world.getServer().runCommand("tp @a 20 194 52 180 35");
+		this.context.getInput().lookAt(180, 35);
+		this.context.waitTicks(20);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w4-camera-translated", false);
+		this.capture(WaterRoutingDebug.Mode.NORMALS, "metalcraft-water-w4-camera-translated-normals", false);
+
+		world.getServer().runCommand("tp @a 16 183 48 180 7");
+		this.context.getInput().lookAt(180, 7);
+		this.context.waitTicks(20);
+		this.capture(WaterRoutingDebug.Mode.BASELINE,
+			"metalcraft-water-w4-grazing-baseline", false);
+		this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w4-grazing-effect", false);
+
+		world.getServer().runCommand("time set 18000");
+		world.getServer().runCommand("tp @a 16 194 52 180 35");
+		this.context.getInput().lookAt(180, 35);
+		this.context.waitTicks(20);
+		this.capture(WaterRoutingDebug.Mode.BASELINE,
+			"metalcraft-water-w4-night-baseline", false);
+		this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w4-night-effect", false);
+
+		// Enclosed pool at noon tests occlusion independently of the night gate.
+		world.getServer().runCommand("time set 6000");
+		world.getServer().runCommand("tp @a 48 184 39 180 18");
+		this.context.getInput().lookAt(180, 18);
+		this.context.waitTicks(60);
+		this.capture(WaterRoutingDebug.Mode.BASELINE,
+			"metalcraft-water-w4-cave-baseline", false);
+		this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w4-cave-effect", false);
+		world.getServer().runCommand("tick unfreeze");
+		world.getServer().runCommand("tp @a 0 193 18 180 40");
+		this.context.getInput().lookAt(180, 40);
+		this.context.waitTicks(20);
 	}
 
 	private Path capture(final WaterRoutingDebug.Mode mode, final String name, final boolean fabulous) {
@@ -264,6 +354,11 @@ final class MetalWaterIdentityGameTest {
 	}
 
 	private static int differentSamples(final Path first, final Path second, final double x0, final double x1) {
+		return differentSamples(first, second, x0, x1, 80);
+	}
+
+	private static int differentSamples(final Path first, final Path second, final double x0, final double x1,
+		final int rgbThreshold) {
 		try (var a = NativeImage.read(Files.newInputStream(first));
 			 var b = NativeImage.read(Files.newInputStream(second))) {
 			if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) {
@@ -280,12 +375,20 @@ final class MetalWaterIdentityGameTest {
 					for (int shift : new int[]{0, 8, 16}) {
 						mad += Math.abs(((pa >>> shift) & 255) - ((pb >>> shift) & 255));
 					}
-					if (mad > 80) count++;
+					if (mad > rgbThreshold) count++;
 				}
 			}
 			return count;
 		} catch (java.io.IOException error) {
 			throw new AssertionError("Could not inspect water depth captures", error);
+		}
+	}
+
+	private static void assertVisualDifference(final Path first, final Path second,
+		final int minimumSamples, final String message) {
+		int changed = differentSamples(first, second, 0.0, 1.0);
+		if (changed < minimumSamples) {
+			throw new AssertionError(message + ": " + changed + " changed samples");
 		}
 	}
 

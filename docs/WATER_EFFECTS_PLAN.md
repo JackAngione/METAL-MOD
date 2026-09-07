@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W3 complete; W4 is next.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W4 complete; W5 is next.
 
 ## Outcome and scope
 
@@ -44,7 +44,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
 | [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
 | [x] | W3 | Water routing and stable frame inputs | W1, W2 | grok | done | 2026-09-07: surface/opaque depth debug views, GPU reconstruction at native and odd half extents, live native/half identity, resize/world-change snapshot extents, and ordinary vs forced Fabulous water routing. See W3 completion evidence. |
-| [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
+| [x] | W4 | Animated surface and baseline reflections | W3 | /root | done | 2026-09-07: periodic normals, bounded Fresnel/environment/sun, GPU seam/roughness/fallback fixtures, and standard-world camera/noon/night/cave comparisons pass. Build and lifecycle pass; see W4 completion evidence. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
 | [ ] | W6 | Shoreline foam and underwater appearance | W5 | unassigned | not started | Implement foam and one underwater fog policy. |
 | [ ] | W7 | Controls and optional screen-space reflections | W5 | unassigned | not started | Add quality controls and measure bounded SSR. |
@@ -1332,3 +1332,114 @@ correct, but the composed Fabulous screenshot currently omits opaque terrain and
 (black background). Ordinary transparency includes the opaque world. Do not treat
 Fabulous opaque composite as proven when implementing refraction. No water animation,
 absorption, foam, or performance budget is claimed. Next task is W4.
+
+
+### W4 progress — claimed 2026-09-07 by `/root`
+
+Coordinator serializes this tracker. Smaller tasks use GPT-5.6 Sol medium agents.
+
+- [x] W4a: periodic world-anchored normals and finite baseline lighting; owner `/root/water_shader`, done; build/GPU and live evidence below.
+- [x] W4b: standard-world paired animation/lighting captures; owner `/root/water_live`, done; coordinator ran and inspected the corrected test matrix below.
+- [x] W4c: actual shared-helper GPU fixtures; owner `/root/water_gpu`, done.
+  `./gradlew build` passed including Metal compute/readback checks and the 255–256
+  interpolated-quad regression (`/tmp/water-w4-build.log`, 12 seconds).
+- [x] W4d: extracted immutable sky/sun inputs, integration and final validation; owner `/root`, done; serialization/night/rain/nonstandard-sky fixtures and lifecycle pass below.
+
+Preserve W3's recorded Fabulous opaque-background limitation. W4 remains unchecked until
+GPU and live acceptance evidence has been inspected.
+
+W4 partial evidence (2026-09-07): implementation compiles and the full build/GPU smoke
+passes. First live run stopped at a normal-debug comparison whose >80 RGB threshold was
+inherited from depth debug. Inspection and pixel measurements showed real bounded normal
+animation (4238 central-pool samples exceeded RGB delta 12; none exceeded 40). The test
+now measures that diagnostic at delta 12 and keeps the original depth threshold unchanged.
+A separate review corrected per-vertex wrapping that would distort interpolation at the
+256-block boundary; a GPU regression now evaluates the actual 255.5 midpoint. Live rerun
+is pending. Cave comparison is now at noon, with a torch, independently testing sky occlusion.
+
+
+### W4 completion evidence — 2026-09-07 (`/root`, GPT-5.6 Sol medium workers)
+
+W4 is complete. Implementation lives in Standard `shared/water.metal`, `gbuffer.metal`
+and `pack.json`; immutable lighting capture is in `WaterFrameInputs` and
+`GameRendererWorldGradeMixin`. `WaterRoutingDebug` adds BASELINE (4) and NORMALS (5),
+while OFF (0) is normal production shading. Identity and depth modes remain unchanged.
+
+**Animation and lighting contract**
+
+- Two bounded analytic normal scales, no displaced vertices. Integer chunk block origins
+  reduce modulo 256 before float conversion; local vertex positions stay unwrapped through
+  interpolation. This preserves both distant-coordinate precision and quads spanning the
+  255–256 boundary. Integer spatial frequencies repeat after 256 blocks, with 205/451 time
+  cycles per 1024 seconds. Surface normals are normalized with finite fallbacks; wave
+  strength zero returns the normalized mesh normal. Flow projected onto the face selects
+  travel direction for each scale, including vertical falling faces. This is a bounded
+  directional approximation, not physical flow simulation.
+- Dielectric F0 is 0.02; default roughness 0.08. Roughness-aware Schlick mixes the existing
+  linear lightmap seed with the linear environment; a bounded sun lobe avoids a singular
+  point-light peak. Original alpha, ordering, coverage and fog remain intact. Refraction
+  and a replacement transmission/blending contract remain W5 work.
+- Frame layout is now 208 bytes: W3's original 176 bytes, world sun direction/energy at
+  176, linear sky RGB/availability at 192. Values copy the same extracted `SkyRenderState`.
+  Sun direction matches the established terrain-shadow convention; rainBrightness scales
+  sun energy, and sun elevation gates daylight. Night environment is deliberately dark
+  (at most 2% of extracted sky color); non-Overworld, missing or invalid sky uses zero
+  sky/sun. Existing biome tint and blocklight remain in the vanilla base term.
+- Squared vertex skylight suppresses sky/sun in caves. Forward water does not sample the
+  terrain shadow map; this is an explicit occlusion approximation, so detailed outdoor
+  cast-shadow reflection visibility is not claimed. No point-light specular is invented.
+  Controls remain W7 work; no water UI settings or SSR are claimed here.
+
+**Validation**
+
+- `./gradlew build`: passed in 12s, including real Metal GPU smoke and production forward
+  pipeline compilation (`/tmp/water-w4-build.log`). `WaterSurfaceSmoke` tests normalization,
+  zero strength, degenerate inputs, temporal/spatial periods, negative chunk coordinates,
+  wrapped section seams, the interpolated 255.5 regression, Fresnel endpoints, roughness
+  0/1 at grazing, finite highlights, and missing-light identity. `WaterFrameInputsSmoke`
+  verifies exact layout, linear sky conversion, rain/night/nonstandard fallback and copying.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed in
+  69s (`/tmp/water-w4-client.log`). Explicit NORMAL generation with fixed seed 12345;
+  built fixtures sit above the generated terrain. Includes W3 identity/depth/native/half/
+  resize/world-edit/Fabulous routing checks and W4 frozen-time paired comparisons.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed in
+  40s (`/tmp/water-w4-lifecycle.log`), including reload, resize and fullscreen.
+- Visually inspected noon baseline/effect, normal animation, translated-camera normals,
+  grazing baseline/effect, night effect and torch-lit enclosed noon baseline/effect.
+  Still and flowing surfaces animate; vertical water retains its face orientation; the
+  x=16 pool has no chunk line. Grazing reflection is restrained, with no bright daytime
+  reflection in night or cave captures. Glass/ice/slime/lava identity controls stay separate.
+- Fixed-time camera validation: register the central pool's edges row by row between the
+  original and x+4 translated camera normal images. Across 9629 interior samples, mean
+  absolute RGB error is 0.016/255, median 0, p95 0.167/255. This independently confirms
+  that camera translation does not move the wave pattern relative to the pool. Enclosed
+  noon baseline/effect mean RGB difference is 0.271/255 (animated atlas/torch noise remains).
+  Metrics: `/tmp/water-w4-visual-metrics.txt`.
+- `git diff --check`: passed. The first failed diagnostic run and corrected threshold are
+  documented above; the final build and live acceptance use the corrected implementation.
+
+**Local comparison artifacts** (generated, not committed)
+
+- [Noon baseline](../run/screenshots/0012_metalcraft-water-w4-noon-baseline.png),
+  [noon effect t0](../run/screenshots/0013_metalcraft-water-w4-noon-effect-t0.png),
+  [noon effect t1](../run/screenshots/0015_metalcraft-water-w4-noon-effect-t1.png).
+- [Normals t0](../run/screenshots/0014_metalcraft-water-w4-noon-normals-t0.png),
+  [normals t1](../run/screenshots/0016_metalcraft-water-w4-noon-normals-t1.png),
+  [translated camera](../run/screenshots/0017_metalcraft-water-w4-camera-translated.png),
+  [translated normals](../run/screenshots/0018_metalcraft-water-w4-camera-translated-normals.png).
+- [Grazing baseline](../run/screenshots/0019_metalcraft-water-w4-grazing-baseline.png),
+  [grazing effect](../run/screenshots/0020_metalcraft-water-w4-grazing-effect.png).
+- [Night baseline](../run/screenshots/0021_metalcraft-water-w4-night-baseline.png),
+  [night effect](../run/screenshots/0022_metalcraft-water-w4-night-effect.png).
+- [Enclosed noon baseline](../run/screenshots/0023_metalcraft-water-w4-cave-baseline.png),
+  [enclosed noon effect](../run/screenshots/0024_metalcraft-water-w4-cave-effect.png).
+
+**Next concrete steps (W5)**
+
+1. Resolve or explicitly gate W3's existing Fabulous opaque/sky black-background limitation
+   before accepting refracted composition in that mode. W4 does not fix that pre-existing issue.
+2. Claim W5 and establish one replacement/transmission blend policy so opaque snapshot
+   color is not counted twice through source-alpha blending.
+3. Implement validated common-space thickness, bounded refraction with foreground/border
+   rejection, and depth-dependent absorption; test sky, near-plane, below-surface and
+   transparent-overlap cases. Keep W5 unchecked until its own GPU/live criteria pass.
