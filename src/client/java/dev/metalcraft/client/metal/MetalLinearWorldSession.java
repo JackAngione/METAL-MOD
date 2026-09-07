@@ -91,6 +91,7 @@ public final class MetalLinearWorldSession implements AutoCloseable {
 
 	void poison() {
 		this.poisoned = true;
+		this.device.invalidateOpaqueWaterInputs();
 	}
 
 	boolean ownsTranslated(final @Nullable MetalGpuTextureView color, final @Nullable MetalGpuTextureView depth) {

@@ -1,6 +1,7 @@
 package dev.metalcraft.client.test;
 
 import dev.metalcraft.client.metal.MetalLinearWorldActivation;
+import dev.metalcraft.client.metal.MetalGpuDevices;
 import dev.metalcraft.client.shader.SceneColor;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import com.mojang.blaze3d.platform.NativeImage;
@@ -104,6 +105,13 @@ final class MetalWaterIdentityGameTest {
 		this.context.runOnClient(client -> {
 			if (!MetalLinearWorldActivation.lastLiveUsedHdr()) {
 				throw new AssertionError("Live HDR world session dropped after terrain rebuild");
+			}
+			var device = MetalGpuDevices.current();
+			if (device == null || !device.lastWorldHadOpaqueWaterInputs()) {
+				throw new AssertionError("Opaque water inputs were not captured in the live HDR world");
+			}
+			if (device.opaqueWaterInputs().isPresent()) {
+				throw new AssertionError("Opaque water inputs escaped the world session");
 			}
 			client.gui.hud.getChat().clearMessages(true);
 		});

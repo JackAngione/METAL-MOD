@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1 and W2 complete; W3 is next.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1 and W2 complete; W3 in progress.
 
 ## Outcome and scope
 
@@ -43,7 +43,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
 | [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
-| [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
+| [ ] | W3 | Water routing and stable frame inputs | W1, W2 | /root | in progress | 2026-09-07: stored HDR/depth snapshots wired before translucency; GPU, standard-world water and shader lifecycle checks pass. Production metadata/uniforms and depth debug acceptance remain open; see W3 initial increment. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
 | [ ] | W6 | Shoreline foam and underwater appearance | W5 | unassigned | not started | Implement foam and one underwater fog policy. |
@@ -1065,3 +1065,95 @@ Limitations carried into W3: opaque snapshots and production water metadata are
 still absent; translucent terrain/entity pipelines stay on the vanilla forward
 path; outline intermediates remain encoded; GGX is out of scope. No water
 performance budget is due at W2.
+
+
+### W3 initial increment — claimed 2026-09-06 by `/root`
+
+- [x] W3a: implement typed stored opaque color/depth snapshot ownership, validity,
+  distinct-source checks, resize/retirement, and focused GPU coverage. Owner `/root/snapshots`.
+- [x] W3b: audit production metadata transport and the live pre-transparency seam;
+  record concrete next integration steps. Owner `/root`.
+
+This increment begins W3. Production routing, stable frame uniforms, native/half-resolution
+debug views and live lifecycle/transparency acceptance remain required before W3 is complete.
+Coordinator owns this tracker; workers report evidence without editing it.
+
+W3b mapped audit (2026-09-07, `/root`): read the local 26.2 client sources jar
+under `.gradle/loom-cache/minecraftMaven` and current backend. `SectionCompiler`
+creates one builder per layer and interleaves fluid and block-model vertices. Attach a
+zero-initialized metadata stream to each builder; tag water during the fluid wrapper,
+then carry it through `Results.renderedLayers` into the compiled mesh. Vertex count must
+match the BLOCK stream, including non-water models and reverse fluid faces.
+
+`SectionRenderDispatcher.getRenderSectionSlice` returns shared vertex-buffer byte offsets;
+`LevelRenderer.prepareChunkRenders` divides that offset by the vertex stride for each
+`RenderPass.Draw.baseVertex`. `MetalRenderPassBackend.drawMultipleIndexed` binds the
+whole vertex buffer and preserves this base vertex. Therefore a separately packed metadata
+buffer cannot simply use the same absolute vertex ID: either mirror vertex heap allocation
+exactly, or bind each section's metadata slice and subtract its original base vertex through
+an explicit per-draw uniform. Choose the latter to avoid coupling allocator fragmentation.
+Bind metadata and base-vertex adjustment within the existing draw loop, retaining reversed
+translucent draw order and original index buffers. Never key metadata by sorted primitive.
+
+Publication must wait for metadata upload as well as existing vertex/index callbacks in
+`checkSectionMesh`; resource-generation mismatch or absent metadata selects the original
+forward pipeline. `releaseSectionMesh` must retire metadata with the mesh, and buffer heap
+relocation must refresh the original base-vertex adjustment. `ResortTransparencyTask`
+uploads only indices and must preserve the original metadata. Cancelled rebuilds must close
+the unpublished metadata alongside mesh results. These changes are the next production
+routing increment; the existing magenta probe is still only an identity diagnostic.
+
+The verified capture seam is `PreparedFrame.executeTranslucent` HEAD, immediately after
+`WorldGeometryAdapter.resolveOpaque`. `LevelRenderer.addMainPass` invokes it after solid
+features and Fabulous depth copies, before any translucent features/terrain. Read the HDR
+session's main attachments, not whichever Fabulous output target happens to be current.
+The opaque snapshot includes sky and opaque features; depth clear remains reverse-Z zero.
+Projection/camera state must later be captured from the same extracted render frame rather
+than queried independently during water draws. Missing projection is not identity projection.
+
+W3 snapshot contract: each HDR world frame captures one stored, private, single-sample
+RGBA16_FLOAT opaque color texture and one DEPTH32_FLOAT opaque depth texture at the
+actual world attachment extent (not the window/presentation extent). Each destination has
+texture-binding and copy-source/copy-destination usage; a GPU copy is its producer, so it
+does not need render-attachment usage. Both sources must have copy-source usage and belong
+to the same device. No memoryless attachment, mismatched extent/format, mip view, or source
+alias of the owned destinations is accepted. Reverse-Z clear depth zero is copied unchanged.
+
+The device owns the pair across frames and retires it on resize, reload and close; encoded
+Metal commands retain native resources through GPU completion. Capture is once per healthy
+HDR session. The public typed binding is absent before capture, outside that session or
+after poisoning; stale handles reject access after invalidation. Copies and consumers use
+the existing serial command queue, with no CPU readback/wait in the production frame loop.
+This establishes opaque inputs only: water surface position/normal, projection, flow,
+biome data and immutable per-frame uniforms still require the production routing increment.
+
+W3a completion evidence (2026-09-07, `/root` and GPT-5.6 Sol medium
+`/root/snapshots`): implemented `MetalOpaqueSnapshotOwner`, device/session lifetime
+integration, capture after opaque resolve in `PreparedFeatureFrameMixin`, and
+`OpaqueSnapshotSmoke` registered in the normal shader smoke suite. The water client fixture
+asserts successful capture and absence of bindings outside the world session after rebuilds.
+
+- [x] `./gradlew build`: passed including Metal GPU smoke; `/tmp/water-w3a-build.log`.
+  Snapshot fixtures verify HDR
+  values above 1, D32 values and reverse-Z clear zero, exact 9x5/5x3 extents, producer
+  mutation after capture, same-size reuse, alias/format/extent/usage fallback, stale
+  handles and resize/close while queued copies retain native resources.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed
+  in 46 seconds with explicit NORMAL world generation; `/tmp/water-w3-client.log`.
+  Live snapshot-capture/session-scope assertions, water-only identity/restoration and
+  linear half-exposure/white-HUD assertions pass.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed
+  in 45 seconds using the standard-world fixture; `/tmp/water-w3-lifecycle.log`.
+- [x] Visually inspected refreshed [water identity](../run/screenshots/0001_metalcraft-water-identity-water.png),
+  [restored water](../run/screenshots/0002_metalcraft-water-identity-restored.png), and
+  [half-exposure/HUD](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png).
+  Water-only coverage, glass/ice/slime/lava controls and HUD appearance remain correct.
+  These are regression views of the existing identity probe, not production depth debug views.
+- [x] `git diff --check`: passed.
+
+Next: implement metadata compile/upload/publication and per-draw routing described in W3b,
+then bind immutable projection/camera/time/flow inputs and add surface/opaque depth debug
+views. W3 remains in progress: native/half live depth views, explicit Fabulous/ordinary
+water comparisons, resize/world-change acceptance and production water GPU routing fixtures
+are still required. No new water surface shading or performance acceptance is claimed.
+The added stored pair costs 12 bytes per world pixel before allocation alignment.

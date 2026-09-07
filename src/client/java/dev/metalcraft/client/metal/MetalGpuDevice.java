@@ -78,6 +78,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private long nativeGeneration = 1L;
 	private boolean forceLegacyFrame;
 	private @Nullable MetalLinearWorldSession linearWorldSession;
+	private @Nullable MetalOpaqueSnapshotOwner opaqueSnapshots;
+	private boolean lastWorldHadOpaqueWaterInputs;
 	private @Nullable ShaderSource reloadShaderSource;
 	private final Map<RenderPipeline, LinearWorldPostShaders.Semantic> linearPostContracts = new IdentityHashMap<>();
 
@@ -180,6 +182,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		if (this.linearWorldSession != null) {
 			throw new IllegalStateException("A linear world session is already active");
 		}
+		this.lastWorldHadOpaqueWaterInputs = false;
 		if (knownPipelines == null || knownPost == null) {
 			throw new NullPointerException("Linear world preflight collections are required");
 		}
@@ -223,6 +226,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		MetalLinearWorldSession session = new MetalLinearWorldSession(this, token);
 		for (RenderPipeline pipeline : knownPipelines) session.approve(pipeline);
 		for (MetalLinearWorldSession.PostContract contract : knownPost) session.approve(contract.pipeline());
+		if (this.opaqueSnapshots != null) this.opaqueSnapshots.invalidate();
 		this.linearWorldSession = session;
 		return session;
 	}
@@ -231,10 +235,38 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		return this.linearWorldSession;
 	}
 
+	/** Capture once after opaque resolve and before forward features change world attachments. */
+	public void captureOpaqueWaterInputs() {
+		MetalLinearWorldSession session = this.linearWorldSession;
+		if (session == null || session.isClosed() || session.isPoisoned()) return;
+		if (this.opaqueSnapshots == null) this.opaqueSnapshots = new MetalOpaqueSnapshotOwner(this);
+		if (this.opaqueSnapshots.current().isPresent()) return;
+		this.opaqueSnapshots.capture(this.commandEncoder, session.hdrColor(), session.hdrDepth());
+	}
+
+	/** Empty selects baseline water; snapshots never escape their healthy HDR world session. */
+	public java.util.Optional<MetalOpaqueSnapshotOwner.Snapshot> opaqueWaterInputs() {
+		MetalLinearWorldSession session = this.linearWorldSession;
+		if (session == null || session.isClosed() || session.isPoisoned() || this.opaqueSnapshots == null) {
+			return java.util.Optional.empty();
+		}
+		return this.opaqueSnapshots.current();
+	}
+
+	void invalidateOpaqueWaterInputs() {
+		if (this.opaqueSnapshots != null) this.opaqueSnapshots.invalidate();
+	}
+
+	/** Diagnostic for the completed world frame; does not expose retired snapshot handles. */
+	public boolean lastWorldHadOpaqueWaterInputs() { return this.lastWorldHadOpaqueWaterInputs; }
+
 	void endLinearWorld(final MetalLinearWorldSession session) {
 		if (this.linearWorldSession != session) return;
+		this.lastWorldHadOpaqueWaterInputs = !session.isPoisoned()
+			&& this.opaqueSnapshots != null && this.opaqueSnapshots.current().isPresent();
 		if (session.isPoisoned()) this.forceLegacyFrame = true;
 		this.linearWorldSession = null;
+		if (this.opaqueSnapshots != null) this.opaqueSnapshots.invalidate();
 	}
 
 	/**
@@ -625,6 +657,10 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			this.linearWorldSession.close();
 		}
 		this.shaderGeneration++;
+		if (this.opaqueSnapshots != null) {
+			this.opaqueSnapshots.close();
+			this.opaqueSnapshots = null;
+		}
 		this.linearPostContracts.clear();
 		if (this.worldGrade != null) {
 			this.worldGrade.close();
@@ -657,6 +693,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			if (this.shaderPackRuntime != null) {
 				this.shaderPackRuntime.close();
 			}
+			if (this.opaqueSnapshots != null) this.opaqueSnapshots.close();
 			if (this.worldGrade != null) this.worldGrade.close();
 			if (this.linearWorldTargets != null) this.linearWorldTargets.close();
 			this.pipelineCache.values().forEach(MetalCompiledRenderPipeline::close);
