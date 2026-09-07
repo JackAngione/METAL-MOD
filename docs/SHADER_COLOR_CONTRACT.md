@@ -182,3 +182,13 @@ regression passed in 39 seconds with inspected captures (`/tmp/water-w2o-client.
 Live GameRenderer wrapping, Fabulous target promotion, ShaderManager/PostChain mixins
 and physical display checks remain open; W2 / PR 7b stays unchecked. See
 WATER_EFFECTS_PLAN.md.
+
+
+W2q/W2r/W2s (2026-09-06): reload ShaderSource is installed from ShaderManager.apply;
+Fabulous/transparency promotion and post contracts are mixin-wired for an active
+fabulous HDR token. The GameRenderer wrap/grade seam exists, but live HDR session
+begin is gated after LINEAR_SRGB identity routing dropped rebuilt terrain in the
+standard-world water identity fixture. `./gradlew build` passed
+(`/tmp/water-w2qrs-build.log`). Encoded-route water identity and exposure/HUD
+regression passed in 37 seconds (`/tmp/water-w2qrs-client.log`). Physical display
+validation remains open; W2 / PR 7b stays unchecked. See WATER_EFFECTS_PLAN.md.

@@ -1811,3 +1811,12 @@ HDR-owned passes never select the encoded cache. `./gradlew build` passed
 (`/tmp/water-w2o-build.log`). Standard-world water/HUD regression passed in 39 seconds
 with inspected captures (`/tmp/water-w2o-client.log`). Live wrapping, Fabulous promotion
 and display validation still gate PR 7b / W2. See WATER_EFFECTS_PLAN.md.
+
+
+W2q/W2r/W2s (2026-09-06): ShaderManager reload ShaderSource, Fabulous descriptor
+promotion and PostChain linear post contracts are implemented. Live HDR session begin
+is gated after identity-routed LINEAR_SRGB dropped rebuilt terrain; the wrap still
+grades the encoded path. `./gradlew build` passed (`/tmp/water-w2qrs-build.log`).
+Standard-world water identity/HUD regression passed in 37 seconds
+(`/tmp/water-w2qrs-client.log`). Display validation remains open. See
+WATER_EFFECTS_PLAN.md.

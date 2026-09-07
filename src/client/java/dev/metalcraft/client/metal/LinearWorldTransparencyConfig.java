@@ -7,10 +7,22 @@ import net.minecraft.client.renderer.PostChainConfig;
 import net.minecraft.client.renderer.UniformValue;
 import net.minecraft.resources.Identifier;
 import org.joml.Vector4f;
+import org.jspecify.annotations.Nullable;
 
 /** Validates the vanilla Fabulous graph separately from shader source verification. */
 public final class LinearWorldTransparencyConfig {
 	private LinearWorldTransparencyConfig() { }
+
+	/** True when the currently loaded graph matches the vanilla Fabulous transparency contract. */
+	public static boolean tryVerify(final @Nullable PostChainConfig config) {
+		if (config == null) return false;
+		try {
+			verify(config);
+			return true;
+		} catch (IllegalArgumentException ignored) {
+			return false;
+		}
+	}
 
 	/**
 	 * Checks the currently loaded configuration, not a cached resource name. Future activation

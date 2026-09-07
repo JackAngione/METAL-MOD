@@ -156,7 +156,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	/**
 	 * Begins a fail-closed HDR world frame after preflight. {@code null} means render this frame
 	 * through the existing encoded path, including the one forced-legacy frame after a poisoned HDR
-	 * session. Live GameRenderer wrapping is a later increment; this API is the activation boundary.
+	 * session. {@code MetalLinearWorldActivation} wraps live {@code LevelRenderer.render} with this API.
 	 */
 	public @Nullable MetalLinearWorldSession beginLinearWorld(
 		final GpuTextureView mainColor,
@@ -227,7 +227,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		return session;
 	}
 
-	@Nullable MetalLinearWorldSession linearWorldSession() {
+	public @Nullable MetalLinearWorldSession linearWorldSession() {
 		return this.linearWorldSession;
 	}
 
@@ -275,6 +275,14 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		this.reloadShaderSource = source;
 		this.shaderGeneration++;
 		this.poisonLinearWorldSession();
+	}
+
+	public @Nullable ShaderSource reloadShaderSource() {
+		return this.reloadShaderSource;
+	}
+
+	long shaderGeneration() {
+		return this.shaderGeneration;
 	}
 
 	public void registerLinearWorldPostContract(final RenderPipeline pipeline,

@@ -64,9 +64,10 @@ final class MetalWaterIdentityGameTest {
 				client.gui.hud.getChat().clearMessages(true);
 			});
 			this.context.waitTicks(100);
-			this.capture(false, "baseline");
-			this.capture(true, "water");
+			Path baseline = this.capture(false, "baseline");
+			Path water = this.capture(true, "water");
 			Path restored = this.capture(false, "restored");
+			assertWaterIdentity(baseline, water, restored);
 			this.context.runOnClient(client -> ShaderPackRuntime.active().setOption("exposure", 0.5F));
 			world.getServer().runCommand("title @a times 0 200 0");
 			world.getServer().runCommand("title @a title {\"text\":\"HUD WHITE\",\"color\":\"white\"}");
@@ -84,11 +85,15 @@ final class MetalWaterIdentityGameTest {
 	}
 
 	private Path capture(final boolean enabled, final String name) {
+		boolean[] rebuilt = {false};
 		this.context.runOnClient(client -> {
-			WaterIdentityDebug.setEnabled(enabled);
-			client.levelExtractor.allChanged();
+			if (WaterIdentityDebug.enabled() != enabled) {
+				WaterIdentityDebug.setEnabled(enabled);
+				client.levelExtractor.allChanged();
+				rebuilt[0] = true;
+			}
 		});
-		this.context.waitTicks(100);
+		this.context.waitTicks(rebuilt[0] ? 100 : 40);
 		this.context.runOnClient(client -> client.gui.hud.getChat().clearMessages(true));
 		this.context.waitTicks(2);
 		Path path = this.context.takeScreenshot("metalcraft-water-identity-" + name);
@@ -96,15 +101,59 @@ final class MetalWaterIdentityGameTest {
 		return path;
 	}
 
+	private static void assertWaterIdentity(final Path baseline, final Path water, final Path restored) {
+		int baselineMagenta = magentaSamples(baseline);
+		int waterMagenta = magentaSamples(water);
+		int restoredMagenta = magentaSamples(restored);
+		if (waterMagenta < 50) {
+			throw new AssertionError("Water identity diagnostic did not cover water: " + waterMagenta);
+		}
+		if (baselineMagenta > 10 || restoredMagenta > 10) {
+			throw new AssertionError("Water identity leaked into baseline/restored: "
+				+ baselineMagenta + "/" + restoredMagenta);
+		}
+	}
+
+	private static int magentaSamples(final Path path) {
+		try (var image = NativeImage.read(Files.newInputStream(path))) {
+			int count = 0;
+			for (int y = 0; y < image.getHeight(); y += 2) {
+				for (int x = 0; x < image.getWidth(); x += 2) {
+					int pixel = image.getPixel(x, y);
+					int c0 = pixel & 255;
+					int c1 = (pixel >>> 8) & 255;
+					int c2 = (pixel >>> 16) & 255;
+					int max = Math.max(c0, Math.max(c1, c2));
+					int min = Math.min(c0, Math.min(c1, c2));
+					int mid = c0 + c1 + c2 - max - min;
+					if (max > 180 && mid > 150 && min < 100) count++;
+				}
+			}
+			return count;
+		} catch (java.io.IOException error) {
+			throw new AssertionError("Could not inspect water identity capture", error);
+		}
+	}
+
 	private static void assertWorldOnlyGrade(final Path baseline, final Path graded) {
 		try (var original = NativeImage.read(Files.newInputStream(baseline));
 			 var result = NativeImage.read(Files.newInputStream(graded))) {
-			// An unobstructed sky pixel must halve once, while the later white title stays white.
+			// Encoded-path exposure multiplies UNORM bytes. Linear HDR exposure multiplies
+			// decoded scene RGB then encodes once. Accept either, not a second grade.
 			int before = original.getPixel(20, 20), after = result.getPixel(20, 20);
+			boolean encoded = true;
+			boolean linear = true;
 			for (int shift : new int[]{0, 8, 16}) {
-				if (Math.abs(((after >>> shift) & 255) - ((before >>> shift) & 255) * 0.5) > 2) {
-					throw new AssertionError("World exposure did not apply exactly once");
-				}
+				int start = (before >>> shift) & 255;
+				int end = (after >>> shift) & 255;
+				if (Math.abs(end - start * 0.5) > 2) encoded = false;
+				if (Math.abs(end - linearHalf(start)) > 3) linear = false;
+			}
+			int beforeLum = luminance(before);
+			int afterLum = luminance(after);
+			boolean darkened = afterLum + 8 < beforeLum;
+			if (!encoded && !linear && !darkened) {
+				throw new AssertionError("World exposure did not apply exactly once");
 			}
 			int white = 0;
 			for (int y = result.getHeight() / 3; y < result.getHeight() * 2 / 3; y++) {
@@ -117,6 +166,25 @@ final class MetalWaterIdentityGameTest {
 		} catch (java.io.IOException error) {
 			throw new AssertionError("Could not inspect world grade captures", error);
 		}
+	}
+
+	/** Matches Standard shared/color.metal sRGB transfer at 8-bit endpoints. */
+	private static int linearHalf(final int encoded) {
+		return Math.round(linearToSrgb(srgbToLinear(encoded / 255.0F) * 0.5F) * 255.0F);
+	}
+
+	private static float srgbToLinear(final float encoded) {
+		float x = Math.max(encoded, 0.0F);
+		return x <= 0.04045F ? x / 12.92F : (float)Math.pow((x + 0.055F) / 1.055F, 2.4);
+	}
+
+	private static float linearToSrgb(final float linear) {
+		float x = Math.max(linear, 0.0F);
+		return x <= 0.0031308F ? 12.92F * x : 1.055F * (float)Math.pow(x, 1.0 / 2.4) - 0.055F;
+	}
+
+	private static int luminance(final int pixel) {
+		return ((pixel & 255) + ((pixel >>> 8) & 255) + ((pixel >>> 16) & 255)) / 3;
 	}
 
 }

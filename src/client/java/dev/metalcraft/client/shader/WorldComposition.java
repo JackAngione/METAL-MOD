@@ -10,8 +10,11 @@ import org.jspecify.annotations.Nullable;
  * World-only pack insertion relative to Minecraft 26.2's frame graph.
  *
  * <p>Live grading runs before the hand-depth clear in {@code GameRenderer.renderLevel}.
- * Presentation copies the completed scene without running the pack again. World consumers
- * receive a stored depth snapshot taken before hand and HUD can overwrite main depth.
+ * A linear world session wraps {@code LevelRenderer.render} and grades with
+ * {@code gradeLinearWorld} into the encoded main color at that same seam; otherwise the
+ * encoded {@code gradeWorld} path remains. Presentation copies the completed scene without
+ * running the pack again. World consumers receive a stored depth snapshot taken before hand
+ * and HUD can overwrite main depth.
  */
 public final class WorldComposition {
 	/**

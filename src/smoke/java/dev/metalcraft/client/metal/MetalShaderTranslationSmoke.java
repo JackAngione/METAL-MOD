@@ -328,9 +328,12 @@ public final class MetalShaderTranslationSmoke {
 			assertMemorylessPassMerge();
 			WorldHdrTargetsSmoke.run();
 			LinearWorldSessionSmoke.run();
+			LinearWorldActivationSmoke.run();
+			LinearWorldReloadSourceSmoke.run();
 			LinearWorldShadersSmoke.run();
 			LinearWorldPostShadersSmoke.run();
 			LinearWorldTransparencyConfigSmoke.run();
+			LinearWorldFabulousPromotionSmoke.run();
 			NativeColorContractSmoke.run();
 			assertIdentityGradePack(device);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(

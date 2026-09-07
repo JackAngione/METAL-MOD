@@ -16,6 +16,7 @@ import dev.metalcraft.client.metal.MetalCommandQueue;
 import dev.metalcraft.client.metal.MetalDevice;
 import dev.metalcraft.client.metal.MetalGpuDevice;
 import dev.metalcraft.client.metal.MetalGpuTextureView;
+import dev.metalcraft.client.metal.MetalLinearWorldSession;
 import dev.metalcraft.client.metal.MetalPassCensus;
 import dev.metalcraft.client.metal.MetalRenderPass;
 import dev.metalcraft.client.metal.MetalRenderPipeline;
@@ -445,10 +446,23 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 
 	private void validateSceneEncoding(final GpuTextureView scene) {
 		if (this.colorEncoding == FrameBindings.ColorEncoding.LINEAR_SRGB
-			&& (!(scene instanceof MetalGpuTextureView metalView)
-				|| metalView.attachment().descriptor().format() != MetalTexture.Format.RGBA16_FLOAT)) {
+			&& this.resolvedSceneFormat(scene) != MetalTexture.Format.RGBA16_FLOAT) {
 			throw new IllegalArgumentException("Linear world geometry requires RGBA16_FLOAT scene storage");
 		}
+	}
+
+	/** Format after linear-session identity routing, which the command encoder applies at pass creation. */
+	private MetalTexture.Format resolvedSceneFormat(final GpuTextureView scene) {
+		MetalLinearWorldSession session = this.device.linearWorldSession();
+		if (session != null && !session.isClosed()
+			&& (scene == session.token().originalColor()
+				|| (scene instanceof MetalGpuTextureView view
+					&& view.texture() == session.token().originalColorTexture()))) {
+			return session.hdrColor().attachment().descriptor().format();
+		}
+		return scene instanceof MetalGpuTextureView metalView
+			? metalView.attachment().descriptor().format()
+			: MetalTexture.Format.RGBA8_UNORM;
 	}
 
 	private String encodedSource(final String source) {
@@ -458,9 +472,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 
 	private void ensureResolvePipeline(final GpuTextureView scene) {
 		this.validateSceneEncoding(scene);
-		MetalTexture.Format sceneFormat = scene instanceof MetalGpuTextureView metalView
-			? metalView.attachment().descriptor().format()
-			: MetalTexture.Format.RGBA8_UNORM;
+		MetalTexture.Format sceneFormat = this.resolvedSceneFormat(scene);
 		if (this.resolvePipeline != null && this.resolveSceneFormat == sceneFormat) {
 			return;
 		}
