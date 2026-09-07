@@ -316,7 +316,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 					try (MetalBuffer waterDraw = this.device.metal().createBuffer(16, MetalBuffer.StorageMode.SHARED)) {
 						try (MetalBuffer.Mapping mapping = waterDraw.map()) {
 							mapping.bytes().putInt(draw.baseVertex()).putInt(water.vertexCount())
-								.putInt(WaterRoutingDebug.enabled() ? 1 : 0).putInt(0);
+								.putInt(WaterRoutingDebug.mode().gpuValue).putInt(0);
 						}
 						this.device.linearWorldSession().recordWaterDraw();
 						this.encodeUniformBuffer(13, this.device.linearWorldSession().waterFrameBuffer(), 0, MetalRenderPass.STAGE_VERTEX | MetalRenderPass.STAGE_FRAGMENT);
@@ -324,7 +324,8 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 						this.encodeTexture(12, opaque.color().metal(), MetalRenderPass.STAGE_FRAGMENT);
 						this.encodeTexture(13, opaque.depth().metal(), MetalRenderPass.STAGE_FRAGMENT);
 						this.encodeUniformBuffer(14, metadata, 0, MetalRenderPass.STAGE_VERTEX);
-						this.encodeUniformBuffer(15, waterDraw, 0, MetalRenderPass.STAGE_VERTEX);
+						this.encodeUniformBuffer(15, waterDraw, 0,
+							MetalRenderPass.STAGE_VERTEX | MetalRenderPass.STAGE_FRAGMENT);
 						this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
 					}
 				} else {

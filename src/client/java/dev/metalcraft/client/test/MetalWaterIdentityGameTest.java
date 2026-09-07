@@ -1,7 +1,13 @@
 package dev.metalcraft.client.test;
 
+import com.mojang.blaze3d.platform.Window;
+import dev.metalcraft.client.MetalCraftConfig;
+import dev.metalcraft.client.MetalCraftRenderResolution;
 import dev.metalcraft.client.metal.MetalLinearWorldActivation;
 import dev.metalcraft.client.metal.MetalGpuDevices;
+import dev.metalcraft.client.mixin.LevelRendererAccessor;
+import dev.metalcraft.client.mixin.WindowFramebufferAccessor;
+import org.lwjgl.glfw.GLFW;
 import dev.metalcraft.client.shader.SceneColor;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import com.mojang.blaze3d.platform.NativeImage;
@@ -13,8 +19,11 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.world.level.gamerules.GameRules;
 
-/** Paired real-mesh captures; visual review is required before closing the W1 gate. */
+/** Paired real-mesh captures; visual review is required before closing water routing gates. */
 final class MetalWaterIdentityGameTest {
+	private static final int RESIZED_WIDTH = 1280;
+	private static final int RESIZED_HEIGHT = 720;
+
 	private final ClientGameTestContext context;
 
 	MetalWaterIdentityGameTest(final ClientGameTestContext context) {
@@ -35,8 +44,11 @@ final class MetalWaterIdentityGameTest {
 			settings.getGameRules().set(GameRules.ADVANCE_WEATHER, false, null);
 		});
 		boolean originalDebug = WaterIdentityDebug.enabled();
-		boolean originalRoutingDebug = WaterRoutingDebug.enabled();
+		WaterRoutingDebug.Mode originalRoutingDebug = WaterRoutingDebug.mode();
+		boolean originalHalfResolution = MetalCraftConfig.halfResolution();
+		boolean originalFabulous = this.context.computeOnClient(client -> client.options.improvedTransparency().get());
 		WaterIdentityDebug.setEnabled(false);
+		WaterRoutingDebug.setMode(WaterRoutingDebug.Mode.OFF);
 		java.util.Map<String, Object> originalOptions = new java.util.LinkedHashMap<>();
 		String originalPack = this.context.computeOnClient(client -> ShaderPackRuntime.active().selectedPackId());
 		try (var world = builder.create()) {
@@ -74,21 +86,73 @@ final class MetalWaterIdentityGameTest {
 				if (!MetalLinearWorldActivation.lastLiveUsedHdr()) {
 					throw new AssertionError("Live HDR world session was not active before water identity captures");
 				}
+				if (MetalLinearWorldActivation.lastLiveFabulous()) {
+					throw new AssertionError("Ordinary transparency expected before the Fabulous check");
+				}
 			});
-			Path baseline = this.capture(false, "baseline");
-			Path water = this.capture(true, "water");
-			Path restored = this.capture(false, "restored");
+			int[] nativeSnapshot = new int[2];
+			Path baseline = this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-identity-baseline", false);
+			Path water = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-water", false);
+			Path restored = this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-identity-restored", false);
 			assertWaterIdentity(baseline, water, restored);
+			Path surface = this.capture(WaterRoutingDebug.Mode.SURFACE_DEPTH, "metalcraft-water-surface-depth", false);
+			Path opaque = this.capture(WaterRoutingDebug.Mode.OPAQUE_DEPTH, "metalcraft-water-opaque-depth", false);
+			assertDepthViews(surface, opaque, restored);
+			this.context.runOnClient(client -> {
+				WaterRoutingDebug.setMode(WaterRoutingDebug.Mode.OFF);
+				client.gui.hud.getChat().clearMessages(true);
+			});
+			this.context.waitTicks(12);
+			Path gradeBaseline = this.context.takeScreenshot("metalcraft-world-grade-baseline");
 			this.context.runOnClient(client -> ShaderPackRuntime.active().setOption("exposure", 0.5F));
 			world.getServer().runCommand("title @a times 0 200 0");
 			world.getServer().runCommand("title @a title {\"text\":\"HUD WHITE\",\"color\":\"white\"}");
 			this.context.waitTicks(10);
+			this.context.runOnClient(client -> client.gui.hud.getChat().clearMessages(true));
+			this.context.waitTicks(2);
 			Path graded = this.context.takeScreenshot("metalcraft-world-grade-half-exposure-hud");
-			assertWorldOnlyGrade(restored, graded);
+			assertWorldOnlyGrade(gradeBaseline, graded);
+			this.context.runOnClient(client -> ShaderPackRuntime.active().setOption("exposure", 1.0F));
+
+			this.setHalfResolution(false);
+			this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-native", false);
+			this.recordSnapshotSize(nativeSnapshot);
+			this.setHalfResolution(true);
+			Path half = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-half", false);
+			assertWaterIdentity(baseline, half, restored);
+			this.assertSnapshotSmallerThan(nativeSnapshot);
+			this.setHalfResolution(false);
+			this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-identity-native-restored", false);
+
+			this.context.getInput().resizeWindow(RESIZED_WIDTH, RESIZED_HEIGHT);
+			this.context.waitFor(client -> client.getWindow().getWidth() == RESIZED_WIDTH
+				&& client.getWindow().getHeight() == RESIZED_HEIGHT);
+			this.context.waitTicks(20);
+			this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-resized", false);
+
+			world.getServer().runCommand("fill -10 181 2 -8 181 4 minecraft:water");
+			this.context.waitTicks(40);
+			this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-world-change", false);
+
+			this.setFabulous(true);
+			Path fabulous = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-fabulous", true);
+			assertWaterIdentity(baseline, fabulous, restored);
+			this.context.runOnClient(client -> {
+				if (!MetalLinearWorldActivation.lastLiveFabulous()) {
+					throw new AssertionError("Fabulous HDR session was not active");
+				}
+				if (((LevelRendererAccessor)client.levelRenderer).metalcraft$getTransparencyChain() == null) {
+					throw new AssertionError("Fabulous transparency chain was missing");
+				}
+			});
+			this.setFabulous(false);
 		} finally {
 			WaterIdentityDebug.setEnabled(originalDebug);
-			WaterRoutingDebug.setEnabled(originalRoutingDebug);
+			WaterRoutingDebug.setMode(originalRoutingDebug);
+			MetalCraftConfig.setHalfResolution(originalHalfResolution);
 			this.context.runOnClient(client -> {
+				client.options.improvedTransparency().set(originalFabulous);
+				MetalCraftRenderResolution.apply(client);
 				originalOptions.forEach((id, value) -> ShaderPackRuntime.active().setOption(id, value));
 				ShaderPackRuntime.active().selectPack(originalPack);
 				client.levelExtractor.allChanged();
@@ -96,19 +160,16 @@ final class MetalWaterIdentityGameTest {
 		}
 	}
 
-	private Path capture(final boolean enabled, final String name) {
-		boolean[] rebuilt = {false};
-		this.context.runOnClient(client -> {
-			if (WaterRoutingDebug.enabled() != enabled) {
-				WaterRoutingDebug.setEnabled(enabled);
-				client.levelExtractor.allChanged();
-				rebuilt[0] = true;
-			}
-		});
-		this.context.waitTicks(rebuilt[0] ? 100 : 40);
+	private Path capture(final WaterRoutingDebug.Mode mode, final String name, final boolean fabulous) {
+		this.context.runOnClient(client -> WaterRoutingDebug.setMode(mode));
+		this.context.waitTicks(12);
 		this.context.runOnClient(client -> {
 			if (!MetalLinearWorldActivation.lastLiveUsedHdr()) {
-				throw new AssertionError("Live HDR world session dropped after terrain rebuild");
+				throw new AssertionError("Live HDR world session dropped during " + name);
+			}
+			if (fabulous != MetalLinearWorldActivation.lastLiveFabulous()) {
+				throw new AssertionError("Fabulous state for " + name + " expected=" + fabulous
+					+ " actual=" + MetalLinearWorldActivation.lastLiveFabulous());
 			}
 			var device = MetalGpuDevices.current();
 			if (device == null || !device.lastWorldHadOpaqueWaterInputs()) {
@@ -120,12 +181,112 @@ final class MetalWaterIdentityGameTest {
 			if (device.opaqueWaterInputs().isPresent()) {
 				throw new AssertionError("Opaque water inputs escaped the world session");
 			}
+			var view = client.gameRenderer.mainRenderTarget().getColorTextureView();
+			if (device.lastWorldOpaqueWaterWidth() != view.getWidth(0)
+				|| device.lastWorldOpaqueWaterHeight() != view.getHeight(0)) {
+				throw new AssertionError("Opaque snapshot extent " + device.lastWorldOpaqueWaterWidth()
+					+ "x" + device.lastWorldOpaqueWaterHeight() + " did not match world attachment "
+					+ view.getWidth(0) + "x" + view.getHeight(0));
+			}
 			client.gui.hud.getChat().clearMessages(true);
 		});
 		this.context.waitTicks(2);
-		Path path = this.context.takeScreenshot("metalcraft-water-identity-" + name);
-		System.out.println("Water identity capture: " + path);
+		Path path = this.context.takeScreenshot(name);
+		System.out.println("Water capture: " + path);
 		return path;
+	}
+
+	private void recordSnapshotSize(final int[] size) {
+		this.context.runOnClient(client -> {
+			var device = MetalGpuDevices.current();
+			size[0] = device.lastWorldOpaqueWaterWidth();
+			size[1] = device.lastWorldOpaqueWaterHeight();
+		});
+		if (size[0] <= 0 || size[1] <= 0) {
+			throw new AssertionError("Native opaque snapshot size was not recorded");
+		}
+	}
+
+	private void assertSnapshotSmallerThan(final int[] nativeSize) {
+		this.context.runOnClient(client -> {
+			var device = MetalGpuDevices.current();
+			if (device.lastWorldOpaqueWaterWidth() >= nativeSize[0]
+				|| device.lastWorldOpaqueWaterHeight() >= nativeSize[1]) {
+				throw new AssertionError("Half-resolution snapshot "
+					+ device.lastWorldOpaqueWaterWidth() + "x" + device.lastWorldOpaqueWaterHeight()
+					+ " was not smaller than native " + nativeSize[0] + "x" + nativeSize[1]);
+			}
+		});
+	}
+
+	private void setHalfResolution(final boolean enabled) {
+		MetalCraftConfig.setHalfResolution(enabled);
+		this.context.runOnClient(client -> {
+			Window window = client.getWindow();
+			int[] nativeWidth = new int[1];
+			int[] nativeHeight = new int[1];
+			GLFW.glfwGetFramebufferSize(window.handle(), nativeWidth, nativeHeight);
+			int width = enabled ? Math.max(1, nativeWidth[0] / 2) : Math.max(1, nativeWidth[0]);
+			int height = enabled ? Math.max(1, nativeHeight[0] / 2) : Math.max(1, nativeHeight[0]);
+			WindowFramebufferAccessor framebuffer = (WindowFramebufferAccessor)(Object)window;
+			framebuffer.metalcraft$setFramebufferWidth(width);
+			framebuffer.metalcraft$setFramebufferHeight(height);
+			client.framebufferSizeChanged();
+		});
+		this.context.waitTicks(20);
+	}
+
+	private void setFabulous(final boolean enabled) {
+		this.context.runOnClient(client -> {
+			client.getGpuWarnlistManager().dismissWarning();
+			client.options.improvedTransparency().set(enabled);
+		});
+		this.context.waitTicks(40);
+	}
+
+	private static void assertDepthViews(final Path surface, final Path opaque, final Path restored) {
+		int leftSurface = differentSamples(surface, restored, 0.05, 0.40);
+		int rightSurface = differentSamples(surface, restored, 0.60, 0.95);
+		int leftOpaque = differentSamples(opaque, restored, 0.05, 0.40);
+		int rightOpaque = differentSamples(opaque, restored, 0.60, 0.95);
+		if (leftSurface < 30) {
+			throw new AssertionError("Surface depth debug did not cover water: " + leftSurface);
+		}
+		if (leftOpaque < 30) {
+			throw new AssertionError("Opaque depth debug did not cover water: " + leftOpaque);
+		}
+		if (rightSurface > Math.max(10, leftSurface / 4)) {
+			throw new AssertionError("Surface depth debug leaked onto glass/lava: " + rightSurface);
+		}
+		if (rightOpaque > Math.max(10, leftOpaque / 4)) {
+			throw new AssertionError("Opaque depth debug leaked onto glass/lava: " + rightOpaque);
+		}
+	}
+
+	private static int differentSamples(final Path first, final Path second, final double x0, final double x1) {
+		try (var a = NativeImage.read(Files.newInputStream(first));
+			 var b = NativeImage.read(Files.newInputStream(second))) {
+			if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) {
+				throw new AssertionError("Depth debug captures have mismatched extents");
+			}
+			int count = 0;
+			int left = Math.max(0, (int)(a.getWidth() * x0));
+			int right = Math.min(a.getWidth(), (int)(a.getWidth() * x1));
+			for (int y = 0; y < a.getHeight(); y += 2) {
+				for (int x = left; x < right; x += 2) {
+					int pa = a.getPixel(x, y);
+					int pb = b.getPixel(x, y);
+					int mad = 0;
+					for (int shift : new int[]{0, 8, 16}) {
+						mad += Math.abs(((pa >>> shift) & 255) - ((pb >>> shift) & 255));
+					}
+					if (mad > 80) count++;
+				}
+			}
+			return count;
+		} catch (java.io.IOException error) {
+			throw new AssertionError("Could not inspect water depth captures", error);
+		}
 	}
 
 	private static void assertWaterIdentity(final Path baseline, final Path water, final Path restored) {

@@ -1,5 +1,6 @@
 package dev.metalcraft.client.shader;
 
+import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
@@ -113,6 +114,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final int lightingFrameSlot;
 	private final Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
 	private final Map<RenderPipeline, Optional<RenderPipeline>> waterSubstitutions = new IdentityHashMap<>();
+	private final Map<RenderPipeline, RenderPipeline> linearColorPipelines = new IdentityHashMap<>();
+	private @Nullable GpuFormat forwardPassColorFormat;
 	private final Set<String> declined = new LinkedHashSet<>();
 	private final Matrix4f inverseProjection = new Matrix4f();
 	private final Matrix4f viewToCameraRelative = new Matrix4f();
@@ -260,7 +263,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		final List<RenderPipeline> pipelines
 	) {
 		WorldGeometryAdapter binding = active();
-		if (binding != null) binding.validateSceneEncoding(color);
+		if (binding != null) {
+			binding.validateSceneEncoding(color);
+			binding.forwardPassColorFormat = color.texture().getFormat();
+		}
 		if (binding == null || depth == null || pipelines.isEmpty()) {
 			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 		}
@@ -279,11 +285,68 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 
 	public static RenderPipeline substitute(final RenderPass pass, final RenderPipeline pipeline) {
 		WorldGeometryAdapter binding = active();
-		if (binding == null || binding.gbufferPass != pass) {
+		if (binding == null) {
 			return pipeline;
 		}
+		if (binding.gbufferPass != pass) {
+			return binding.linearColorCompatible(pipeline);
+		}
 		binding.pendingResolve = true;
-		return binding.substitutionFor(pipeline).map(Substitution::pipeline).orElse(pipeline);
+		return binding.substitutionFor(pipeline).map(Substitution::pipeline).orElseGet(() -> binding.linearColorCompatible(pipeline));
+	}
+
+	/**
+	 * Fabulous HDR layers advertise {@code RGBA16_FLOAT} to Blaze3D. Vanilla pipelines declare
+	 * RGBA8, so the pass format check rejects them unless a format-matched copy is supplied.
+	 * Ordinary identity-routed main still reports RGBA8 and is left unchanged.
+	 */
+	private RenderPipeline linearColorCompatible(final RenderPipeline pipeline) {
+		if (this.colorEncoding != FrameBindings.ColorEncoding.LINEAR_SRGB || this.forwardPassColorFormat == null) {
+			return pipeline;
+		}
+		ColorTargetState state = pipeline.getColorTargetState();
+		if (state == null || state.format() == this.forwardPassColorFormat) {
+			return pipeline;
+		}
+		GpuFormat format = this.forwardPassColorFormat;
+		return this.linearColorPipelines.computeIfAbsent(pipeline, original -> copyWithColorFormat(original, format));
+	}
+
+	public static RenderPipeline copyWithColorFormat(final RenderPipeline pipeline, final GpuFormat format) {
+		ColorTargetState original = pipeline.getColorTargetState();
+		ColorTargetState remapped = new ColorTargetState(original.blendFunction(), format, original.writeMask());
+		RenderPipeline.Builder builder = RenderPipeline.builder()
+			.withLocation(Identifier.parse("metalcraft:linear_color/"
+				+ pipeline.getLocation().getPath() + "_" + format.name().toLowerCase(Locale.ROOT) + "_"
+				+ Integer.toHexString(System.identityHashCode(pipeline))))
+			.withVertexShader(pipeline.getVertexShader())
+			.withFragmentShader(pipeline.getFragmentShader())
+			.withDepthStencilState(Optional.ofNullable(pipeline.getDepthStencilState()))
+			.withPolygonMode(pipeline.getPolygonMode())
+			.withCull(pipeline.isCull())
+			.withPrimitiveTopology(pipeline.getPrimitiveTopology())
+			.withColorTargetState(0, remapped);
+		for (BindGroupLayout layout : pipeline.getBindGroupLayouts()) {
+			builder = builder.withBindGroupLayout(layout);
+		}
+		VertexFormat[] bindings = pipeline.getVertexFormatBindings();
+		for (int index = 0; index < bindings.length; index++) {
+			if (bindings[index] != null) {
+				builder = builder.withVertexBinding(index, bindings[index]);
+			}
+		}
+		for (String flag : pipeline.getShaderDefines().flags()) {
+			builder = builder.withShaderDefine(flag);
+		}
+		for (var value : pipeline.getShaderDefines().values().entrySet()) {
+			String number = value.getValue();
+			if (number.indexOf('.') >= 0 || number.indexOf('e') >= 0 || number.indexOf('E') >= 0) {
+				builder = builder.withShaderDefine(value.getKey(), Float.parseFloat(number));
+			} else {
+				builder = builder.withShaderDefine(value.getKey(), Integer.parseInt(number));
+			}
+		}
+		return builder.build();
 	}
 
 	public static void resolveOpaque() {
@@ -851,6 +914,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			water.ifPresent(this.device::forgetNativePipeline);
 		}
 		this.waterSubstitutions.clear();
+		this.linearColorPipelines.clear();
+		this.forwardPassColorFormat = null;
 	}
 
 	@Override

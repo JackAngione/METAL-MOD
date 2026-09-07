@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1 and W2 complete; W3 in progress.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W3 complete; W4 is next.
 
 ## Outcome and scope
 
@@ -43,7 +43,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
 | [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
-| [ ] | W3 | Water routing and stable frame inputs | W1, W2 | /root | in progress | 2026-09-07: opaque snapshots, production per-vertex metadata/forward routing and immutable frame bindings implemented; actual GPU routing, standard-world identity and lifecycle tests pass. Depth debug views and full transparency/resize acceptance remain open; see W3 production increment. |
+| [x] | W3 | Water routing and stable frame inputs | W1, W2 | grok | done | 2026-09-07: surface/opaque depth debug views, GPU reconstruction at native and odd half extents, live native/half identity, resize/world-change snapshot extents, and ordinary vs forced Fabulous water routing. See W3 completion evidence. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
 | [ ] | W6 | Shoreline foam and underwater appearance | W5 | unassigned | not started | Implement foam and one underwater fog policy. |
@@ -1242,3 +1242,93 @@ native and half resolution, explicit ordinary/Fabulous comparisons and resize/wo
 coverage. Opaque textures and stable frame data are bound but await depth/effect consumers;
 GPU binding alone is not proof of reconstruction or visual effects. These substep completions
 establish production identity/routing and frame ownership, not the entire W3 acceptance gate.
+
+
+### W3 depth-debug increment — claimed 2026-09-07 by `grok`
+
+Coordinator `grok` owns this tracker and the remaining W3 acceptance files. Prior W3a–W3f
+routing stays in place.
+
+- [x] W3g: surface and opaque depth debug views in the production forward water program,
+  reconstructing opaque device depth with the captured reverse-Z projection. Owner `grok`.
+- [x] W3h: GPU fixture for reconstruction at native and odd half extents, clear-zero far
+  fallback, mixed water/glass identity, and independent CPU references. Owner `grok`.
+- [x] W3i: live standard-world native and half-resolution depth/identity captures, plus
+  ordinary vs forced Fabulous transparency. Owner `grok`.
+- [x] W3j: live resize and world-change snapshot extent/routing checks with no frame-loop
+  CPU readback. Owner `grok`.
+
+W3 completion evidence follows.
+
+
+### W3 completion evidence — 2026-09-07 (`grok`)
+
+W3 is complete as the water routing and stable frame-input milestone. Production metadata,
+opaque snapshots, immutable reverse-Z frame uniforms, and forward substitution already
+existed; this increment adds proven surface/opaque depth debug views and live
+native/half/Fabulous/resize/world-change acceptance.
+
+Debug views (production forward program, no BLOCK rebuild):
+
+- Identity: water-only magenta from the sidecar material stream.
+- Surface depth: water fragments output `(1, saturate(-viewZ/32), 0)` from interpolated
+  view position. Nearer water is more red; farther water is more yellow.
+- Opaque depth: water fragments reconstruct the stored D32 snapshot with the captured
+  inverse projection (undoing the Metal clip-Y flip) and output
+  `(saturate(-viewZ/32), 1, 0)`. Pool-over-bed is lime; waterfall-over-sky (device depth
+  0 / far) is yellow. Glass, ice, slime and lava keep vanilla shading.
+
+Clear/sky device depth 0 reconstructs to the far plane. Missing snapshots or frame
+inputs still select the original forward pipeline. Snapshots remain distinct stored
+RGBA16_FLOAT / DEPTH32_FLOAT copies; no frame-loop CPU readback.
+
+Fabulous HDR layers advertise RGBA16_FLOAT to Blaze3D while vanilla pipelines declare
+RGBA8. `WorldGeometryAdapter` and `RenderPassColorFormatMixin` supply format-matched
+pipeline copies, and post contracts are copied onto those identities so the HDR session
+still selects `FABULOUS_TRANSPARENCY` / `LINEAR_COPY`. Vanilla's FABULOUS preset leaves
+`improvedTransparency` off on macOS; the live check enables that option directly.
+
+Implementation files: `gbuffer.metal`, `WaterRoutingDebug`, `MetalRenderPassBackend`,
+`MetalGpuDevice` snapshot-extent diagnostics, `MetalLinearWorldActivation`,
+`WorldGeometryAdapter.copyWithColorFormat`, `MetalLinearWorldPostActivation`,
+`RenderPassColorFormatMixin`, `WaterDepthDebugSmoke`, `WaterForwardPipelineSmoke`,
+`MetalWaterIdentityGameTest`, mixins.json, and this tracker.
+
+Validation:
+
+- `./gradlew build`: passed, including Metal GPU smoke (`/tmp/water-w3g-build.log`).
+  `WaterDepthDebugSmoke` reconstructs reverse-Z view Z at 8x4 and odd 5x3, checks
+  clear-zero far encode, mixed water/glass, and independent CPU references
+  (`/tmp/water-w3g-smoke.log`).
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed in
+  45 seconds on Metal with explicit NORMAL generation (`/tmp/water-w3g-client.log`).
+  Snapshot extents match the world attachment at native glfw pixels, half of those
+  pixels, and after a 1280x720 resize. World-change fill still produces water draws.
+  Numeric identity (water-only) and linear half-exposure/white-HUD assertions pass.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed in
+  39 seconds including resize, fullscreen, resource reload (`/tmp/water-w3g-lifecycle.log`).
+- Visually inspected identity, restored, surface-depth, opaque-depth, half-res identity,
+  HUD, and Fabulous identity captures. Ordinary path: pool/flow/waterlogged water only;
+  glass/ice/slime/lava unchanged. Surface vs opaque encodings differ as described.
+  HUD remains white over a darkened world.
+- `git diff --check`: passed.
+
+Local visual artifacts (generated outputs, not committed):
+
+- [Baseline](../run/screenshots/0000_metalcraft-water-identity-baseline.png)
+- [Water identity](../run/screenshots/0001_metalcraft-water-identity-water.png)
+- [Restored](../run/screenshots/0002_metalcraft-water-identity-restored.png)
+- [Surface depth](../run/screenshots/0003_metalcraft-water-surface-depth.png)
+- [Opaque depth](../run/screenshots/0004_metalcraft-water-opaque-depth.png)
+- [Half exposure with white HUD](../run/screenshots/0006_metalcraft-world-grade-half-exposure-hud.png)
+- [Native glfw identity](../run/screenshots/0007_metalcraft-water-identity-native.png)
+- [Half-resolution identity](../run/screenshots/0008_metalcraft-water-identity-half.png)
+- [Resized identity](../run/screenshots/0010_metalcraft-water-identity-resized.png)
+- [World-change identity](../run/screenshots/0011_metalcraft-water-identity-world-change.png)
+- [Fabulous identity](../run/screenshots/0012_metalcraft-water-identity-fabulous.png)
+
+Limitation carried into W4/W5: Fabulous water identity and other translucents are
+correct, but the composed Fabulous screenshot currently omits opaque terrain and sky
+(black background). Ordinary transparency includes the opaque world. Do not treat
+Fabulous opaque composite as proven when implementing refraction. No water animation,
+absorption, foam, or performance budget is claimed. Next task is W4.

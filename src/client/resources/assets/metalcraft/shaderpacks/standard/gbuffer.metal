@@ -62,7 +62,33 @@ struct McLighting {
 #ifdef MC_WATER_FORWARD
 // Typed sidecar binding: 32 bytes per original vertex, independent of sorted indices.
 struct WaterVertexMetadata { float4 normalMaterial; float4 flow; };
-struct WaterDraw { uint baseVertex; uint vertexCount; uint debugIdentity; uint reserved; };
+struct WaterDraw { uint baseVertex; uint vertexCount; uint debugMode; uint reserved; };
+// Matches WaterFrameInputs.UNIFORM_BYTES: projection, inverse, split camera, time, submerged.
+struct WaterFrameUniform {
+    float4x4 projection;
+    float4x4 inverseProjection;
+    float4 cameraWorldHigh;
+    float4 cameraWorldResidual;
+    float animationSeconds;
+    uint cameraSubmerged;
+    float2 pad;
+};
+// Linear view-depth debug encoding. Reverse-Z device 0 (clear/sky) reconstructs to the far plane.
+constant float MC_WATER_DEBUG_DEPTH_RANGE = 32.0;
+
+// Geometry already negated clip Y for Metal. Undo that pair before applying the captured inverse.
+static inline float3 mc_water_view_from_device_depth(
+    float2 pixel, float deviceDepth, float2 extent, float4x4 inverseProjection
+) {
+    float2 uv = pixel / max(extent, float2(1.0));
+    float2 metalNdc = uv * 2.0 - 1.0;
+    float4 viewH = inverseProjection * float4(metalNdc.x, -metalNdc.y, deviceDepth, 1.0);
+    return viewH.xyz / max(abs(viewH.w), 1.0e-7);
+}
+
+static inline float mc_water_debug_depth_encode(float3 viewPos) {
+    return saturate(max(0.0, -viewPos.z) / MC_WATER_DEBUG_DEPTH_RANGE);
+}
 #endif
 
 struct GBufferTargets {
@@ -209,7 +235,7 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     out.waterMaterial = metadata.normalMaterial.w;
     out.normal = metadata.normalMaterial.xyz;
     out.waterFlow = metadata.flow.xyz;
-    if (waterDraw.debugIdentity != 0 && out.waterMaterial == 1.0) out.tint.rgb = float3(1.0, 0.0, 1.0);
+    if (waterDraw.debugMode == 1u && out.waterMaterial == 1.0) out.tint.rgb = float3(1.0, 0.0, 1.0);
 #endif
     out.lightMapColor = mc_sample_lightmap(lightMap, lightSampler, uv2);
     out.uv = in.UV0;
@@ -272,7 +298,31 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     constant McGlobals &globals [[buffer(MC_SLOT_GLOBALS)]],
     texture2d<float> atlas [[texture(MC_SLOT_SAMPLER0)]],
     sampler atlasSampler [[sampler(MC_SLOT_SAMPLER0)]]
+#ifdef MC_WATER_FORWARD
+    , constant WaterFrameUniform &waterFrame [[buffer(13)]]
+    , texture2d<float> opaqueColor [[texture(12)]]
+    , depth2d<float> opaqueDepth [[texture(13)]]
+    , constant WaterDraw &waterDraw [[buffer(15)]]
+#endif
 ) {
+#ifdef MC_WATER_FORWARD
+    if (in.waterMaterial == 1.0 && waterDraw.debugMode >= 2u) {
+        float2 extent = float2(float(opaqueDepth.get_width()), float(opaqueDepth.get_height()));
+        float2 pixel = clamp(in.position.xy, float2(0.0), max(extent - 1.0, float2(0.0)));
+        uint2 coord = uint2(pixel);
+        float3 opaqueView = mc_water_view_from_device_depth(
+            in.position.xy, opaqueDepth.read(coord), extent, waterFrame.inverseProjection
+        );
+        float encoded = waterDraw.debugMode == 2u
+            ? mc_water_debug_depth_encode(in.worldPos)
+            : mc_water_debug_depth_encode(opaqueView);
+        float keepColor = opaqueColor.read(coord).x * 0.0;
+        if (waterDraw.debugMode == 2u) {
+            return float4(1.0, encoded + keepColor, 0.0, 1.0);
+        }
+        return float4(encoded + keepColor, 1.0, 0.0, 1.0);
+    }
+#endif
     float2 pixelSize = 1.0 / float2(section.TextureSize);
     float4 texel = globals.UseRgss == 1
         ? mc_sample_rgss(atlas, atlasSampler, in.uv, pixelSize)

@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 public final class MetalLinearWorldActivation {
 	private static final Logger LOGGER = LogUtils.getLogger();
 	private static volatile boolean lastLiveUsedHdr;
+	private static volatile boolean lastLiveFabulous;
 	/** Subset LinearWorldShaders can verify; other static pipelines fail preflight. */
 	private static final Set<String> LINEAR_WORLD_SHADER_PATHS = Set.of(
 		"core/terrain", "core/block", "core/entity", "core/particle", "core/rendertype_clouds",
@@ -54,6 +55,11 @@ public final class MetalLinearWorldActivation {
 		return lastLiveUsedHdr;
 	}
 
+	/** Whether the most recent live HDR session captured a Fabulous transparency chain. */
+	public static boolean lastLiveFabulous() {
+		return lastLiveFabulous;
+	}
+
 	/**
 	 * Live GameRenderer entry. Selects linear geometry before opening the session so retiring
 	 * legacy G-buffer stand-ins cannot poison the token. GPU smoke may still call {@link #begin}.
@@ -66,10 +72,12 @@ public final class MetalLinearWorldActivation {
 	) {
 		if (gpu == null || mainColor == null || mainDepth == null) {
 			lastLiveUsedHdr = false;
+			lastLiveFabulous = false;
 			return encoded(gpu, mainColor, mainDepth);
 		}
 		Frame frame = begin(gpu, mainColor, mainDepth, fabulous, knownWorldPipelines(gpu));
 		lastLiveUsedHdr = frame.sessionActive();
+		lastLiveFabulous = lastLiveUsedHdr && fabulous;
 		return frame;
 	}
 

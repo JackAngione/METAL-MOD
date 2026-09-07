@@ -74,7 +74,16 @@ final class WaterForwardPipelineSmoke {
 				 var globals = gpu.metal().createBuffer(64, MetalBuffer.StorageMode.SHARED);
 				 var fog = gpu.metal().createBuffer(48, MetalBuffer.StorageMode.SHARED);
 				 var baselineDraw = gpu.metal().createBuffer(16, MetalBuffer.StorageMode.SHARED);
-				 var identityDraw = gpu.metal().createBuffer(16, MetalBuffer.StorageMode.SHARED)) {
+				 var identityDraw = gpu.metal().createBuffer(16, MetalBuffer.StorageMode.SHARED);
+				 var waterFrame = gpu.metal().createBuffer(
+					 dev.metalcraft.client.shader.water.WaterFrameInputs.UNIFORM_BYTES,
+					 MetalBuffer.StorageMode.SHARED);
+				 var opaqueColor = gpu.metal().createTexture(new MetalTexture.Descriptor(
+					 MetalTexture.Format.RGBA16_FLOAT, 1, 1, 1));
+				 var opaqueDepth = gpu.metal().createTexture(new MetalTexture.Descriptor(
+					 MetalTexture.Format.DEPTH32_FLOAT, 1, 1, 1));
+				 var opaqueColorView = opaqueColor.createView();
+				 var opaqueDepthView = opaqueDepth.createView()) {
 				atlas.upload(queue, 0, halfPixel(2, 2, 2, 1));
 				lightmap.upload(queue, 0, halfPixel(1, 1, 1, 1));
 				writeVertices(vertices);
@@ -84,9 +93,11 @@ final class WaterForwardPipelineSmoke {
 				writeDraw(baselineDraw, 0);
 				writeDraw(identityDraw, 1);
 				draw(queue, pipeline, baseline, atlasView, lightmapView, sampler, vertices, indices,
-					metadata, projection, section, globals, fog, baselineDraw);
+					metadata, projection, section, globals, fog, baselineDraw, waterFrame,
+					opaqueColorView, opaqueDepthView);
 				draw(queue, pipeline, identity, atlasView, lightmapView, sampler, vertices, indices,
-					metadata, projection, section, globals, fog, identityDraw);
+					metadata, projection, section, globals, fog, identityDraw, waterFrame,
+					opaqueColorView, opaqueDepthView);
 
 				double decoded = decode(2.0);
 				double alpha = 128.0 / 255.0;
@@ -117,7 +128,8 @@ final class WaterForwardPipelineSmoke {
 		final MetalTexture target, final MetalTextureView atlas, final MetalTextureView lightmap,
 		final MetalSampler sampler, final MetalBuffer vertices, final MetalBuffer indices,
 		final MetalBuffer metadata, final MetalBuffer projection, final MetalBuffer section,
-		final MetalBuffer globals, final MetalBuffer fog, final MetalBuffer waterDraw) {
+		final MetalBuffer globals, final MetalBuffer fog, final MetalBuffer waterDraw,
+		final MetalBuffer waterFrame, final MetalTextureView opaqueColor, final MetalTextureView opaqueDepth) {
 		try (var commands = queue.createCommandBuffer();
 			 var pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
 				 MetalRenderPass.ColorAttachment.clear(target, 0, 0, 0, 0)))) {
@@ -131,8 +143,11 @@ final class WaterForwardPipelineSmoke {
 			pass.setSampler(4, sampler, STAGES);
 			pass.setTexture(5, lightmap, STAGES);
 			pass.setSampler(5, sampler, STAGES);
+			pass.setUniformBuffer(13, waterFrame, 0, STAGES);
+			pass.setTexture(12, opaqueColor, MetalRenderPass.STAGE_FRAGMENT);
+			pass.setTexture(13, opaqueDepth, MetalRenderPass.STAGE_FRAGMENT);
 			pass.setUniformBuffer(14, metadata, 0, MetalRenderPass.STAGE_VERTEX);
-			pass.setUniformBuffer(15, waterDraw, 0, MetalRenderPass.STAGE_VERTEX);
+			pass.setUniformBuffer(15, waterDraw, 0, STAGES);
 			pass.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, indices, 0,
 				MetalRenderPass.IndexType.UINT16, 12, 1, BASE_VERTEX, 0);
 			pass.close();

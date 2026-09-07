@@ -3,6 +3,11 @@ package dev.metalcraft.client.metal;
 import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.resource.RenderTargetDescriptor;
+import com.mojang.blaze3d.textures.GpuTextureView;
+import dev.metalcraft.client.shader.WorldGeometryAdapter;
+import java.util.EnumMap;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import net.minecraft.client.renderer.PostChainConfig;
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
@@ -14,6 +19,7 @@ import org.jspecify.annotations.Nullable;
 public final class MetalLinearWorldPostActivation {
 	private static final Identifier TRANSPARENCY_CHAIN_ID = Identifier.withDefaultNamespace("transparency");
 	private static final ThreadLocal<Boolean> LOADING_VERIFIED_TRANSPARENCY = new ThreadLocal<>();
+	private static final Map<RenderPipeline, Map<GpuFormat, RenderPipeline>> COLOR_VARIANTS = new IdentityHashMap<>();
 	private static volatile boolean liveTransparencyVerified;
 
 	private MetalLinearWorldPostActivation() { }
@@ -52,6 +58,24 @@ public final class MetalLinearWorldPostActivation {
 		return promote(descriptor, fabulousSession(device) && verifiedTransparencyChain);
 	}
 
+	/** Blaze3D rejects RGBA8 post pipelines writing promoted RGBA16_FLOAT Fabulous targets. */
+	public static RenderPipeline withColorFormat(final RenderPipeline pipeline, final GpuTextureView color) {
+		if (pipeline == null || color == null) return pipeline;
+		GpuFormat format = color.texture().getFormat();
+		if (pipeline.getColorTargetState().format() == format) return pipeline;
+		RenderPipeline remapped;
+		synchronized (COLOR_VARIANTS) {
+			remapped = COLOR_VARIANTS.computeIfAbsent(pipeline, ignored -> new EnumMap<>(GpuFormat.class))
+				.computeIfAbsent(format, ignored -> WorldGeometryAdapter.copyWithColorFormat(pipeline, format));
+		}
+		MetalGpuDevice device = MetalGpuDevices.current();
+		LinearWorldPostShaders.Semantic semantic = semanticFor(pipeline.getFragmentShader());
+		if (device != null && semantic != null) {
+			device.registerLinearWorldPostContract(remapped, semantic);
+		}
+		return remapped;
+	}
+
 	public static void registerCreatedPass(final @Nullable MetalGpuDevice device, final RenderPipeline pipeline) {
 		if (device == null || pipeline == null || !Boolean.TRUE.equals(LOADING_VERIFIED_TRANSPARENCY.get())) {
 			return;
@@ -87,5 +111,6 @@ public final class MetalLinearWorldPostActivation {
 	static void resetForTest() {
 		liveTransparencyVerified = false;
 		LOADING_VERIFIED_TRANSPARENCY.remove();
+		COLOR_VARIANTS.clear();
 	}
 }

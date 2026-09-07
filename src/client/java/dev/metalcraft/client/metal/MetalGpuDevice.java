@@ -80,8 +80,14 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private @Nullable MetalLinearWorldSession linearWorldSession;
 	private @Nullable MetalOpaqueSnapshotOwner opaqueSnapshots;
 	private boolean lastWorldHadOpaqueWaterInputs;
+	private boolean lastWorldFabulous;
 	private int lastWorldWaterDraws;
+	private int lastWorldOpaqueWaterWidth;
+	private int lastWorldOpaqueWaterHeight;
 	public int lastWorldWaterDraws() { return this.lastWorldWaterDraws; }
+	public int lastWorldOpaqueWaterWidth() { return this.lastWorldOpaqueWaterWidth; }
+	public int lastWorldOpaqueWaterHeight() { return this.lastWorldOpaqueWaterHeight; }
+	public boolean lastWorldFabulous() { return this.lastWorldFabulous; }
 	private @Nullable ShaderSource reloadShaderSource;
 	private final Map<RenderPipeline, LinearWorldPostShaders.Semantic> linearPostContracts = new IdentityHashMap<>();
 
@@ -185,7 +191,10 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			throw new IllegalStateException("A linear world session is already active");
 		}
 		this.lastWorldHadOpaqueWaterInputs = false;
+		this.lastWorldFabulous = false;
 		this.lastWorldWaterDraws = 0;
+		this.lastWorldOpaqueWaterWidth = 0;
+		this.lastWorldOpaqueWaterHeight = 0;
 		if (knownPipelines == null || knownPost == null) {
 			throw new NullPointerException("Linear world preflight collections are required");
 		}
@@ -266,8 +275,12 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	void endLinearWorld(final MetalLinearWorldSession session) {
 		if (this.linearWorldSession != session) return;
 		this.lastWorldWaterDraws = session.isPoisoned() ? 0 : session.waterDraws();
-		this.lastWorldHadOpaqueWaterInputs = !session.isPoisoned()
-			&& this.opaqueSnapshots != null && this.opaqueSnapshots.current().isPresent();
+		this.lastWorldFabulous = !session.isPoisoned() && session.token().fabulous();
+		java.util.Optional<MetalOpaqueSnapshotOwner.Snapshot> snapshot = session.isPoisoned()
+			|| this.opaqueSnapshots == null ? java.util.Optional.empty() : this.opaqueSnapshots.current();
+		this.lastWorldHadOpaqueWaterInputs = snapshot.isPresent();
+		this.lastWorldOpaqueWaterWidth = snapshot.map(MetalOpaqueSnapshotOwner.Snapshot::width).orElse(0);
+		this.lastWorldOpaqueWaterHeight = snapshot.map(MetalOpaqueSnapshotOwner.Snapshot::height).orElse(0);
 		if (session.isPoisoned()) this.forceLegacyFrame = true;
 		this.linearWorldSession = null;
 		if (this.opaqueSnapshots != null) this.opaqueSnapshots.invalidate();
