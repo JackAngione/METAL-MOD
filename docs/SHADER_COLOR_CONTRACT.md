@@ -1,8 +1,8 @@
 # Shader color contract
 
 Source audit: 2026-09-05, Minecraft 26.2 mapped sources and the direct Metal backend.
-This records PR 7b's transfer prerequisite. The live renderer still uses the PR 7a
-8-bit compatibility path; the floating-point world composition and GGX work remain open.
+This records PR 7b's transfer prerequisite. Live Standard world composition now
+uses linear RGBA16_FLOAT with one world-only grade before hand/HUD. GGX remains open.
 
 ## Observed path
 
@@ -10,10 +10,10 @@ This records PR 7b's transfer prerequisite. The live renderer still uses the PR 
 | --- | --- | --- |
 | Atlas | `TextureAtlas.createTexture` allocates `RGBA8_UNORM`; `MipmapGenerator` uses `ARGB.linearToSrgbChannel` when constructing mip colors | Atlas RGB is treated as encoded color by the asset pipeline. The Metal texture mapping is plain `MTLPixelFormatRGBA8Unorm`, so sampling does not decode it. Alpha is coverage. Arbitrary resource packs may supply different artistic encodings. |
 | Lightmap | `Lightmap` allocates `RGBA8_UNORM`; `assets/minecraft/shaders/core/lightmap.fsh` combines sky/block/ambient/night vision, clamps, and mixes in `notGamma` using `BrightnessFactor` | This is a bounded, brightness-adjusted artistic multiplier. It is neither isolated sunlight nor a known sRGB encoding of radiance. Applying an sRGB decoder to this multiplier is not a justified physical conversion. |
-| Geometry | Vanilla `terrain.fsh` multiplies sampled color by vertex color, then applies visibility fade and fog. Standard `gbuffer.metal` similarly multiplies atlas, tint and lightmap, then writes fogged `scene` | The current seed and fog arithmetic operate on legacy color values. `shared/lighting.metal` recovers and shadows this seed in that same space. Neither path establishes linear lighting. |
-| World target | `MainTarget` selects `GpuFormat.RGBA8_UNORM`; `RenderTarget` allocates that format | Values above 1 are lost before present-time grading. A floating-point post target alone cannot recover them. |
-| Grade | `standard/grade.metal` applies exposure and optional ACES fit directly to sampled scene; `pack.json` selects `bgra8_unorm` for `post_color` | Grading now executes at the world seam before hand/HUD. It remains a legacy color operation, not a linear HDR tonemapper. Default exposure 1 / tonemap none preserves the seed. |
-| Present | `mc_presentation_pipeline` returns the linearly filtered source sample; `MCMetalSurface` selects `BGRA8Unorm` and explicitly assigns `kCGColorSpaceSRGB` | Neither the fragment program nor the pixel format performs an sRGB output transfer. The layer tells the compositor to interpret the already encoded bytes as sRGB. Physical display validation remains open. |
+| Geometry | Vanilla `terrain.fsh` multiplies sampled color by vertex color, then applies visibility fade and fog. Standard `gbuffer.metal` similarly multiplies atlas, tint and lightmap, then writes fogged `scene` | Live linear variants decode that completed compatibility seed (`mc_scene_seed`) before fade/fog. Lightmap/cardinal lighting remain artistic multipliers, not physical illuminance. GGX is separate. |
+| World target | Live HDR session identity-routes main color/depth to stored RGBA16_FLOAT / DEPTH32_FLOAT; encoded `MainTarget` remains the hand/HUD/present attachment | Values above 1 survive world composition. Grade writes encoded bytes into the original UNORM main color. |
+| Grade | Linear `MC_SCENE_LINEAR_HDR` Standard grade applies exposure/optional ACES then sRGB encode once at the world seam | Hand/HUD composite after that encode. Default exposure 1 / tonemap none preserves the linear seed's encoded appearance. |
+| Present | `mc_presentation_pipeline` returns the linearly filtered source sample; `MCMetalSurface` selects `BGRA8Unorm` and explicitly assigns `kCGColorSpaceSRGB` | Neither the fragment program nor the pixel format performs another sRGB transfer. The layer tells the compositor to interpret the already encoded bytes as sRGB. Live window captures of the water identity fixture confirm ungraded HUD over a graded world. |
 
 Mapped sources are in the project's Loom `minecraft-clientOnly-043a8b3edf-26.2-sources.jar`;
 vanilla GLSL is in the cached 26.2 client jar. Backend evidence is in
@@ -192,3 +192,14 @@ standard-world water identity fixture. `./gradlew build` passed
 (`/tmp/water-w2qrs-build.log`). Encoded-route water identity and exposure/HUD
 regression passed in 37 seconds (`/tmp/water-w2qrs-client.log`). Physical display
 validation remains open; W2 / PR 7b stays unchecked. See WATER_EFFECTS_PLAN.md.
+
+
+W2 live HDR (2026-09-06): `beginLive` now opens the HDR session. First-time LINEAR
+native G-buffer stand-ins no longer poison an open session; geometry encoding is
+selected before `beginLinearWorld`. Host `SceneColor` matches `shared/color.metal`
+and decodes RGBA16_FLOAT world fog/clears. `./gradlew build` passed. Standard-world
+water identity with live HDR, linear half-exposure/HUD, and lifecycle fixtures
+passed (`/tmp/water-w2-live-client.log`, `/tmp/water-w2-live-lifecycle.log`).
+Inspected captures show rebuilt terrain, water-only magenta, restored water, and
+a white HUD over a darkened world. `CAMetalLayer` remains `kCGColorSpaceSRGB`.
+W2 / PR 7b is complete; GGX remains open. See WATER_EFFECTS_PLAN.md.

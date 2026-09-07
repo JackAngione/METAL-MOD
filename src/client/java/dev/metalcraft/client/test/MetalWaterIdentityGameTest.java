@@ -1,5 +1,7 @@
 package dev.metalcraft.client.test;
 
+import dev.metalcraft.client.metal.MetalLinearWorldActivation;
+import dev.metalcraft.client.shader.SceneColor;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import com.mojang.blaze3d.platform.NativeImage;
 import java.nio.file.Files;
@@ -64,6 +66,11 @@ final class MetalWaterIdentityGameTest {
 				client.gui.hud.getChat().clearMessages(true);
 			});
 			this.context.waitTicks(100);
+			this.context.runOnClient(client -> {
+				if (!MetalLinearWorldActivation.lastLiveUsedHdr()) {
+					throw new AssertionError("Live HDR world session was not active before water identity captures");
+				}
+			});
 			Path baseline = this.capture(false, "baseline");
 			Path water = this.capture(true, "water");
 			Path restored = this.capture(false, "restored");
@@ -94,7 +101,12 @@ final class MetalWaterIdentityGameTest {
 			}
 		});
 		this.context.waitTicks(rebuilt[0] ? 100 : 40);
-		this.context.runOnClient(client -> client.gui.hud.getChat().clearMessages(true));
+		this.context.runOnClient(client -> {
+			if (!MetalLinearWorldActivation.lastLiveUsedHdr()) {
+				throw new AssertionError("Live HDR world session dropped after terrain rebuild");
+			}
+			client.gui.hud.getChat().clearMessages(true);
+		});
 		this.context.waitTicks(2);
 		Path path = this.context.takeScreenshot("metalcraft-water-identity-" + name);
 		System.out.println("Water identity capture: " + path);
@@ -138,22 +150,17 @@ final class MetalWaterIdentityGameTest {
 	private static void assertWorldOnlyGrade(final Path baseline, final Path graded) {
 		try (var original = NativeImage.read(Files.newInputStream(baseline));
 			 var result = NativeImage.read(Files.newInputStream(graded))) {
-			// Encoded-path exposure multiplies UNORM bytes. Linear HDR exposure multiplies
-			// decoded scene RGB then encodes once. Accept either, not a second grade.
+			// Linear HDR exposure multiplies decoded scene RGB then encodes once.
 			int before = original.getPixel(20, 20), after = result.getPixel(20, 20);
-			boolean encoded = true;
 			boolean linear = true;
 			for (int shift : new int[]{0, 8, 16}) {
 				int start = (before >>> shift) & 255;
 				int end = (after >>> shift) & 255;
-				if (Math.abs(end - start * 0.5) > 2) encoded = false;
 				if (Math.abs(end - linearHalf(start)) > 3) linear = false;
 			}
-			int beforeLum = luminance(before);
-			int afterLum = luminance(after);
-			boolean darkened = afterLum + 8 < beforeLum;
-			if (!encoded && !linear && !darkened) {
-				throw new AssertionError("World exposure did not apply exactly once");
+			if (!linear) {
+				throw new AssertionError("World exposure did not apply linear HDR grade once: "
+					+ Integer.toHexString(before) + " -> " + Integer.toHexString(after));
 			}
 			int white = 0;
 			for (int y = result.getHeight() / 3; y < result.getHeight() * 2 / 3; y++) {
@@ -170,21 +177,6 @@ final class MetalWaterIdentityGameTest {
 
 	/** Matches Standard shared/color.metal sRGB transfer at 8-bit endpoints. */
 	private static int linearHalf(final int encoded) {
-		return Math.round(linearToSrgb(srgbToLinear(encoded / 255.0F) * 0.5F) * 255.0F);
+		return Math.round(SceneColor.linearToSrgb(SceneColor.srgbToLinear(encoded / 255.0F) * 0.5F) * 255.0F);
 	}
-
-	private static float srgbToLinear(final float encoded) {
-		float x = Math.max(encoded, 0.0F);
-		return x <= 0.04045F ? x / 12.92F : (float)Math.pow((x + 0.055F) / 1.055F, 2.4);
-	}
-
-	private static float linearToSrgb(final float linear) {
-		float x = Math.max(linear, 0.0F);
-		return x <= 0.0031308F ? 12.92F * x : 1.055F * (float)Math.pow(x, 1.0 / 2.4) - 0.055F;
-	}
-
-	private static int luminance(final int pixel) {
-		return ((pixel & 255) + ((pixel >>> 8) & 255) + ((pixel >>> 16) & 255)) / 3;
-	}
-
 }

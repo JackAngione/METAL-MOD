@@ -17,11 +17,12 @@ import org.slf4j.Logger;
 /**
  * Live GameRenderer wrap for one HDR world frame. Mixins stay thin.
  *
- * <p>Fog clear RGB is still written as vanilla encoded fog color. {@code shared/color.metal}
- * has no host decoder, so linearizing that clear is remaining work rather than a second transfer.
+ * <p>World fog clears of {@code RGBA16_FLOAT} attachments decode encoded RGB through
+ * {@link dev.metalcraft.client.shader.SceneColor} so they match {@code mc_scene_fog_color}.
  */
 public final class MetalLinearWorldActivation {
 	private static final Logger LOGGER = LogUtils.getLogger();
+	private static volatile boolean lastLiveUsedHdr;
 	/** Subset LinearWorldShaders can verify; other static pipelines fail preflight. */
 	private static final Set<String> LINEAR_WORLD_SHADER_PATHS = Set.of(
 		"core/terrain", "core/block", "core/entity", "core/particle", "core/rendertype_clouds",
@@ -48,10 +49,14 @@ public final class MetalLinearWorldActivation {
 		return new Frame(gpu, mainColor, mainDepth, null, false, null);
 	}
 
+	/** Whether the most recent {@link #beginLive} opened an HDR session. */
+	public static boolean lastLiveUsedHdr() {
+		return lastLiveUsedHdr;
+	}
+
 	/**
-	 * Live GameRenderer entry. HDR session begin remains gated: LINEAR_SRGB identity routing
-	 * currently drops rebuilt terrain from the standard-world water identity fixture.
-	 * GPU smoke calls {@link #begin} directly.
+	 * Live GameRenderer entry. Selects linear geometry before opening the session so retiring
+	 * legacy G-buffer stand-ins cannot poison the token. GPU smoke may still call {@link #begin}.
 	 */
 	public static Frame beginLive(
 		final @Nullable MetalGpuDevice gpu,
@@ -59,7 +64,13 @@ public final class MetalLinearWorldActivation {
 		final GpuTextureView mainDepth,
 		final boolean fabulous
 	) {
-		return encoded(gpu, mainColor, mainDepth);
+		if (gpu == null || mainColor == null || mainDepth == null) {
+			lastLiveUsedHdr = false;
+			return encoded(gpu, mainColor, mainDepth);
+		}
+		Frame frame = begin(gpu, mainColor, mainDepth, fabulous, knownWorldPipelines(gpu));
+		lastLiveUsedHdr = frame.sessionActive();
+		return frame;
 	}
 
 	/**
@@ -76,34 +87,45 @@ public final class MetalLinearWorldActivation {
 		if (gpu == null || mainColor == null || mainDepth == null || knownPipelines == null) {
 			throw new NullPointerException("Linear world activation requires device, attachments and pipelines");
 		}
+		WorldGeometryAdapter geometry = null;
+		boolean selectedLinear = false;
+		ShaderPackRuntime runtime = gpu.shaderPackRuntime();
+		if (runtime != null && runtime.isActive()) {
+			try {
+				runtime.resizeToScene(mainColor.getWidth(0), mainColor.getHeight(0));
+				geometry = runtime.worldGeometry();
+				if (geometry != null) {
+					geometry.beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
+					selectedLinear = true;
+				}
+			} catch (RuntimeException error) {
+				LOGGER.error("Linear geometry selection failed; keeping the encoded world path", error);
+				if (geometry != null) {
+					try {
+						geometry.beginFrame(FrameBindings.ColorEncoding.LEGACY_ENCODED);
+					} catch (RuntimeException restore) {
+						LOGGER.error("Could not restore encoded world geometry after linear selection failure", restore);
+					}
+				}
+				return encoded(gpu, mainColor, mainDepth);
+			}
+		}
 		MetalLinearWorldSession session = null;
-		if (!knownPipelines.isEmpty()) {
+		if (selectedLinear && !knownPipelines.isEmpty()) {
 			try {
 				session = gpu.beginLinearWorld(mainColor, mainDepth, fabulous, knownPipelines, List.of(), null);
 			} catch (IllegalArgumentException error) {
 				LOGGER.error("Linear world attachments rejected; keeping the encoded world path", error);
 			}
 		}
-		boolean selectedLinear = false;
-		WorldGeometryAdapter geometry = null;
-		if (session != null) {
+		if (session == null && selectedLinear && geometry != null) {
 			try {
-				ShaderPackRuntime runtime = gpu.shaderPackRuntime();
-				if (runtime != null && runtime.isActive()) {
-					runtime.resizeToScene(mainColor.getWidth(0), mainColor.getHeight(0));
-					geometry = runtime.worldGeometry();
-					if (geometry != null) {
-						geometry.beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
-						selectedLinear = true;
-					}
-				}
+				geometry.beginFrame(FrameBindings.ColorEncoding.LEGACY_ENCODED);
 			} catch (RuntimeException error) {
-				session.close();
-				session = null;
-				geometry = null;
-				selectedLinear = false;
-				LOGGER.error("Linear geometry selection failed; keeping the encoded world path", error);
+				LOGGER.error("Could not restore encoded world geometry after a declined HDR session", error);
 			}
+			selectedLinear = false;
+			geometry = null;
 		}
 		return new Frame(gpu, mainColor, mainDepth, session, selectedLinear, geometry);
 	}

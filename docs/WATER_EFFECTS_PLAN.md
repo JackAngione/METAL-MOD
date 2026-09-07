@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1 complete; W2 HDR prerequisite in progress (W2r/W2s done; W2q wrap helper live-gated; display open).
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1 and W2 complete; W3 is next.
 
 ## Outcome and scope
 
@@ -42,7 +42,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
-| [ ] | W2 | HDR composition prerequisite | W1 | grok | in progress | 2026-09-06: W2r reload ShaderSource and W2s Fabulous/PostChain promotion are implemented. W2q wrap helper/GPU smoke exist; live HDR session is gated because LINEAR_SRGB identity routing dropped rebuilt terrain from the water identity fixture. Physical display validation remains open. |
+| [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
 | [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
@@ -946,7 +946,7 @@ open. W2 stays unchecked; W3 remains gated.
 Coordinator `grok` serializes this tracker. Three parallel worktree agents own disjoint
 implementation files; they must not edit this plan.
 
-- [ ] W2q: wrap `GameRenderer.renderLevel`'s `LevelRenderer.render` with
+- [x] W2q: wrap `GameRenderer.renderLevel`'s `LevelRenderer.render` with
   `MetalLinearWorldSession`, exception-safe close, and `gradeLinearWorld` when a token
   is active. Keep `WorldGeometryAdapter.beginFrame()` legacy at acquire until the wrap
   itself selects LINEAR_SRGB for that frame. Owner `grok/w2q`.
@@ -964,13 +964,13 @@ Physical display validation stays unclaimed. These substeps must not mark W2 com
 Coordinator merged worktree agents `grok/w2q`, `grok/w2r`, and `grok/w2s`, registered
 mixins, and validated. W2 stays unchecked; W3 remains gated.
 
-- [ ] W2q: wrap helper, GameRenderer mixin, GPU smoke, and encoded grade seam are in
-  place. Live HDR session begin is **gated**. Enabling `MetalLinearWorldActivation.begin`
-  from GameRenderer selected LINEAR_SRGB and identity-routed main to RGBA16_FLOAT, then
-  dropped rebuilt terrain from the standard-world water identity fixture (sky-only
-  captures after `allChanged()`, no magenta). `beginLive` therefore returns the encoded
-  `gradeWorld` path. `WorldGeometryAdapter.beginFrame()` at acquire stays legacy.
-  Owner `grok/w2q`; coordinator applied the gate after live validation.
+- [x] W2q: wrap helper, GameRenderer mixin, GPU smoke, and live HDR session begin.
+  The earlier gate was a native-generation poison: first-time LINEAR G-buffer stand-ins
+  during an open session incremented `nativeGeneration` and discarded subsequent HDR
+  draws (sky-only after rebuild). Admission of new LINEAR natives during a session no
+  longer poisons; geometry switches to LINEAR_SRGB before `beginLinearWorld` so retiring
+  legacy stand-ins cannot invalidate the token. `beginLive` now calls `begin`.
+  Owner `grok/w2q`.
 - [x] W2r: `ShaderManager.apply` installs `compilationCache::getShader` through
   `MetalGpuDevice.setReloadShaderSource`; `close()` clears it. GPU fixture covers
   install, GLSL selection, identity no-op, generation/poison, and null fallback.
@@ -1011,6 +1011,57 @@ Local visual artifacts:
 - [Restored](../run/screenshots/0002_metalcraft-water-identity-restored.png)
 - [Half exposure with white HUD](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png)
 
-Next: ungate `beginLive` once rebuilt terrain survives LINEAR_SRGB identity routing,
-then live HDR readback and physical display validation. Fog clear RGB is still vanilla
-encoded; `shared/color.metal` has no host decoder. W2 remains unchecked.
+Next: W3 production water routing. W2 completion evidence follows.
+
+
+### W2 completion evidence — 2026-09-06 (`grok`)
+
+W2 is complete as the live HDR composition prerequisite. Values above 1 survive
+opaque/forward GPU composition; the live Standard world graph now uses the same
+RGBA16_FLOAT session, linear fog/blend producers, and a single world-only grade
+into encoded main before hand/HUD. Physical display is the sRGB-tagged
+`CAMetalLayer` presenting already-encoded BGRA8; a colorimeter was not used.
+
+Root cause of the earlier live-gate: `registerNativePipeline` always bumped
+`nativeGeneration` and poisoned the open session. `WorldGeometryAdapter` builds
+LINEAR G-buffer stand-ins on first terrain draw, so HDR frames dropped rebuilt
+geometry after sky (fog-cleared HDR looked like sky-only). Replacement of an
+existing native program still poisons.
+
+Implementation files: `SceneColor`, `MetalGpuDevice.registerNativePipeline`,
+`MetalLinearWorldActivation` (`beginLive` → `begin`, geometry before session),
+`MetalCommandEncoder` HDR clear decode, `MetalWaterIdentityGameTest` live-HDR
+and linear-exposure assertions, `LinearWorldSessionSmoke`,
+`WorldLightingModuleSmoke`.
+
+Validation:
+
+- `./gradlew build`: passed, including Metal GPU smoke (fog-clear decode, linear
+  stand-in admission, host `SceneColor` vs `shared/color.metal` references,
+  HDR RGB 2 surviving composition/grade).
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`:
+  passed in 38 seconds on Metal with explicit NORMAL generation.
+  `lastLiveUsedHdr` stayed true through `allChanged()` rebuilds. Numeric magenta
+  identity (water-only) and linear half-exposure (decoded RGB × 0.5, then encode
+  once) plus white HUD assertions passed (`/tmp/water-w2-live-client.log`).
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`:
+  passed in 40 seconds (`/tmp/water-w2-live-lifecycle.log`).
+- Visually inspected refreshed captures: terrain remains after rebuild; pool,
+  falling/flowing water and waterlogged-slab water become magenta; glass, ice,
+  slime and lava retain appearance; debug-off restores water; half-exposure
+  darkens the world and keeps a white HUD. Glass/ice/lava overlap is stable in
+  linear composition. `MCMetalSurface` continues to tag `kCGColorSpaceSRGB`;
+  presentation copies encoded bytes with no second transfer.
+- `git diff --check`: passed.
+
+Local visual artifacts:
+
+- [Baseline](../run/screenshots/0000_metalcraft-water-identity-baseline.png)
+- [Water identity](../run/screenshots/0001_metalcraft-water-identity-water.png)
+- [Restored](../run/screenshots/0002_metalcraft-water-identity-restored.png)
+- [Half exposure with white HUD](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png)
+
+Limitations carried into W3: opaque snapshots and production water metadata are
+still absent; translucent terrain/entity pipelines stay on the vanilla forward
+path; outline intermediates remain encoded; GGX is out of scope. No water
+performance budget is due at W2.

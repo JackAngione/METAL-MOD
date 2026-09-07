@@ -360,15 +360,29 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 
 	/**
 	 * Declares that a Blaze3D pipeline's programs are pack MSL rather than Minecraft's GLSL.
+	 *
+	 * <p>First-time {@code LINEAR_SRGB} admission during an open HDR session is expected: the
+	 * geometry adapter builds stand-ins on first use. Replacement, forgetting, or a legacy
+	 * program still changes {@code nativeGeneration} and poisons the open session.
 	 */
 	public void registerNativePipeline(final RenderPipeline pipeline, final NativeProgram program) {
 		if (pipeline == null || program == null) {
 			throw new NullPointerException("A native Metal pipeline needs both a Blaze3D pipeline and a program");
 		}
+		NativeProgram previous = this.nativePipelines.get(pipeline);
+		if (program.equals(previous)) {
+			return;
+		}
 		this.retirePipeline(pipeline);
 		this.nativePipelines.put(pipeline, program);
-		this.nativeGeneration++;
-		this.poisonLinearWorldSession();
+		boolean admitLinearStandIn = previous == null
+			&& program.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB
+			&& this.linearWorldSession != null
+			&& !this.linearWorldSession.isClosed();
+		if (!admitLinearStandIn) {
+			this.nativeGeneration++;
+			this.poisonLinearWorldSession();
+		}
 	}
 
 	public void forgetNativePipeline(final RenderPipeline pipeline) {

@@ -1820,3 +1820,10 @@ grades the encoded path. `./gradlew build` passed (`/tmp/water-w2qrs-build.log`)
 Standard-world water identity/HUD regression passed in 37 seconds
 (`/tmp/water-w2qrs-client.log`). Display validation remains open. See
 WATER_EFFECTS_PLAN.md.
+
+
+W2 live HDR (2026-09-06): live session begin is ungated. LINEAR native stand-in
+admission during an open session no longer poisons; fog clears of HDR attachments
+decode on the host. Build, standard-world water identity (live HDR, linear
+exposure/HUD), and lifecycle passed. See WATER_EFFECTS_PLAN.md. PR 7b / W2 is
+complete; GGX remains open.

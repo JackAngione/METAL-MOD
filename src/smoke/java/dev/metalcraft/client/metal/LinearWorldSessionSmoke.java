@@ -9,6 +9,7 @@ import com.mojang.blaze3d.systems.RenderPassDescriptor;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import dev.metalcraft.client.shader.FrameBindings;
+import dev.metalcraft.client.shader.SceneColor;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -108,8 +109,13 @@ final class LinearWorldSessionSmoke {
 				} catch (IllegalStateException expected) { }
 
 				try {
-					backend.clearColorAndDepthTextures(mainColor, new Vector4f(1, 0, 0, 1), mainDepth, 0.25);
+					backend.clearColorAndDepthTextures(mainColor, new Vector4f(0.5F, 0.25F, 1.0F, 1), mainDepth, 0.25);
 					backend.clearColorTexture(unrelated, new Vector4f(0, 0, 1, 1));
+					backend.finishPendingWork();
+					assertHdr(read(queue, session.hdrColor()),
+						SceneColor.srgbToLinear(0.5F), SceneColor.srgbToLinear(0.25F), SceneColor.srgbToLinear(1.0F), 1.0);
+					assertRgba8(read(queue, unrelatedView), 0, 0, 255, 255);
+
 					draw(backend, skyView, mainDepthView, 9, 3, known);
 					backend.copyTextureToTexture(mainColor, copyDest, 0, 0, 0, 0, 0, 9, 3);
 					backend.finishPendingWork();
@@ -151,10 +157,21 @@ final class LinearWorldSessionSmoke {
 				MetalLinearWorldSession retry = gpu.beginLinearWorld(colorView, depthView, false, List.of(known), null);
 				if (retry == null) throw new AssertionError("Linear world did not recover after the forced legacy frame");
 				try {
-					gpu.registerNativePipeline(pipeline("metalcraft:smoke/linear_session_generation"),
-						new MetalGpuDevice.NativeProgram(LINEAR_SOURCE, "vs", "fs",
-							FrameBindings.ColorEncoding.LINEAR_SRGB));
-					if (!retry.isPoisoned()) throw new AssertionError("Native generation change did not poison the session");
+					RenderPipeline standIn = pipeline("metalcraft:smoke/linear_session_standin");
+					gpu.registerNativePipeline(standIn, new MetalGpuDevice.NativeProgram(
+						UNSEEN_SOURCE, "vs", "fs", FrameBindings.ColorEncoding.LINEAR_SRGB));
+					if (retry.isPoisoned()) {
+						throw new AssertionError("First-time linear native stand-in poisoned the HDR session");
+					}
+					draw(backend, colorView, null, 5, 3, standIn, new Vector4f(0, 0, 0, 0));
+					backend.finishPendingWork();
+					assertHdr(read(queue, retry.hdrColor()), 1.5, 0.5, 0.25, 1.0);
+
+					gpu.registerNativePipeline(known, new MetalGpuDevice.NativeProgram(
+						UNSEEN_SOURCE, "vs", "fs", FrameBindings.ColorEncoding.LINEAR_SRGB));
+					if (!retry.isPoisoned()) {
+						throw new AssertionError("Native program replacement did not poison the session");
+					}
 					draw(backend, colorView, null, 5, 3, known, new Vector4f(0, 0, 0, 0));
 					backend.finishPendingWork();
 					assertHdr(read(queue, retry.hdrColor()), 0, 0, 0, 0);
@@ -165,7 +182,7 @@ final class LinearWorldSessionSmoke {
 
 			gpu.clearPipelineCache();
 			runtime.selectPack(ShaderPackRuntime.NONE_ID);
-			System.out.println("Linear world session: identity routing, on-demand compile, legacy discard, poison recovery and generation guards passed");
+			System.out.println("Linear world session: identity routing, fog-clear decode, on-demand compile, linear stand-in admission, legacy discard, poison recovery and replacement guards passed");
 		} finally {
 			gpu.close();
 		}

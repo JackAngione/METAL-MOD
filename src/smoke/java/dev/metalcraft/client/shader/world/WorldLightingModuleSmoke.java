@@ -5,6 +5,7 @@ import dev.metalcraft.client.metal.MetalDevice;
 import dev.metalcraft.client.metal.MetalRenderPass;
 import dev.metalcraft.client.metal.MetalRenderPipeline;
 import dev.metalcraft.client.metal.MetalTexture;
+import dev.metalcraft.client.shader.SceneColor;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -17,6 +18,7 @@ public final class WorldLightingModuleSmoke {
 	}
 
 	public static void run(final MetalDevice device) {
+		assertHostTransfer();
 		String shadows;
 		String lighting;
 		try {
@@ -66,6 +68,41 @@ public final class WorldLightingModuleSmoke {
 		System.out.println("Lighting frame: McFog layout and identity fog upload passed");
 		runColorTransfer(device);
 		HdrCompositionSmoke.run(device);
+	}
+
+	private static void assertHostTransfer() {
+		double[][] expected = {
+			{0, 0.2140411405, 1}, {0, 0.7353569831, 1},
+			{0.00313003096, 0.00313080495, 0.00313159455},
+			{0.040448644, 0.040449936, 0.0404511778},
+			{0.18, 2, 4}, {0.02, 0.5, 1}, {0, 0, 0}, {0, 0, 0}
+		};
+		checkHost(expected[0], SceneColor.srgbToLinear(0), SceneColor.srgbToLinear(0.5F), SceneColor.srgbToLinear(1));
+		checkHost(expected[1], SceneColor.linearToSrgb(0), SceneColor.linearToSrgb(0.5F), SceneColor.linearToSrgb(1));
+		checkHost(expected[2], SceneColor.srgbToLinear(0.04044F), SceneColor.srgbToLinear(0.04045F), SceneColor.srgbToLinear(0.04046F));
+		checkHost(expected[3], SceneColor.linearToSrgb(0.0031307F), SceneColor.linearToSrgb(0.0031308F), SceneColor.linearToSrgb(0.0031309F));
+		checkHost(expected[4],
+			SceneColor.srgbToLinear(SceneColor.linearToSrgb(0.18F)),
+			SceneColor.srgbToLinear(SceneColor.linearToSrgb(2.0F)),
+			SceneColor.srgbToLinear(SceneColor.linearToSrgb(4.0F)));
+		checkHost(expected[5],
+			SceneColor.linearToSrgb(SceneColor.srgbToLinear(0.02F)),
+			SceneColor.linearToSrgb(SceneColor.srgbToLinear(0.5F)),
+			SceneColor.linearToSrgb(SceneColor.srgbToLinear(1.0F)));
+		checkHost(expected[6], SceneColor.srgbToLinear(-1), SceneColor.srgbToLinear(-0.01F), SceneColor.srgbToLinear(0));
+		checkHost(expected[7], SceneColor.linearToSrgb(-1), SceneColor.linearToSrgb(-0.01F), SceneColor.linearToSrgb(0));
+		System.out.println("Host color transfer: SceneColor matches shared/color.metal references");
+	}
+
+	private static void checkHost(final double[] expected, final float r, final float g, final float b) {
+		float[] actual = {r, g, b};
+		for (int channel = 0; channel < 3; channel++) {
+			double tolerance = Math.max(0.000002, Math.abs(expected[channel]) * 0.001);
+			if (!Float.isFinite(actual[channel]) || Math.abs(actual[channel] - expected[channel]) > tolerance) {
+				throw new AssertionError("Host color transfer channel " + channel
+					+ ": expected " + expected[channel] + ", got " + actual[channel]);
+			}
+		}
 	}
 
 	/** Check the production transfer helpers against independent reference values in an HDR target. */

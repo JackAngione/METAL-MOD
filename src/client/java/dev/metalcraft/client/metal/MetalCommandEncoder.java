@@ -10,6 +10,7 @@ import com.mojang.blaze3d.systems.RenderPassBackend;
 import com.mojang.blaze3d.systems.RenderPassDescriptor;
 import com.mojang.blaze3d.systems.TransientMemory;
 import com.mojang.blaze3d.textures.GpuTexture;
+import dev.metalcraft.client.shader.SceneColor;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
@@ -105,6 +106,9 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 				firstColorView = colorView;
 			}
 			Optional<Vector4fc> colorClear = color.clearValue();
+			if (colorClear.isPresent()) {
+				colorClear = Optional.of(decodeWorldClear(colorView.texture().metal(), colorClear.get()));
+			}
 			boolean memoryless = colorView.texture().metal().isMemoryless();
 			colorAttachments.add(new MetalRenderPass.ColorAttachment(
 				colorView.texture().metal(),
@@ -292,9 +296,10 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (routedDepth.getWidth(0) < regionX + regionWidth || routedDepth.getHeight(0) < regionY + regionHeight) {
 			throw new IllegalArgumentException("Metal attachment clear region lies outside the depth attachment");
 		}
+		Vector4fc decoded = decodeWorldClear(color.metal(), clearColor);
 		ByteBuffer parameters = ByteBuffer.allocate(MetalRegionClear.PARAMETER_BYTES).order(ByteOrder.nativeOrder());
 		MetalRegionClear.writeParameters(
-			parameters, clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w(), (float) clearDepth
+			parameters, decoded.x(), decoded.y(), decoded.z(), decoded.w(), (float) clearDepth
 		);
 		GpuBufferSlice staged = this.transientMemory.uploadGpu(
 			parameters.flip(), MetalRegionClear.PARAMETER_ALIGNMENT, GpuBuffer.USAGE_UNIFORM
@@ -505,14 +510,26 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 
 	private void clear(final GpuTexture colorTexture, final Vector4fc clearColor, final GpuTexture depthTexture, final double clearDepth) {
 		MetalGpuTexture color = requireTexture(this.routedTexture(colorTexture));
+		Vector4fc decoded = decodeWorldClear(color.metal(), clearColor);
 		MetalRenderPass.DepthAttachment depthAttachment = depthTexture == null ? null : new MetalRenderPass.DepthAttachment(
 			requireTexture(this.routedTexture(depthTexture)).metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth
 		);
 		try (MetalRenderPass pass = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(
-			MetalRenderPass.ColorAttachment.clear(color.metal(), clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w()), depthAttachment
+			MetalRenderPass.ColorAttachment.clear(color.metal(), decoded.x(), decoded.y(), decoded.z(), decoded.w()), depthAttachment
 		))) {
 			// Beginning and ending the pass performs the clear.
 		}
+	}
+
+	/** Encoded fog/clear RGB becomes linear when the routed attachment is the HDR world target. */
+	private Vector4fc decodeWorldClear(final MetalTexture routed, final Vector4fc encoded) {
+		if (this.device.linearWorldSession() == null || routed == null || encoded == null) {
+			return encoded;
+		}
+		if (routed.descriptor().format() != MetalTexture.Format.RGBA16_FLOAT) {
+			return encoded;
+		}
+		return SceneColor.decodeRgb(encoded);
 	}
 
 	void encodeNativePass(final MetalRenderPass.Descriptor descriptor, final int kind,
