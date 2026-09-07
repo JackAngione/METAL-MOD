@@ -70,6 +70,8 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	private MetalGpuBuffer indexBuffer;
 	private MetalRenderPass.IndexType indexType;
 	private int debugGroups;
+	private boolean hdrOwned;
+	private boolean discardDraws;
 	/**
 	 * The batch buffer, allocated on the first multi-draw and reused for the encoder's lifetime.
 	 *
@@ -99,7 +101,8 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		final int width,
 		final int height,
 		final boolean depth,
-		final MetalTexture.@Nullable Format colorFormat
+		final MetalTexture.@Nullable Format colorFormat,
+		final boolean hdrOwned
 	) {
 		this.metal = pass;
 		this.renderArea = area;
@@ -107,6 +110,8 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		this.outputHeight = height;
 		this.hasDepth = depth;
 		this.colorFormat = colorFormat;
+		this.hdrOwned = hdrOwned;
+		this.discardDraws = false;
 		this.recording = null;
 		this.uniforms.clear();
 		this.textures.clear();
@@ -163,8 +168,20 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void setPipeline(final RenderPipeline pipeline) {
-		MetalCompiledRenderPipeline compiled = this.device.getOrCompilePipeline(pipeline);
-		if (!compiled.isValid()) throw new IllegalStateException("Direct Metal pipeline is invalid: " + pipeline.getLocation());
+		MetalCompiledRenderPipeline compiled;
+		if (this.hdrOwned) {
+			MetalLinearWorldSession session = this.device.linearWorldSession();
+			compiled = session == null ? null : this.device.linearPipelineFor(session, pipeline);
+			if (compiled == null || !compiled.isValid()) {
+				this.pipeline = null;
+				this.discardDraws = true;
+				return;
+			}
+			this.discardDraws = false;
+		} else {
+			compiled = this.device.getOrCompilePipeline(pipeline);
+			if (!compiled.isValid()) throw new IllegalStateException("Direct Metal pipeline is invalid: " + pipeline.getLocation());
+		}
 		if (this.pipeline != compiled) {
 			this.pipeline = compiled;
 			this.clearBoundSlots();
@@ -228,6 +245,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void drawIndexed(final int indexCount, final int instanceCount, final int firstIndex, final int vertexOffset, final int firstInstance) {
+		if (this.discardDraws) return;
 		this.bindResources();
 		this.requireIndexBuffer();
 		this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instanceCount, vertexOffset, firstInstance);
@@ -235,6 +253,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void multiDrawIndexed(final IntBuffer drawParameters, final int instanceCount, final int firstInstance, final int drawCount) {
+		if (this.discardDraws) return;
 		this.bindResources();
 		this.requireIndexBuffer();
 		this.pass().multiDrawIndexed(this.primitive(), this.indexBuffer.metal(), this.indexType, drawParameters, instanceCount, firstInstance, drawCount);
@@ -242,6 +261,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void multiDrawIndexed(final PointerBuffer firstIndexOffsets, final IntBuffer indexCounts, final IntBuffer vertexOffsets, final int drawCount) {
+		if (this.discardDraws) return;
 		this.bindResources();
 		this.requireIndexBuffer();
 		for (int draw = 0; draw < drawCount; draw++) {
@@ -253,6 +273,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void drawIndexedIndirect(final GpuBufferSlice commands, final int drawCount) {
+		if (this.discardDraws) return;
 		this.bindResources();
 		this.requireIndexBuffer();
 		this.pass().drawIndexedIndirect(this.primitive(), this.indexBuffer.metal(), this.indexType, requireBuffer(commands.buffer()).metal(), commands.offset(), drawCount);
@@ -266,6 +287,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		final Collection<String> dynamicUniforms,
 		final T uniformArgument
 	) {
+		if (this.discardDraws) return;
 		MetalCommandStream batch = BATCHING ? this.beginRecording() : null;
 		try {
 			for (RenderPass.Draw<T> draw : draws) {
@@ -285,6 +307,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void draw(final int vertexCount, final int instanceCount, final int firstVertex, final int firstInstance) {
+		if (this.discardDraws) return;
 		this.bindResources();
 		if (this.isTriangleFan()) {
 			this.drawTriangleFan(vertexCount, instanceCount, firstVertex, firstInstance);
@@ -295,18 +318,21 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 
 	@Override
 	public void multiDraw(final IntBuffer drawParameters, final int instanceCount, final int firstInstance, final int drawCount) {
+		if (this.discardDraws) return;
 		this.bindResources();
 		this.pass().multiDraw(this.primitive(), drawParameters, instanceCount, firstInstance, drawCount);
 	}
 
 	@Override
 	public void multiDraw(final IntBuffer firstVertices, final IntBuffer vertexCounts, final int drawCount) {
+		if (this.discardDraws) return;
 		this.bindResources();
 		this.pass().multiDraw(this.primitive(), firstVertices, vertexCounts, drawCount);
 	}
 
 	@Override
 	public void drawIndirect(final GpuBufferSlice commands, final int drawCount) {
+		if (this.discardDraws) return;
 		this.bindResources();
 		this.pass().drawIndirect(this.primitive(), requireBuffer(commands.buffer()).metal(), commands.offset(), drawCount);
 	}

@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1 complete; W2 HDR prerequisite in progress.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1 complete; W2 HDR prerequisite in progress (W2o session/recovery done; live wrapping open).
 
 ## Outcome and scope
 
@@ -42,7 +42,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
-| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-06: world grade seam, stored HDR target APIs, opaque variants and expanded forward GPU coverage implemented. Standard-world regression passes; explicit native G-buffer/resolve encoding selection and verified Fabulous post contracts now pass GPU checks. Coordinated live HDR routing and physical display validation remain open. |
+| [ ] | W2 | HDR composition prerequisite | W1 | /root | in progress | 2026-09-06: world grade seam, stored HDR target APIs, opaque variants, forward/post GPU coverage, native encoding selection, and W2o fail-closed session/preflight/recovery are implemented. Standard-world regression passes. Live GameRenderer HDR wrapping, Fabulous target promotion, reload-correct ShaderSource/PostChain mixins, and physical display validation remain open. |
 | [ ] | W3 | Water routing and stable frame inputs | W1, W2 | unassigned | not started | Implement material identity, snapshots, and lifetime checks. |
 | [ ] | W4 | Animated surface and baseline reflections | W3 | unassigned | not started | Add bounded normal animation and water lighting. |
 | [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
@@ -835,8 +835,8 @@ work; coordinator corrected the fixture, completed validation, and serialized th
   and copy pipeline contracts. Owner `/root/post_contract`; status done (evidence below).
 - [x] W2n: add actual post shader GPU fixtures for HDR preservation and layer ordering.
   Owner `/root/post_checks`; status done (evidence below).
-- [ ] W2o: resolve atomic activation/preflight design against current frame execution.
-  Owner `/root`; status in progress; `/root/activation_audit` supplies a bounded audit.
+- [x] W2o: resolve atomic activation/preflight design against current frame execution.
+  Owner `grok`; status done (evidence below).
 
 Coordinator serializes this tracker. W2 remains open and W3 gated; these preparation
 steps do not claim live activation or physical display validation.
@@ -895,3 +895,47 @@ GameRenderer.render:425 after grade/hand/screen effects. Do not promote outline
 intermediates merely because generation runs inside the world graph. This resolves the
 outline scope choice without claiming any new live rendering. W2 remains unchecked;
 W3 stays gated pending coordinated HDR routing and live/display acceptance.
+
+
+### W2 atomic session and recovery — claimed 2026-09-06 by `grok`
+
+- [x] W2o: implement the fail-closed HDR session, identity routing, generation guards
+  and validated recovery policy from the activation audit. Owner `grok`; status done
+  (evidence below). Live GameRenderer wrapping is a later increment.
+
+W2o evidence (2026-09-06, `grok`): `MetalLinearWorldSession` owns one HDR frame token
+with captured main color/depth identities, HDR views, shader/native generations and the
+reload ShaderSource. `MetalGpuDevice.beginLinearWorld` prefights known forward/post
+pipelines, installs the token only on success, and returns null for the one forced-legacy
+frame after a poisoned session. Nested sessions are rejected. HDR-owned passes in
+`MetalRenderPassBackend.setPipeline` call `linearPipelineFor` only: unseen supported
+pipelines compile synchronously; unsupported pipelines encode zero draws, poison the
+session, still allow `gradeLinearWorld`, and force the next complete frame through
+legacy targets. Native/shader generation changes poison the open session. Clears, copies
+and render passes translate only the captured main color/depth objects; same-size
+unrelated targets are untouched. `setReloadShaderSource` and
+`registerLinearWorldPostContract` exist for later mixins; they are not live-wired.
+
+`LinearWorldSessionSmoke` exercises actual backend draws: cached extra view of main
+color routes to HDR; original RGBA8 main stays green; unrelated same-size target stays
+blue; HDR stores values above 1; a copy of main color reads back the HDR pixels; an
+unseen LINEAR_SRGB native compiles before draw; a legacy-cached native cannot bind to
+the HDR pass; poison recovery skips one begin then reactivates; native registration
+mid-session discards subsequent HDR draws. This does not wrap `LevelRenderer.render`,
+promote Fabulous descriptors, or install ShaderManager/PostChain mixins.
+
+- [x] `./gradlew build`: passed including all Metal GPU smoke; `/tmp/water-w2o-build.log`.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`:
+  passed in 39 seconds using the explicit NORMAL preset; `/tmp/water-w2o-client.log`.
+  Numeric exposure/HUD assertions passed. Visually inspected refreshed
+  [water identity](../run/screenshots/0001_metalcraft-water-identity-water.png) and
+  [half-exposure/HUD](../run/screenshots/0003_metalcraft-world-grade-half-exposure-hud.png)
+  captures: magenta water coverage excludes glass/ice/slime/lava; darkened world retains
+  white HUD. This is a legacy-route regression, not live HDR acceptance.
+- [x] Final `git diff --check`: passed.
+
+Next: wrap `GameRenderer.renderLevel`'s `LevelRenderer.render` with the session,
+install reload-correct ShaderSource and PostChain pipeline registration, promote
+Fabulous/transparency targets while a token is active, and keep the live no-argument
+geometry entry legacy until that wrap is complete. Physical display validation remains
+open. W2 stays unchecked; W3 remains gated.

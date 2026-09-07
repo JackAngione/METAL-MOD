@@ -327,6 +327,7 @@ public final class MetalShaderTranslationSmoke {
 			dev.metalcraft.client.shader.world.WorldLightingModuleSmoke.run(device);
 			assertMemorylessPassMerge();
 			WorldHdrTargetsSmoke.run();
+			LinearWorldSessionSmoke.run();
 			LinearWorldShadersSmoke.run();
 			LinearWorldPostShadersSmoke.run();
 			LinearWorldTransparencyConfigSmoke.run();

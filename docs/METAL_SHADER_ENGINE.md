@@ -1803,3 +1803,11 @@ WATER_EFFECTS_PLAN.md for task evidence and the unresolved unseen-pipeline recov
 Standard-world lifecycle/water identity regression passed in 40 seconds with numeric
 exposure/HUD assertions and visually inspected refreshed captures (`/tmp/water-w2m-client.log`).
 This remains legacy-route evidence; the live HDR gate is unchecked.
+
+
+W2o atomic session (2026-09-06): fail-closed HDR session, identity routing, verified
+linear pipeline selection and one-frame legacy recovery are implemented and GPU-tested.
+HDR-owned passes never select the encoded cache. `./gradlew build` passed
+(`/tmp/water-w2o-build.log`). Standard-world water/HUD regression passed in 39 seconds
+with inspected captures (`/tmp/water-w2o-client.log`). Live wrapping, Fabulous promotion
+and display validation still gate PR 7b / W2. See WATER_EFFECTS_PLAN.md.

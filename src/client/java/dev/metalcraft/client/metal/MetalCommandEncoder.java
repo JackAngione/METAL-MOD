@@ -100,7 +100,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 				colorAttachments.add(null);
 				continue;
 			}
-			MetalGpuTextureView colorView = requireTextureView(color.textureView());
+			MetalGpuTextureView colorView = this.routedView(requireTextureView(color.textureView()));
 			if (firstColorView == null) {
 				firstColorView = colorView;
 			}
@@ -122,7 +122,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		MetalGpuTextureView depthView = null;
 		if (descriptor.depthAttachment() != null) {
 			RenderPassDescriptor.Attachment<OptionalDouble> depth = descriptor.depthAttachment();
-			depthView = requireTextureView(depth.textureView());
+			depthView = this.routedView(requireTextureView(depth.textureView()));
 			depthAttachment = new MetalRenderPass.DepthAttachment(
 				depthView.texture().metal(),
 				depthView.baseMipLevel(),
@@ -152,9 +152,12 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
 		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
 		MetalGpuTextureView sizeView = firstColorView != null ? firstColorView : depthView;
+		MetalLinearWorldSession session = this.device.linearWorldSession();
+		boolean hdrOwned = session != null && session.ownsTranslated(firstColorView, depthView);
 		this.renderPassBackend.reset(this.renderPass, area, sizeView.getWidth(0), sizeView.getHeight(0), depthAttachment != null,
 			colorAttachments.isEmpty() || colorAttachments.getFirst() == null ? null
-				: ((MetalTexture)colorAttachments.getFirst().target()).descriptor().format());
+				: ((MetalTexture)colorAttachments.getFirst().target()).descriptor().format(),
+			hdrOwned);
 		return this.renderPassBackend;
 	}
 
@@ -272,19 +275,21 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		final int regionWidth,
 		final int regionHeight
 	) {
-		int width = colorTexture.getWidth(0);
-		int height = colorTexture.getHeight(0);
+		GpuTexture routedColor = this.routedTexture(colorTexture);
+		GpuTexture routedDepth = this.routedTexture(depthTexture);
+		int width = routedColor.getWidth(0);
+		int height = routedColor.getHeight(0);
 		if (regionX == 0 && regionY == 0 && regionWidth == width && regionHeight == height) {
-			this.clear(colorTexture, clearColor, depthTexture, clearDepth);
+			this.clear(routedColor, clearColor, routedDepth, clearDepth);
 			return;
 		}
 		if (regionX < 0 || regionY < 0 || regionWidth <= 0 || regionHeight <= 0
 			|| regionX + regionWidth > width || regionY + regionHeight > height) {
 			throw new IllegalArgumentException("Metal attachment clear region lies outside the color attachment");
 		}
-		MetalGpuTexture color = requireTexture(colorTexture);
-		MetalGpuTexture depth = requireTexture(depthTexture);
-		if (depthTexture.getWidth(0) < regionX + regionWidth || depthTexture.getHeight(0) < regionY + regionHeight) {
+		MetalGpuTexture color = requireTexture(routedColor);
+		MetalGpuTexture depth = requireTexture(routedDepth);
+		if (routedDepth.getWidth(0) < regionX + regionWidth || routedDepth.getHeight(0) < regionY + regionHeight) {
 			throw new IllegalArgumentException("Metal attachment clear region lies outside the depth attachment");
 		}
 		ByteBuffer parameters = ByteBuffer.allocate(MetalRegionClear.PARAMETER_BYTES).order(ByteOrder.nativeOrder());
@@ -302,7 +307,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 
 	@Override
 	public void clearDepthTexture(final GpuTexture depthTexture, final double clearDepth) {
-		MetalGpuTexture depth = requireTexture(depthTexture);
+		MetalGpuTexture depth = requireTexture(this.routedTexture(depthTexture));
 		// A depth-only pass. This previously created a full-size BGRA scratch render target for every
 		// clear purely to satisfy the descriptor, which at 3840x2160 allocated and released 33 MB of
 		// texture per call on the render path.
@@ -448,7 +453,8 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		final int height
 	) {
 		this.commands().copyTexture(
-			requireTexture(source).metal(), requireTexture(destination).metal(), mipLevel, sourceX, sourceY, destX, destY, width, height
+			requireTexture(this.routedTexture(source)).metal(), requireTexture(this.routedTexture(destination)).metal(),
+			mipLevel, sourceX, sourceY, destX, destY, width, height
 		);
 	}
 
@@ -487,10 +493,20 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		}
 	}
 
+	private GpuTexture routedTexture(final GpuTexture texture) {
+		MetalLinearWorldSession session = this.device.linearWorldSession();
+		return session == null ? texture : session.translateTexture(texture);
+	}
+
+	private MetalGpuTextureView routedView(final MetalGpuTextureView view) {
+		MetalLinearWorldSession session = this.device.linearWorldSession();
+		return session == null ? view : requireTextureView(session.translateView(view));
+	}
+
 	private void clear(final GpuTexture colorTexture, final Vector4fc clearColor, final GpuTexture depthTexture, final double clearDepth) {
-		MetalGpuTexture color = requireTexture(colorTexture);
+		MetalGpuTexture color = requireTexture(this.routedTexture(colorTexture));
 		MetalRenderPass.DepthAttachment depthAttachment = depthTexture == null ? null : new MetalRenderPass.DepthAttachment(
-			requireTexture(depthTexture).metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth
+			requireTexture(this.routedTexture(depthTexture)).metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth
 		);
 		try (MetalRenderPass pass = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(
 			MetalRenderPass.ColorAttachment.clear(color.metal(), clearColor.x(), clearColor.y(), clearColor.z(), clearColor.w()), depthAttachment

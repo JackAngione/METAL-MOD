@@ -30,6 +30,7 @@ import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import java.nio.ShortBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.IdentityHashMap;
 import java.util.HashMap;
@@ -73,6 +74,12 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private MetalWorldGrade worldGrade;
 	private MetalWorldTargets linearWorldTargets;
 	private final @Nullable ShaderPackRuntime shaderPackRuntime;
+	private long shaderGeneration = 1L;
+	private long nativeGeneration = 1L;
+	private boolean forceLegacyFrame;
+	private @Nullable MetalLinearWorldSession linearWorldSession;
+	private @Nullable ShaderSource reloadShaderSource;
+	private final Map<RenderPipeline, LinearWorldPostShaders.Semantic> linearPostContracts = new IdentityHashMap<>();
 
 	MetalGpuDevice(final MetalDevice metal, final ShaderSource defaultShaderSource) {
 		this.metal = metal;
@@ -132,11 +139,163 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	/** Allocate world resources only when a caller is ready to render every producer in linear space. */
 	public MetalWorldTargets prepareLinearWorldTargets(final int width, final int height) {
 		this.requireOpen();
+		if (this.linearWorldSession != null) {
+			MetalWorldTargets current = this.linearWorldTargets;
+			if (current != null && current.color().getWidth(0) == width && current.color().getHeight(0) == height) {
+				return current;
+			}
+			throw new IllegalStateException("Cannot resize linear world targets during an active session");
+		}
 		if (this.linearWorldTargets == null) this.linearWorldTargets = new MetalWorldTargets(this);
 		// End a deferred pass before resize may retire the attachments it references.
 		this.commandEncoder.commands();
 		this.linearWorldTargets.resize(width, height);
 		return this.linearWorldTargets;
+	}
+
+	/**
+	 * Begins a fail-closed HDR world frame after preflight. {@code null} means render this frame
+	 * through the existing encoded path, including the one forced-legacy frame after a poisoned HDR
+	 * session. Live GameRenderer wrapping is a later increment; this API is the activation boundary.
+	 */
+	public @Nullable MetalLinearWorldSession beginLinearWorld(
+		final GpuTextureView mainColor,
+		final GpuTextureView mainDepth,
+		final boolean fabulous,
+		final Collection<RenderPipeline> knownPipelines,
+		final @Nullable ShaderSource shaderSource
+	) {
+		return this.beginLinearWorld(mainColor, mainDepth, fabulous, knownPipelines, List.of(), shaderSource);
+	}
+
+	public @Nullable MetalLinearWorldSession beginLinearWorld(
+		final GpuTextureView mainColor,
+		final GpuTextureView mainDepth,
+		final boolean fabulous,
+		final Collection<RenderPipeline> knownPipelines,
+		final Collection<MetalLinearWorldSession.PostContract> knownPost,
+		final @Nullable ShaderSource shaderSource
+	) {
+		this.requireOpen();
+		if (this.linearWorldSession != null) {
+			throw new IllegalStateException("A linear world session is already active");
+		}
+		if (knownPipelines == null || knownPost == null) {
+			throw new NullPointerException("Linear world preflight collections are required");
+		}
+		if (this.forceLegacyFrame) {
+			this.forceLegacyFrame = false;
+			return null;
+		}
+		if (this.shaderPackRuntime == null || !this.shaderPackRuntime.isActive()
+			|| !ShaderPackRuntime.BUILTIN_ID.equals(this.shaderPackRuntime.selectedPackId())) {
+			return null;
+		}
+		if (!(mainColor instanceof MetalGpuTextureView colorView)
+			|| !(mainDepth instanceof MetalGpuTextureView depthView)
+			|| colorView.attachment().device() != this.metal
+			|| depthView.attachment().device() != this.metal) {
+			throw new IllegalArgumentException("Linear world attachments must belong to this Metal device");
+		}
+		int width = colorView.getWidth(0);
+		int height = colorView.getHeight(0);
+		if (width != depthView.getWidth(0) || height != depthView.getHeight(0)) {
+			throw new IllegalArgumentException("Linear world color and depth extents must match");
+		}
+		ShaderSource selected = this.linearShaderSource(shaderSource);
+		try {
+			for (RenderPipeline pipeline : knownPipelines) {
+				this.precompileLinearWorldPipeline(pipeline, selected);
+			}
+			for (MetalLinearWorldSession.PostContract contract : knownPost) {
+				this.linearPostContracts.put(contract.pipeline(), contract.semantic());
+				this.precompileLinearWorldPostPipeline(contract.pipeline(), selected, contract.semantic());
+			}
+		} catch (RuntimeException error) {
+			LOGGER.error("Linear world preflight failed; keeping the encoded world path", error);
+			return null;
+		}
+		MetalWorldTargets targets = this.prepareLinearWorldTargets(width, height);
+		MetalLinearWorldSession.Token token = new MetalLinearWorldSession.Token(
+			colorView, colorView.texture(), depthView, depthView.texture(),
+			targets.color(), targets.depth(), width, height,
+			this.shaderGeneration, this.nativeGeneration, fabulous, selected);
+		MetalLinearWorldSession session = new MetalLinearWorldSession(this, token);
+		for (RenderPipeline pipeline : knownPipelines) session.approve(pipeline);
+		for (MetalLinearWorldSession.PostContract contract : knownPost) session.approve(contract.pipeline());
+		this.linearWorldSession = session;
+		return session;
+	}
+
+	@Nullable MetalLinearWorldSession linearWorldSession() {
+		return this.linearWorldSession;
+	}
+
+	void endLinearWorld(final MetalLinearWorldSession session) {
+		if (this.linearWorldSession != session) return;
+		if (session.isPoisoned()) this.forceLegacyFrame = true;
+		this.linearWorldSession = null;
+	}
+
+	/**
+	 * HDR-owned passes may bind only a verified linear pipeline. Never select the legacy cache.
+	 * Unseen supported pipelines compile here; failure poisons the session and suppresses the draw.
+	 */
+	@Nullable MetalCompiledRenderPipeline linearPipelineFor(final MetalLinearWorldSession session,
+		final RenderPipeline pipeline) {
+		if (session == null || pipeline == null) throw new NullPointerException("Linear pipeline lookup needs a session and pipeline");
+		if (session.isClosed()) throw new IllegalStateException("Linear world session is closed");
+		if (session.token().shaderGeneration() != this.shaderGeneration
+			|| session.token().nativeGeneration() != this.nativeGeneration) {
+			session.poison();
+			this.forceLegacyFrame = true;
+			return null;
+		}
+		try {
+			LinearWorldPostShaders.Semantic post = this.linearPostContracts.get(pipeline);
+			MetalCompiledRenderPipeline compiled = post != null
+				? (MetalCompiledRenderPipeline)this.precompileLinearWorldPostPipeline(
+					pipeline, session.token().shaderSource(), post)
+				: (MetalCompiledRenderPipeline)this.precompileLinearWorldPipeline(
+					pipeline, session.token().shaderSource());
+			session.approve(pipeline);
+			return compiled;
+		} catch (RuntimeException error) {
+			session.poison();
+			this.forceLegacyFrame = true;
+			LOGGER.error("Unsupported pipeline in an HDR-owned pass; suppressing draws: {}",
+				pipeline.getLocation(), error);
+			return null;
+		}
+	}
+
+	public void setReloadShaderSource(final @Nullable ShaderSource source) {
+		this.requireOpen();
+		if (this.reloadShaderSource == source) return;
+		this.reloadShaderSource = source;
+		this.shaderGeneration++;
+		this.poisonLinearWorldSession();
+	}
+
+	public void registerLinearWorldPostContract(final RenderPipeline pipeline,
+		final LinearWorldPostShaders.Semantic semantic) {
+		this.requireOpen();
+		if (pipeline == null || semantic == null) {
+			throw new NullPointerException("A linear post contract needs a pipeline and semantic");
+		}
+		this.linearPostContracts.put(pipeline, semantic);
+	}
+
+	private ShaderSource linearShaderSource(final @Nullable ShaderSource override) {
+		if (override != null) return override;
+		return this.reloadShaderSource != null ? this.reloadShaderSource : this.defaultShaderSource;
+	}
+
+	private void poisonLinearWorldSession() {
+		if (this.linearWorldSession != null) {
+			this.linearWorldSession.poison();
+			this.forceLegacyFrame = true;
+		}
 	}
 
 	/** Explicit linear producer handoff. The caller must have finished the whole world graph. */
@@ -200,11 +359,15 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		}
 		this.retirePipeline(pipeline);
 		this.nativePipelines.put(pipeline, program);
+		this.nativeGeneration++;
+		this.poisonLinearWorldSession();
 	}
 
 	public void forgetNativePipeline(final RenderPipeline pipeline) {
 		this.nativePipelines.remove(pipeline);
 		this.retirePipeline(pipeline);
+		this.nativeGeneration++;
+		this.poisonLinearWorldSession();
 	}
 
 	void forgetNativePipelines() {
@@ -212,6 +375,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			this.retirePipeline(pipeline);
 		}
 		this.nativePipelines.clear();
+		this.nativeGeneration++;
+		this.poisonLinearWorldSession();
 	}
 
 	private void retirePipeline(final RenderPipeline pipeline) {
@@ -433,6 +598,12 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	@Override
 	public void clearPipelineCache() {
 		this.commandEncoder.finishPendingWork();
+		if (this.linearWorldSession != null) {
+			this.linearWorldSession.poison();
+			this.linearWorldSession.close();
+		}
+		this.shaderGeneration++;
+		this.linearPostContracts.clear();
 		if (this.worldGrade != null) {
 			this.worldGrade.close();
 			this.worldGrade = null;
@@ -459,6 +630,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	public void close() {
 		if (!this.closed) {
 			this.closed = true;
+			if (this.linearWorldSession != null) this.linearWorldSession.close();
 			this.commandEncoder.close();
 			if (this.shaderPackRuntime != null) {
 				this.shaderPackRuntime.close();
