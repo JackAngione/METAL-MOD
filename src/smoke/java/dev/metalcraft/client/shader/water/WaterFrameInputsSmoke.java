@@ -28,6 +28,7 @@ public final class WaterFrameInputsSmoke {
 			throw new AssertionError("Double camera position lost precision");
 		}
 		if (!input.cameraSubmerged()) throw new AssertionError("Submerged state was not retained");
+		if (input.refractionEnabled()) throw new AssertionError("Refraction was not fail-closed by default");
 		if (!(input.animationSeconds() >= 0.0F
 			&& input.animationSeconds() < WaterFrameInputs.ANIMATION_PERIOD_SECONDS)) {
 			throw new AssertionError("Animation time escaped its periodic range");
@@ -47,6 +48,11 @@ public final class WaterFrameInputsSmoke {
 			throw new AssertionError("Smoke mutation did not execute");
 		}
 		assertGpuLayout(input, expectedProjection);
+		var refracting = input.withRefraction(true);
+		if (!refracting.refractionEnabled() || input.refractionEnabled()) {
+			throw new AssertionError("Refraction gate was not immutable");
+		}
+		assertGpuRefractionFlag(refracting);
 		assertSkyInputs();
 
 		float last = WaterFrameInputs.create(reverseZProjection(), new Vector3d(),
@@ -105,6 +111,10 @@ public final class WaterFrameInputsSmoke {
 		}
 		bytes.clear(); noon.write(bytes);
 		if (bytes.getFloat(188) != 1.0F) throw new AssertionError("Mutable sky escaped immutable frame capture");
+		bytes.clear(); noon.withRefraction(true).write(bytes);
+		if (bytes.getFloat(188) != 1.0F || bytes.getFloat(204) != 1.0F || bytes.getInt(168) != 1) {
+			throw new AssertionError("Refraction gate dropped immutable sky lighting");
+		}
 		bytes.clear(); base.write(bytes);
 		if (bytes.getFloat(188) != 0.0F) throw new AssertionError("withSky mutated source frame");
 	}
@@ -148,7 +158,7 @@ public final class WaterFrameInputsSmoke {
 			}
 		}
 		if (bytes.getFloat(8 + 160) != input.animationSeconds() || bytes.getInt(8 + 164) != 1
-			|| bytes.getLong(8 + 168) != 0L) {
+			|| bytes.getInt(8 + 168) != 0 || bytes.getInt(8 + 172) != 0) {
 			throw new AssertionError("GPU frame flags/padding layout changed");
 		}
 		try {
@@ -156,6 +166,14 @@ public final class WaterFrameInputsSmoke {
 			throw new AssertionError("Undersized uniform destination was accepted");
 		} catch (IllegalArgumentException expected) {
 			// Missing GPU storage must disable binding rather than truncate a frame.
+		}
+	}
+
+	private static void assertGpuRefractionFlag(final WaterFrameInputs input) {
+		ByteBuffer bytes = ByteBuffer.allocate(WaterFrameInputs.UNIFORM_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+		input.write(bytes);
+		if (bytes.getInt(168) != 1 || bytes.getInt(172) != 0) {
+			throw new AssertionError("Refraction gate/padding GPU layout changed");
 		}
 	}
 

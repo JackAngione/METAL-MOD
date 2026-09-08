@@ -136,6 +136,7 @@ final class MetalWaterIdentityGameTest {
 			this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-world-change", false);
 
 			this.captureW4Comparisons(world);
+			this.captureW5Comparisons(world);
 
 			this.setFabulous(true);
 			Path fabulous = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-fabulous", true);
@@ -161,6 +162,69 @@ final class MetalWaterIdentityGameTest {
 				client.levelExtractor.allChanged();
 			});
 		}
+	}
+
+	/** W5 uses a deep and shallow pool in the NORMAL-world fixture, with transparent controls. */
+	private void captureW5Comparisons(final TestSingleplayerContext world) {
+		world.getServer().runCommand("fill -20 174 55 20 195 85 minecraft:air");
+		// Five-block-deep pool on the left, one-block-shallow pool on the right.
+		world.getServer().runCommand("fill -18 176 58 -2 182 74 minecraft:stone hollow");
+		world.getServer().runCommand("fill -17 182 59 -3 182 73 minecraft:air");
+		world.getServer().runCommand("fill -17 177 59 -3 181 73 minecraft:water");
+		world.getServer().runCommand("fill 2 180 58 18 182 74 minecraft:stone hollow");
+		world.getServer().runCommand("fill 3 182 59 17 182 73 minecraft:air");
+		world.getServer().runCommand("fill 3 181 59 17 181 73 minecraft:water");
+		world.getServer().runCommand("fill -16 176 61 -4 176 63 minecraft:red_concrete");
+		world.getServer().runCommand("fill 4 180 61 16 180 63 minecraft:red_concrete");
+		// Transparent geometry both below the deep surface and above the shallow surface.
+		world.getServer().runCommand("fill -12 178 65 -8 180 65 minecraft:light_blue_stained_glass");
+		world.getServer().runCommand("fill 8 183 65 12 185 65 minecraft:light_blue_stained_glass");
+		world.getServer().runCommand("time set 6000");
+		world.getServer().runCommand("weather clear");
+		world.getServer().runCommand("tp @a 0 194 84 180 34");
+		this.context.getInput().lookAt(180, 34);
+		this.context.waitTicks(80);
+		world.getServer().runCommand("tick freeze");
+
+		Path refractionOff = this.capture(WaterRoutingDebug.Mode.REFRACTION_OFF,
+			"metalcraft-water-w5-refraction-off", false);
+		Path refracted = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w5-refraction-absorption", false);
+		assertVisualDifference(refractionOff, refracted, 80,
+			"W5 refraction/absorption did not change the shallow/deep pools");
+
+		world.getServer().runCommand("tp @a 0 183 82 180 6");
+		this.context.getInput().lookAt(180, 6);
+		this.context.waitTicks(20);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w5-steep-border-sky", false);
+
+		world.getServer().runCommand("tp @a -10 180 68 180 -30");
+		this.context.getInput().lookAt(180, -30);
+		this.context.waitTicks(20);
+		Path underwaterOff = this.capture(WaterRoutingDebug.Mode.REFRACTION_OFF,
+			"metalcraft-water-w5-underwater-refraction-off", false);
+		Path underwater = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w5-underwater-fallback", false);
+		// Vanilla's underwater overlay can vary a few encoded values between adjacent captures.
+		// A 40/765 RGB-distance threshold is just above 5%; larger changes indicate shading.
+		if (differentSamples(underwaterOff, underwater, 0.0, 1.0, 40) > 20) {
+			throw new AssertionError("W5 underwater view did not use the explicit W4 fallback");
+		}
+
+		world.getServer().runCommand("tp @a 0 194 84 180 34");
+		this.context.getInput().lookAt(180, 34);
+		this.context.waitTicks(20);
+		this.setFabulous(true);
+		Path fabulousOff = this.capture(WaterRoutingDebug.Mode.REFRACTION_OFF,
+			"metalcraft-water-w5-fabulous-refraction-off", true);
+		Path fabulous = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w5-fabulous-fallback", true);
+		if (differentSamples(fabulousOff, fabulous, 0.0, 1.0, 12) > 20) {
+			throw new AssertionError("W5 Fabulous mode did not use the explicit W4 fallback");
+		}
+		this.setFabulous(false);
+		world.getServer().runCommand("tick unfreeze");
+		// Leave the large W5 pools framed for the caller's final Fabulous identity capture.
 	}
 
 	/**

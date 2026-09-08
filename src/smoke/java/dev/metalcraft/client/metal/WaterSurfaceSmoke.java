@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 /** GPU checks for the production animated-water and reflection helpers. */
 final class WaterSurfaceSmoke {
-	private static final int RESULT_COUNT = 26;
+	private static final int RESULT_COUNT = 37;
 	private static final int FLOAT4_BYTES = 4 * Float.BYTES;
 	private static final float EPSILON = 2.0e-5F;
 
@@ -68,6 +68,22 @@ final class WaterSurfaceSmoke {
 			    out[23] = float4(mc_water_animated_normal(float3(0, 1, 0), float3(0.8, 0, -0.3), out[21].xyz, 17.25, 0.65), 0);
 			    out[24] = float4(mc_water_animated_normal(float3(0, 1, 0), float3(0.8, 0, -0.3), out[7].xyz, 17.25, 0.65), 0);
 			    out[25] = float4(mc_water_animated_normal(float3(0, 1, 0), float3(0.8, 0, -0.3), out[8].xyz, 17.25, 0.65), 0);
+
+			    out[26] = float4(mc_water_thickness(float3(0, 0, -2), float3(0, 0, -2), 0.5), 0, 0, 0);
+			    out[27] = float4(mc_water_thickness(float3(0, 0, -1), float3(0, 0, -100), 0.01), 0, 0, 0);
+			    out[28] = float4(mc_water_thickness(float3(0, 0, -1), float3(0, 0, -100), 0.0), 0, 0, 0);
+			    out[29] = float4(mc_water_thickness(float3(0, 0, -1), float3(0, 0, -0.5), 0.8), 0, 0, 0);
+			    out[30] = float4(mc_water_refraction_offset_pixels(float3(0.5, -0.5, 1), 24, 0), 0, 0);
+			    out[31] = float4(mc_water_refraction_offset_pixels(float3(2, -2, 0), 24, 2), 0, 0);
+			    out[32] = float4(
+			        mc_water_sample_in_bounds(float2(0.5, 0.5), float2(8, 4)) ? 1.0 : 0.0,
+			        mc_water_sample_in_bounds(float2(7.5, 3.5), float2(8, 4)) ? 1.0 : 0.0,
+			        mc_water_sample_in_bounds(float2(7.51, 2), float2(8, 4)) ? 1.0 : 0.0,
+			        mc_water_sample_in_bounds(float2(-0.1, 2), float2(8, 4)) ? 1.0 : 0.0);
+			    out[33] = float4(mc_water_absorb(float3(0.8, 0.6, 0.4), float3(0.1, 0.4, 0.7), 0), 0);
+			    out[34] = float4(mc_water_absorb(float3(1), float3(0), 24), 0);
+			    out[35] = float4(mc_water_absorb(float3(0.8, 0.6, 0.4), float3(0.1), NAN), 0);
+			    out[36] = float4(mc_water_thickness(float3(0, 0, 0), float3(0, 0, -2), 0.5), 0, 0, 0);
 			}
 			""";
 
@@ -108,10 +124,31 @@ final class WaterSurfaceSmoke {
 				assertEqual(bytes, 20, 21, EPSILON, "interpolated and direct wrap-edge position");
 				assertEqual(bytes, 22, 23, EPSILON, "interpolated and direct wrap-edge normal");
 				assertEqual(bytes, 24, 25, EPSILON, "wrapped adjacent-section normal");
+				assertVector(bytes, 26, new float[]{0}, EPSILON, "zero thickness");
+				assertVector(bytes, 27, new float[]{24}, EPSILON, "maximum thickness clamp");
+				assertVector(bytes, 28, new float[]{-1}, EPSILON, "clear depth rejection");
+				assertVector(bytes, 29, new float[]{-1}, EPSILON, "foreground depth rejection");
+				assertVector(bytes, 30, new float[]{0, 0}, EPSILON, "refraction-off identity");
+				assertVector(bytes, 31, new float[]{8, -8}, EPSILON, "bounded refraction offset");
+				assertVector(bytes, 32, new float[]{1, 1, 0, 0}, EPSILON, "image-bound rejection");
+				assertVector(bytes, 33, new float[]{0.8F, 0.6F, 0.4F}, EPSILON, "zero-thickness absorption identity");
+				assertAbsorptionOrdering(bytes, 34);
+				assertVector(bytes, 35, new float[]{0.8F, 0.6F, 0.4F}, EPSILON, "invalid-thickness absorption identity");
+				assertVector(bytes, 36, new float[]{-1}, EPSILON, "near-plane surface rejection");
 			}
 		}
-		System.out.println("Water surface GPU: normalized/zero-strength normals, temporal and spatial periods, "
-			+ "chunk seams, Fresnel endpoints, and finite roughness/degenerate reflection extremes passed");
+		System.out.println("Water surface GPU: normals/reflections plus bounded thickness, invalid depth, "
+			+ "refraction-off/bounds rejection and depth absorption extremes passed");
+	}
+
+	private static void assertAbsorptionOrdering(final ByteBuffer bytes, final int result) {
+		float red = get(bytes, result, 0);
+		float green = get(bytes, result, 1);
+		float blue = get(bytes, result, 2);
+		if (!(red >= 0.0F && red < green && green < blue && blue < 1.0F)) {
+			throw new AssertionError("Maximum-thickness RGB absorption was not progressive: "
+				+ red + ", " + green + ", " + blue);
+		}
 	}
 
 	private static String resource(final String path) throws IOException {

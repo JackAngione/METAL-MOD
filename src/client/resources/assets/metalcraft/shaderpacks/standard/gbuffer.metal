@@ -63,7 +63,7 @@ struct McLighting {
 // Typed sidecar binding: 32 bytes per original vertex, independent of sorted indices.
 struct WaterVertexMetadata { float4 normalMaterial; float4 flow; };
 struct WaterDraw { uint baseVertex; uint vertexCount; uint debugMode; uint reserved; };
-// Matches WaterFrameInputs.UNIFORM_BYTES: projection, inverse, split camera, time, submerged.
+// Matches WaterFrameInputs.UNIFORM_BYTES: projection, inverse, split camera, time and flags.
 struct WaterFrameUniform {
     float4x4 projection;
     float4x4 inverseProjection;
@@ -71,7 +71,8 @@ struct WaterFrameUniform {
     float4 cameraWorldResidual;
     float animationSeconds;
     uint cameraSubmerged;
-    float2 pad;
+    uint refractionEnabled;
+    uint pad;
     float4 sunDirectionEnergy;
     float4 environment;
 };
@@ -345,7 +346,8 @@ fragment GBufferTargets gbuffer_terrain_fragment(
 #endif
 
 #ifdef MC_WATER_FORWARD
-    if (in.waterMaterial == 1.0 && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u)) {
+    if (in.waterMaterial == 1.0
+        && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u)) {
         float3 normalWorld = mc_water_animated_normal(
             in.waterNormalWorld, in.waterFlow, in.waterPeriodicWorldPosition,
             waterFrame.animationSeconds, 1.0
@@ -359,10 +361,65 @@ fragment GBufferTargets gbuffer_terrain_fragment(
             section.ModelViewMat[2].xyz
         );
         float3 viewToCameraWorld = transpose(viewRotation) * -in.worldPos;
-        shaded = float4(mc_water_reflection(
-            shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
-            waterFrame.sunDirectionEnergy, waterFrame.environment
-        ), shaded.a);
+        if (waterDraw.debugMode == 0u && waterFrame.refractionEnabled != 0u
+            && waterFrame.cameraSubmerged == 0u) {
+            float2 extent = float2(float(opaqueDepth.get_width()), float(opaqueDepth.get_height()));
+            float2 surfacePixel = in.position.xy;
+            if (mc_water_sample_in_bounds(surfacePixel, extent)) {
+                uint2 undistortedCoord = uint2(surfacePixel);
+                float undistortedDeviceDepth = opaqueDepth.read(undistortedCoord);
+                float3 undistortedView = mc_water_view_from_device_depth(
+                    surfacePixel, undistortedDeviceDepth, extent, waterFrame.inverseProjection);
+                float thickness = mc_water_thickness(in.worldPos, undistortedView, undistortedDeviceDepth);
+                if (thickness >= 0.0) {
+                    float3 normalView = mc_water_safe_normalize(viewRotation * normalWorld, float3(0.0, 1.0, 0.0));
+                    float2 refractedPixel = surfacePixel
+                        + mc_water_refraction_offset_pixels(normalView, thickness, 1.0);
+                    uint2 sampleCoord = undistortedCoord;
+                    float3 backgroundView = undistortedView;
+                    if (mc_water_sample_in_bounds(refractedPixel, extent)) {
+                        uint2 candidateCoord = uint2(refractedPixel);
+                        float candidateDeviceDepth = opaqueDepth.read(candidateCoord);
+                        float2 candidateCenter = float2(candidateCoord) + 0.5;
+                        float3 candidateView = mc_water_view_from_device_depth(
+                            candidateCenter, candidateDeviceDepth, extent, waterFrame.inverseProjection);
+                        float candidateThickness = mc_water_thickness(
+                            in.worldPos, candidateView, candidateDeviceDepth);
+                        // A candidate in front of the water is a foreground silhouette, not a
+                        // refracted background. Reject it and retain the valid undistorted sample.
+                        if (candidateThickness >= 0.0) {
+                            sampleCoord = candidateCoord;
+                            backgroundView = candidateView;
+                            thickness = candidateThickness;
+                        }
+                    }
+                    float3 background = opaqueColor.read(sampleCoord).rgb;
+                    float backgroundFog = mc_fog_amount(length(backgroundView),
+                        max(length(backgroundView.xz), abs(backgroundView.y)), fog);
+                    background = mc_unfog(background, fog, backgroundFog);
+                    float3 transmitted = mc_water_absorb(background, shaded.rgb, thickness);
+                    shaded = float4(mc_water_reflection(
+                        transmitted, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+                        waterFrame.sunDirectionEnergy, waterFrame.environment
+                    ), 1.0);
+                } else {
+                    shaded = float4(mc_water_reflection(
+                        shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+                        waterFrame.sunDirectionEnergy, waterFrame.environment
+                    ), shaded.a);
+                }
+            } else {
+                shaded = float4(mc_water_reflection(
+                    shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+                    waterFrame.sunDirectionEnergy, waterFrame.environment
+                ), shaded.a);
+            }
+        } else {
+            shaded = float4(mc_water_reflection(
+                shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+                waterFrame.sunDirectionEnergy, waterFrame.environment
+            ), shaded.a);
+        }
     }
     return mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
 #else

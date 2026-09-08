@@ -29,7 +29,8 @@ public final class WaterFrameInputs {
 	/**
 	 * GPU layout in bytes: projection mat4 at 0, inverse projection mat4 at 64,
 	 * camera-world high float4 at 128, camera-world residual float4 at 144, animation
-	 * seconds float at 160, submerged uint at 164, eight padding bytes at 168,
+	 * seconds float at 160, submerged uint at 164, refraction-enabled uint at 168,
+	 * four padding bytes at 172,
 	 * sun direction/energy float4 at 176, linear sky RGB/validity float4 at 192.
 	 */
 	public static final int UNIFORM_BYTES = 208;
@@ -43,10 +44,12 @@ public final class WaterFrameInputs {
 	private final double cameraZ;
 	private final float animationSeconds;
 	private final boolean cameraSubmerged;
+	private final boolean refractionEnabled;
 	private float sunX, sunY, sunEnergy, environmentR, environmentG, environmentB, normalSky;
 
 	private WaterFrameInputs(final Matrix4f projection, final Matrix4f inverseProjection,
-		final Vector3dc cameraWorldPosition, final float animationSeconds, final boolean cameraSubmerged) {
+		final Vector3dc cameraWorldPosition, final float animationSeconds, final boolean cameraSubmerged,
+		final boolean refractionEnabled) {
 		this.projection = projection;
 		this.inverseProjection = inverseProjection;
 		this.cameraX = cameraWorldPosition.x();
@@ -54,6 +57,7 @@ public final class WaterFrameInputs {
 		this.cameraZ = cameraWorldPosition.z();
 		this.animationSeconds = animationSeconds;
 		this.cameraSubmerged = cameraSubmerged;
+		this.refractionEnabled = refractionEnabled;
 	}
 
 	/**
@@ -82,13 +86,14 @@ public final class WaterFrameInputs {
 		double seconds = (boundedTicks + (double)partialTick) / TICKS_PER_SECOND;
 		if (seconds >= ANIMATION_PERIOD_SECONDS) seconds -= ANIMATION_PERIOD_SECONDS;
 		return Optional.of(new WaterFrameInputs(projectionCopy, inverse, cameraWorldPosition,
-			(float)seconds, cameraSubmerged));
+			(float)seconds, cameraSubmerged, false));
 	}
 
 	/** Copies extracted sky values; unavailable/nonstandard skies have no invented sun or sky. */
 	public WaterFrameInputs withSky(final net.minecraft.client.renderer.state.level.SkyRenderState sky) {
 		WaterFrameInputs copy = new WaterFrameInputs(new Matrix4f(this.projection),
-			new Matrix4f(this.inverseProjection), this.cameraWorldPosition(), this.animationSeconds, this.cameraSubmerged);
+			new Matrix4f(this.inverseProjection), this.cameraWorldPosition(), this.animationSeconds,
+			this.cameraSubmerged, this.refractionEnabled);
 		if (sky.skybox != net.minecraft.world.level.dimension.DimensionType.Skybox.OVERWORLD
 			|| !Float.isFinite(sky.sunAngle) || !Float.isFinite(sky.rainBrightness)) return copy;
 		copy.normalSky = 1.0F;
@@ -126,6 +131,24 @@ public final class WaterFrameInputs {
 		return this.cameraSubmerged;
 	}
 
+	/** Enables opaque-snapshot replacement only for a composition mode that has proved it safe. */
+	public WaterFrameInputs withRefraction(final boolean enabled) {
+		WaterFrameInputs copy = new WaterFrameInputs(new Matrix4f(this.projection), new Matrix4f(this.inverseProjection),
+			this.cameraWorldPosition(), this.animationSeconds, this.cameraSubmerged, enabled);
+		copy.sunX = this.sunX;
+		copy.sunY = this.sunY;
+		copy.sunEnergy = this.sunEnergy;
+		copy.environmentR = this.environmentR;
+		copy.environmentG = this.environmentG;
+		copy.environmentB = this.environmentB;
+		copy.normalSky = this.normalSky;
+		return copy;
+	}
+
+	public boolean refractionEnabled() {
+		return this.refractionEnabled;
+	}
+
 	/**
 	 * Writes the explicit little-endian GPU layout at the destination's current position and
 	 * advances it by {@link #UNIFORM_BYTES}. Camera coordinates use a float high part plus a
@@ -149,7 +172,8 @@ public final class WaterFrameInputs {
 		bytes.putFloat(start + 156, 0.0F);
 		bytes.putFloat(start + 160, this.animationSeconds);
 		bytes.putInt(start + 164, this.cameraSubmerged ? 1 : 0);
-		bytes.putLong(start + 168, 0L);
+		bytes.putInt(start + 168, this.refractionEnabled ? 1 : 0);
+		bytes.putInt(start + 172, 0);
 		bytes.putFloat(start + 176, this.sunX).putFloat(start + 180, this.sunY)
 			.putFloat(start + 184, 0.0F).putFloat(start + 188, this.sunEnergy);
 		bytes.putFloat(start + 192, this.environmentR).putFloat(start + 196, this.environmentG)

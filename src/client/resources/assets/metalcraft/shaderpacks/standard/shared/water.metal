@@ -10,6 +10,8 @@ using namespace metal;
 constant float MC_WATER_SPATIAL_PERIOD = 256.0;
 constant float MC_WATER_TIME_PERIOD = 1024.0;
 constant float MC_WATER_TAU = 6.28318530717958647692;
+constant float MC_WATER_MAX_THICKNESS = 24.0;
+constant float MC_WATER_MAX_REFRACTION_PIXELS = 8.0;
 
 static inline float3 mc_water_safe_normalize(float3 value, float3 fallback) {
     float magnitudeSquared = dot(value, value);
@@ -113,6 +115,44 @@ static inline float3 mc_water_reflection(
     // singular at zero roughness without a finite solar disc representation.
     float lobe = min(pow(saturate(dot(normal, halfVector)), exponent) * nDotL, 1.0);
     return reflected + float3(sunEnergy * visibility * fresnel * lobe);
+}
+
+/// Returns view-space water path length, or -1 when the opaque sample is not behind the surface.
+/// Device depth zero is reverse-Z's clear/sky value and deliberately has no invented thickness.
+static inline float mc_water_thickness(
+    float3 surfaceView, float3 backgroundView, float backgroundDeviceDepth
+) {
+    if (!all(isfinite(surfaceView)) || !all(isfinite(backgroundView))
+        || !isfinite(backgroundDeviceDepth) || backgroundDeviceDepth <= 1.0e-7
+        || surfaceView.z >= -1.0e-4 || backgroundView.z > surfaceView.z + 1.0e-4) return -1.0;
+    float thickness = length(backgroundView - surfaceView);
+    return clamp(isfinite(thickness) ? thickness : -1.0, 0.0, MC_WATER_MAX_THICKNESS);
+}
+
+/// Bounded screen-space distortion. Strength zero is an exact identity.
+static inline float2 mc_water_refraction_offset_pixels(
+    float3 normalView, float thickness, float strength
+) {
+    if (!all(isfinite(normalView)) || !isfinite(thickness) || thickness < 0.0) return float2(0.0);
+    float boundedStrength = saturate(isfinite(strength) ? strength : 0.0);
+    float pathWeight = saturate(thickness / 4.0);
+    return clamp(normalView.xy, float2(-1.0), float2(1.0))
+        * (MC_WATER_MAX_REFRACTION_PIXELS * boundedStrength * pathWeight);
+}
+
+static inline bool mc_water_sample_in_bounds(float2 pixel, float2 extent) {
+    return all(isfinite(pixel)) && all(isfinite(extent)) && all(extent >= float2(1.0))
+        && all(pixel >= float2(0.5)) && all(pixel <= extent - 0.5);
+}
+
+/// Beer-Lambert RGB absorption with a restrained biome-colored in-scatter floor.
+static inline float3 mc_water_absorb(float3 scene, float3 biomeTint, float thickness) {
+    float boundedThickness = clamp(isfinite(thickness) ? thickness : 0.0, 0.0, MC_WATER_MAX_THICKNESS);
+    float3 safeScene = max(select(float3(0.0), scene, isfinite(scene)), float3(0.0));
+    float3 safeTint = saturate(select(float3(0.0), biomeTint, isfinite(biomeTint)));
+    float3 transmittance = exp(-float3(0.18, 0.065, 0.025) * boundedThickness);
+    float3 scattering = safeTint * 0.18;
+    return safeScene * transmittance + scattering * (1.0 - transmittance);
 }
 
 #endif

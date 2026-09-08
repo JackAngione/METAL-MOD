@@ -12,7 +12,8 @@ public final class WaterRoutingDebug {
 		SURFACE_DEPTH(2),
 		OPAQUE_DEPTH(3),
 		BASELINE(4),
-		NORMALS(5);
+		NORMALS(5),
+		REFRACTION_OFF(6);
 
 		public final int gpuValue;
 

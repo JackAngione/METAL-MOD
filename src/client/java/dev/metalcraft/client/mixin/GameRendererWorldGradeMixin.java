@@ -85,7 +85,9 @@ abstract class GameRendererWorldGradeMixin {
 					new Vector3d(cameraState.pos.x, cameraState.pos.y, cameraState.pos.z),
 					self.gameRenderState().levelRenderState.gameTime, deltaTracker.getGameTimeDeltaPartialTick(false),
 					cameraState.fogType == FogType.WATER)
-					.map(inputs -> inputs.withSky(self.gameRenderState().levelRenderState.skyRenderState)).orElse(null));
+					.map(inputs -> inputs.withSky(self.gameRenderState().levelRenderState.skyRenderState)
+						.withRefraction(!fabulous))
+					.orElse(null));
 			}
 			levelRenderer.render(resourceAllocator, deltaTracker, renderOutline, cameraState,
 				modelViewMatrix, terrainFog, fogColor, shouldRenderSky);

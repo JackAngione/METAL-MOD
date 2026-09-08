@@ -45,7 +45,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
 | [x] | W3 | Water routing and stable frame inputs | W1, W2 | grok | done | 2026-09-07: surface/opaque depth debug views, GPU reconstruction at native and odd half extents, live native/half identity, resize/world-change snapshot extents, and ordinary vs forced Fabulous water routing. See W3 completion evidence. |
 | [x] | W4 | Animated surface and baseline reflections | W3 | /root | done | 2026-09-07: periodic normals, bounded Fresnel/environment/sun, GPU seam/roughness/fallback fixtures, and standard-world camera/noon/night/cave comparisons pass. Build and lifecycle pass; see W4 completion evidence. |
-| [ ] | W5 | Refraction and depth absorption | W4 | unassigned | not started | Implement validated water thickness and scene sampling. |
+| [x] | W5 | Refraction and depth absorption | W4 | /root | done | 2026-09-08: ordinary-mode opaque replacement, validated reverse-Z thickness/refraction, RGB absorption/scattering, GPU extremes, and standard-world shallow/deep/steep/underwater/Fabulous/transparent checks pass. See W5 completion evidence. |
 | [ ] | W6 | Shoreline foam and underwater appearance | W5 | unassigned | not started | Implement foam and one underwater fog policy. |
 | [ ] | W7 | Controls and optional screen-space reflections | W5 | unassigned | not started | Add quality controls and measure bounded SSR. |
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
@@ -1443,3 +1443,75 @@ while OFF (0) is normal production shading. Identity and depth modes remain unch
 3. Implement validated common-space thickness, bounded refraction with foreground/border
    rejection, and depth-dependent absorption; test sky, near-plane, below-surface and
    transparent-overlap cases. Keep W5 unchecked until its own GPU/live criteria pass.
+
+
+### W5 completion evidence — 2026-09-08 (`/root`)
+
+W5 is complete for ordinary transparency. Implementation lives in Standard
+`shared/water.metal` and `gbuffer.metal`; `WaterFrameInputs` carries an immutable,
+fail-closed refraction gate selected by the verified world composition mode.
+`WaterRoutingDebug.REFRACTION_OFF` retains W4 lighting for matched comparisons, and the
+existing NORMAL-world client fixture now builds explicit one- and five-block-deep pools.
+
+**Refraction, absorption, and composition contract**
+
+- Reverse-Z opaque depth reconstructs into the same view space as the interpolated water
+  surface. Clear depth, non-finite data, a surface at/across the near plane, and a sample
+  in front of the surface reject replacement. Valid Euclidean view-space path length is
+  clamped to 24 blocks. Clear sky/no opaque hit therefore retains the finite W4 surface
+  fallback rather than inventing a far-plane water column.
+- The animated normal produces an at-most-eight-pixel offset, weighted by thickness.
+  Out-of-bounds candidates and candidate depths in front of water revert to the valid
+  undistorted opaque sample. This prevents border reads and foreground-silhouette bleed.
+- Opaque snapshot RGB is already fogged. The shader reconstructs its sampled position,
+  removes that established fog where numerically recoverable, applies Beer-Lambert RGB
+  attenuation plus restrained biome-tinted scattering in linear space, combines it with
+  W4 Fresnel/environment/sun reflection, then applies fog once at the water surface.
+- A valid ordinary-mode result writes the complete reflected/transmitted RGB with alpha
+  one through Minecraft's retained source-alpha blend state. The atlas alpha still owns
+  discard/coverage boundaries, but the opaque background is not blended a second time.
+  Refraction-off, invalid depth, camera-submerged, and Fabulous frames retain W4's original
+  straight-alpha surface contribution. Fabulous remains gated because its known missing
+  opaque composite is still unresolved; W5 does not claim refractive Fabulous support.
+- The opaque snapshot deliberately omits other transparency. The live fixture confirms
+  above-water stained glass remains in the sorted result; stained glass below the water
+  is visible with refraction off but disappears under opaque-snapshot replacement. This
+  is the W1-documented limitation, now validated rather than silently treated as support.
+
+**Validation**
+
+- `./gradlew build`: passed in 12s (`/tmp/water-w5-build.log`), including production Metal
+  pipeline compilation and `WaterSurfaceSmoke`. The GPU helper fixture covers zero and
+  maximum thickness, clear/foreground/near-plane-invalid inputs, zero-strength refraction,
+  bounded offsets, image edges, zero-thickness absorption identity, maximum RGB absorption,
+  and invalid-thickness identity. `WaterFrameInputsSmoke` verifies the immutable ordinary/
+  Fabulous gate layout and preservation of captured lighting.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: final pass in
+  1m27s on Apple M4 Max (`/tmp/water-w5-client-final.log`). The fixture explicitly selects
+  NORMAL world generation with seed 12345. It compares W4-only and W5 shading at frozen
+  time, exercises shallow/deep pools, red-bed silhouettes, above/below-water stained glass,
+  a steep border/sky view, underwater fallback, and Fabulous fallback. Refraction changes
+  more than 80 sampled pixels; underwater and Fabulous matched pairs have zero pixels over
+  a 5% difference threshold. The deep crop's linear RGB mean is
+  `(0.0294, 0.0508, 0.0945)` versus shallow `(0.0879, 0.1256, 0.1836)`.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed in
+  42s (`/tmp/water-w5-lifecycle.log`), including resource reload, resize, and fullscreen.
+- Visually inspected the corrected W5 images after an initial fixture run exposed stone
+  roofs over both pools. The final open-pool captures show a readable shallow bed,
+  progressive deep attenuation, stable silhouettes/borders/sky, the documented transparent
+  limitation, and unchanged underwater/Fabulous fallbacks. `git diff --check` passed.
+
+**Local comparison artifacts** (generated, not committed)
+
+- [W4/refraction off](../run/screenshots/0025_metalcraft-water-w5-refraction-off.png) and
+  [refraction plus absorption](../run/screenshots/0026_metalcraft-water-w5-refraction-absorption.png).
+- [Steep border/sky](../run/screenshots/0027_metalcraft-water-w5-steep-border-sky.png).
+- [Underwater refraction off](../run/screenshots/0028_metalcraft-water-w5-underwater-refraction-off.png)
+  and [underwater fallback](../run/screenshots/0029_metalcraft-water-w5-underwater-fallback.png).
+- [Fabulous refraction off](../run/screenshots/0030_metalcraft-water-w5-fabulous-refraction-off.png)
+  and [Fabulous fallback](../run/screenshots/0031_metalcraft-water-w5-fabulous-fallback.png).
+- [Fabulous identity](../run/screenshots/0032_metalcraft-water-identity-fabulous.png).
+
+Next tasks unlocked by W5 are W6 (foam and underwater appearance) and W7 (controls and
+optional SSR). W6 should replace the explicit underwater W4 fallback with one owned fog/
+absorption policy; W7 owns user-facing strength controls.
