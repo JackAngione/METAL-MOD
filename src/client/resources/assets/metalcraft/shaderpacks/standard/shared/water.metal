@@ -12,7 +12,9 @@ constant float MC_WATER_TIME_PERIOD = 1024.0;
 constant float MC_WATER_TAU = 6.28318530717958647692;
 constant float MC_WATER_MAX_THICKNESS = 24.0;
 constant float MC_WATER_MAX_REFRACTION_PIXELS = 8.0;
-constant float MC_WATER_FOAM_MAX_CONTACT_DISTANCE = 0.65;
+// A full source block over a solid shelf reconstructs to roughly one block of thickness.
+// Keep that common shoreline case inside the contact band while rejecting deeper water.
+constant float MC_WATER_FOAM_MAX_CONTACT_DISTANCE = 1.5;
 
 struct McWaterSsrHit {
     float3 color;
@@ -403,7 +405,10 @@ static inline float mc_water_contact_foam(
         + 229.0 * boundedTime / MC_WATER_TIME_PERIOD);
     float noise = saturate(0.58 + 0.24 * sin(phaseA) + 0.18 * sin(phaseB));
     float proximity = 1.0 - smoothstep(0.12, MC_WATER_FOAM_MAX_CONTACT_DISTANCE, thickness);
-    return saturate(boundedStrength * upward * proximity * smoothstep(0.30, 0.82, noise));
+    // Keep a faint continuous contact trace so a valid one-block shore cannot disappear at a
+    // low-noise animation phase; the moving crest remains the dominant part of the pattern.
+    float pattern = mix(0.25, 1.0, smoothstep(0.30, 0.82, noise));
+    return saturate(boundedStrength * upward * proximity * pattern);
 }
 
 #endif

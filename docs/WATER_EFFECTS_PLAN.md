@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W5 and W7 complete; W6 implemented; broader shoreline visibility validation remains open after the separate pipeline-cache fix.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W7 complete; W8 integrated release validation remains open.
 
 ## Outcome and scope
 
@@ -46,7 +46,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | W3 | Water routing and stable frame inputs | W1, W2 | grok | done | 2026-09-07: surface/opaque depth debug views, GPU reconstruction at native and odd half extents, live native/half identity, resize/world-change snapshot extents, and ordinary vs forced Fabulous water routing. See W3 completion evidence. |
 | [x] | W4 | Animated surface and baseline reflections | W3 | /root | done | 2026-09-07: periodic normals, bounded Fresnel/environment/sun, GPU seam/roughness/fallback fixtures, and standard-world camera/noon/night/cave comparisons pass. Build and lifecycle pass; see W4 completion evidence. |
 | [x] | W5 | Refraction and depth absorption | W4 | /root | done | 2026-09-08: ordinary-mode opaque replacement, validated reverse-Z thickness/refraction, RGB absorption/scattering, GPU extremes, and standard-world shallow/deep/steep/underwater/Fabulous/transparent checks pass. See W5 completion evidence. |
-| [ ] | W6 | Shoreline foam and underwater appearance | W5 | /root | in progress | 2026-09-08: restrained contact foam, single vanilla underwater fog ownership, smoothly introduced world-only distortion; GPU, standard-world transition/cave/HUD captures and lifecycle pass. See W6 completion evidence. |
+| [x] | W6 | Shoreline foam and underwater appearance | W5 | /root | done | 2026-09-09: one-block shoreline coverage regression fixed and locked down across three shelf regions with zero sky/dry-fence leakage; GPU, NORMAL-world water matrix and lifecycle pass. See W6 final closure evidence. |
 | [x] | W7 | Controls and optional screen-space reflections | W5 | /root | done | 2026-09-09: bounded controls, restart/reload persistence, fallback recovery and low/high SSR pass GPU and NORMAL-world validation; clean captures and 4K M4 Max tier timings recorded below. Baseline remains default. |
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
 
@@ -1694,7 +1694,7 @@ were not changed for the experiment; the diagnostic modifications remain only in
 hand/HUD behavior, reload/resize, and resource retirement and pass lifecycle checks.
 
 - [x] Identify and experimentally isolate a substantial FPS defect.
-- [ ] Implement and validate production pipeline-cache lifetime fix; exact user-scene
+- [x] Implement and validate production pipeline-cache lifetime fix; exact user-scene
   before/after comparison remains outstanding. W6/W8 performance acceptance stays open.
 
 - [x] Compare `865b042` (W5) against parent `0be0f6d`, separating the existing
@@ -1719,8 +1719,8 @@ correctness-only captures did not measure performance and are insufficient to cl
 report. W6 is reopened. Next: reproduce with paired same-scene timings and inspect actual
 effect coverage; preserve current changes while comparing against W5.
 
-- [ ] Establish reproducible performance and visible-effect feedback loops.
-- [ ] Identify cause, fix, and rerun paired standard-world validation.
+- [x] Establish reproducible performance and visible-effect feedback loops.
+- [x] Identify cause, fix, and rerun paired standard-world validation.
 
 
 Regression investigation partial evidence (2026-09-08): user clarifies roughly half FPS
@@ -1785,6 +1785,35 @@ conflating an implementation commit with completion of all reopened validation.
 Precommit integration validation: `./gradlew build` passed in 11s, including Metal GPU
 smoke, on top of `5ff4cda` (`/tmp/water-w6-precommit-build.log`).
 `git diff --check` passed.
+
+### W6 final closure evidence — 2026-09-09 (`/root`)
+
+The reopened ordinary-shoreline visibility gate now passes. The root cause was the
+combination of a 0.65-block hard contact cutoff, which excluded the common one-block-deep
+Minecraft shelf, and a noise threshold that could erase an otherwise valid contact at
+some animation phases. `shared/water.metal` now admits contacts up to 1.5 blocks and keeps
+a faint continuous contact trace beneath the animated crest. Existing upward-face,
+valid-depth, foreground, sky, zero-strength and distant-water gates remain unchanged.
+
+- `WaterSurfaceSmoke` first reproduced the defect deterministically: a one-block contact
+  returned zero. The updated production helper passes one-block-positive and two-block-zero
+  fixtures alongside all existing animation and rejection checks.
+- The NORMAL-world client assertion now requires changed samples in the left, center and
+  right shallow-shelf regions and rejects changes on sky and the dry fence. Final counts at
+  RGB delta >12 with two-pixel sampling were left 325, center 138 and right 358 (821 total),
+  versus the reopened investigation's roughly 169 sampled pixels; sky and dry fence were 0.
+- `./gradlew build`: passed in 14s, including the Metal GPU smoke suite.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed in
+  2m43s using NORMAL generation and seed 12345. Captures `0032` through `0040` revalidated
+  foam off/on, entry/exit, partial submersion, distortion identity/on, upward view, cave,
+  hand and HUD; the broader W3–W7 water regression matrix also passed.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed in
+  43s, including reload, resize, fullscreen, failure fallback/recovery, world close and
+  clean shutdown. `git diff --check` passed.
+- Visual inspection of the final foam pair confirms a restrained trace across the near
+  shoreline and both side contacts without tinting the open pool, sky or dry fence.
+
+W6 is complete. W8 retains the broader composed-scene release matrix and performance budget.
 
 ### W7 controls increment — 2026-09-09 (`/root`)
 

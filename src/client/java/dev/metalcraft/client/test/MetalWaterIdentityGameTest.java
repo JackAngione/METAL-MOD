@@ -377,8 +377,7 @@ final class MetalWaterIdentityGameTest {
 			"metalcraft-water-w6-contact-foam-off", false);
 		Path foamOn = this.capture(WaterRoutingDebug.Mode.OFF,
 			"metalcraft-water-w6-contact-foam-on", false);
-		assertVisualDifference(foamOff, foamOn, 50,
-			"W6 shallow contact scene did not change when water effects were enabled");
+		assertFoamCoverage(foamOff, foamOn);
 
 		// Enter from just above the surface, stop with the eye at the waterline, then submerge.
 		world.getServer().runCommand("tp @a 0 182.4 109 180 4");
@@ -698,6 +697,11 @@ final class MetalWaterIdentityGameTest {
 
 	private static int differentSamples(final Path first, final Path second, final double x0, final double x1,
 		final int rgbThreshold) {
+		return differentSamples(first, second, x0, x1, 0.0, 1.0, rgbThreshold);
+	}
+
+	private static int differentSamples(final Path first, final Path second,
+		final double x0, final double x1, final double y0, final double y1, final int rgbThreshold) {
 		try (var a = NativeImage.read(Files.newInputStream(first));
 			 var b = NativeImage.read(Files.newInputStream(second))) {
 			if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) {
@@ -706,7 +710,9 @@ final class MetalWaterIdentityGameTest {
 			int count = 0;
 			int left = Math.max(0, (int)(a.getWidth() * x0));
 			int right = Math.min(a.getWidth(), (int)(a.getWidth() * x1));
-			for (int y = 0; y < a.getHeight(); y += 2) {
+			int top = Math.max(0, (int)(a.getHeight() * y0));
+			int bottom = Math.min(a.getHeight(), (int)(a.getHeight() * y1));
+			for (int y = top; y < bottom; y += 2) {
 				for (int x = left; x < right; x += 2) {
 					int pa = a.getPixel(x, y);
 					int pb = b.getPixel(x, y);
@@ -721,6 +727,24 @@ final class MetalWaterIdentityGameTest {
 		} catch (java.io.IOException error) {
 			throw new AssertionError("Could not inspect water depth captures", error);
 		}
+	}
+
+	private static void assertFoamCoverage(final Path foamOff, final Path foamOn) {
+		int left = differentSamples(foamOff, foamOn, 0.05, 0.35, 0.40, 0.85, 12);
+		int center = differentSamples(foamOff, foamOn, 0.35, 0.65, 0.40, 0.85, 12);
+		int right = differentSamples(foamOff, foamOn, 0.65, 0.95, 0.40, 0.85, 12);
+		if (left < 100 || center < 100 || right < 100 || left + center + right < 750) {
+			throw new AssertionError("W6 foam did not cover the broad shallow shelf: left=" + left
+				+ " center=" + center + " right=" + right);
+		}
+		int sky = differentSamples(foamOff, foamOn, 0.05, 0.90, 0.0, 0.17, 12);
+		int dryFenceTop = differentSamples(foamOff, foamOn, 0.46, 0.54, 0.18, 0.28, 12);
+		if (sky > 10 || dryFenceTop > 10) {
+			throw new AssertionError("W6 foam leaked onto dry controls: sky=" + sky
+				+ " fence=" + dryFenceTop);
+		}
+		System.out.println("W6 foam coverage: left=" + left + " center=" + center
+			+ " right=" + right + " sky=" + sky + " dryFence=" + dryFenceTop);
 	}
 
 	private static void assertVisualDifference(final Path first, final Path second,

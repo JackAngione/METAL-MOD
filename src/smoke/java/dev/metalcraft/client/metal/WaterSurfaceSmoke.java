@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 /** GPU checks for the production animated-water and reflection helpers. */
 final class WaterSurfaceSmoke {
-	private static final int RESULT_COUNT = 45;
+	private static final int RESULT_COUNT = 46;
 	private static final int FLOAT4_BYTES = 4 * Float.BYTES;
 	private static final float EPSILON = 2.0e-5F;
 
@@ -93,6 +93,7 @@ final class WaterSurfaceSmoke {
 			    out[42] = float4(mc_water_contact_foam(0.2, float3(1, 0, 0), foamPosition, 17.25, 1), 0, 0, 0);
 			    out[43] = float4(mc_water_contact_foam(0.2, float3(0, -1, 0), foamPosition, 17.25, 1), 0, 0, 0);
 			    out[44] = float4(mc_water_contact_foam(NAN, float3(0, 1, 0), foamPosition, 17.25, 1), 0, 0, 0);
+			    out[45] = float4(mc_water_contact_foam(2.0, float3(0, 1, 0), foamPosition, 17.25, 1), 0, 0, 0);
 			}
 			""";
 
@@ -151,10 +152,11 @@ final class WaterSurfaceSmoke {
 					throw new AssertionError("Contact foam did not animate");
 				}
 				assertVector(bytes, 40, new float[]{0}, EPSILON, "missing/sky foam rejection");
-				assertVector(bytes, 41, new float[]{0}, EPSILON, "distant opaque foam rejection");
+				assertUnitInterval(bytes, 41, true, "one-block shallow contact foam");
 				assertVector(bytes, 42, new float[]{0}, EPSILON, "vertical-face foam rejection");
 				assertVector(bytes, 43, new float[]{0}, EPSILON, "downward-face foam rejection");
 				assertVector(bytes, 44, new float[]{0}, EPSILON, "invalid-thickness foam rejection");
+				assertVector(bytes, 45, new float[]{0}, EPSILON, "distant opaque foam rejection");
 			}
 		}
 		System.out.println("Water surface GPU: normals/reflections, bounded refraction/absorption, and "
