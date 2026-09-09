@@ -47,7 +47,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | W4 | Animated surface and baseline reflections | W3 | /root | done | 2026-09-07: periodic normals, bounded Fresnel/environment/sun, GPU seam/roughness/fallback fixtures, and standard-world camera/noon/night/cave comparisons pass. Build and lifecycle pass; see W4 completion evidence. |
 | [x] | W5 | Refraction and depth absorption | W4 | /root | done | 2026-09-08: ordinary-mode opaque replacement, validated reverse-Z thickness/refraction, RGB absorption/scattering, GPU extremes, and standard-world shallow/deep/steep/underwater/Fabulous/transparent checks pass. See W5 completion evidence. |
 | [ ] | W6 | Shoreline foam and underwater appearance | W5 | /root | in progress | 2026-09-08: restrained contact foam, single vanilla underwater fog ownership, smoothly introduced world-only distortion; GPU, standard-world transition/cave/HUD captures and lifecycle pass. See W6 completion evidence. |
-| [ ] | W7 | Controls and optional screen-space reflections | W5 | unassigned | not started | Add quality controls and measure bounded SSR. |
+| [ ] | W7 | Controls and optional screen-space reflections | W5 | /root | in progress | 2026-09-09: claimed; implement bounded settings and identity behavior first, then validate optional SSR and measure tiers. |
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
 
 ## Implementation tasks and acceptance criteria
@@ -1785,3 +1785,39 @@ conflating an implementation commit with completion of all reopened validation.
 Precommit integration validation: `./gradlew build` passed in 11s, including Metal GPU
 smoke, on top of `5ff4cda` (`/tmp/water-w6-precommit-build.log`).
 `git diff --check` passed.
+
+### W7 controls increment — 2026-09-09 (`/root`)
+
+- [x] Claim W7 after its completed W5 dependency and audit settings propagation.
+- [x] Add water enable, wave/refraction strength, absorption, foam, underwater
+  distortion, and off/baseline reflection quality to Standard's existing settings UI.
+- [x] Validate production forward water-off RGB/alpha ordering, reload retention,
+  and zero/default control variant compilation in `WaterForwardPipelineSmoke`.
+- [ ] Validate saved controls across restart, live repeated toggles and failed
+  configuration recovery in a NORMAL world; capture off/on and zero-strength views.
+- [ ] Implement bounded optional SSR, GPU rejection fixtures and standard-world
+  camera/edge/thin-geometry/resolution checks; measure each tier before acceptance.
+
+This is the first implementation increment, not W7 completion or an SSR deferral.
+All new controls use existing `recompile` semantics so forward geometry and grade
+receive the same saved options without extending their distinct uniform layouts.
+The existing generic UI supplies labels and numeric sliders from option declarations.
+Strengths range from 0 to 1 in 0.1 increments; default 1 preserves prior appearance.
+Reflection defaults to baseline; the only currently offered tiers are off/baseline.
+SSR is deliberately not advertised before implementation and measurement.
+
+Water-off skips added surface effects and grade distortion while preserving vanilla
+compatibility shading, original alpha/sorting/fog and Minecraft's underwater fog/veil.
+Diagnostic identity/depth modes remain available. Zero refraction strength removes
+the sample displacement while retaining absorption/replacement composition; zero
+absorption removes optical attenuation/scattering; zero waves uses the mesh normal.
+Foam and distortion zero retain their helper identity behavior. Reflection off removes
+both environment reflection and sun highlight. Graph outputs remain defined because
+no graph nodes are disabled. Recompile cost during UI adjustment remains unmeasured.
+
+Validation: `./gradlew build` passed in 15s, including actual Metal GPU fixtures
+(`/tmp/water-w7-controls-build.log`). The expanded forward fixture compares water-off
+against independent baseline HDR RGB and sorted overlap references, verifies false
+survives runtime reload, and compiles zero/default variants after option changes.
+`git diff --check` passed. This increment has no new live screenshots, restart check,
+SSR implementation or performance results; those acceptance gates stay open above.

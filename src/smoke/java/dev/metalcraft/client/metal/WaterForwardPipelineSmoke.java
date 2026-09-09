@@ -122,6 +122,40 @@ final class WaterForwardPipelineSmoke {
 					assertRgb(debugPixels, 3, y, foreground, behind, foreground, "identity sorted overlap");
 					assertRgb(debugPixels, 7, y, 0, foreground, 0, "identity excludes glass");
 				}
+				// Production mode with water disabled must retain baseline RGB and sorted alpha.
+				runtime.setOption("water_enabled", false);
+				runtime.reload();
+				if (!Boolean.FALSE.equals(runtime.optionValue("water_enabled"))) {
+					throw new AssertionError("Water enable did not survive reload");
+				}
+				WorldGeometryAdapter disabledGeometry = runtime.worldGeometry();
+				disabledGeometry.beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
+				var disabledWater = disabledGeometry.waterPipeline(original).orElseThrow();
+				var disabledCompiled = (MetalCompiledRenderPipeline)gpu.precompileLinearWorldPipeline(disabledWater, null);
+				writeDraw(baselineDraw, 0);
+				draw(queue, disabledCompiled.metal(false, MetalTexture.Format.RGBA16_FLOAT), baseline,
+					atlasView, lightmapView, sampler, vertices, indices, metadata, projection,
+					section, globals, fog, baselineDraw, waterFrame, opaqueColorView, opaqueDepthView);
+				ByteBuffer disabledPixels = baseline.readback(queue, 0).order(ByteOrder.nativeOrder());
+				for (int y = 0; y < HEIGHT; y++) {
+					assertRgb(disabledPixels, 0, y, foreground, 0, 0, "water-off baseline");
+					assertRgb(disabledPixels, 3, y, foreground, behind, 0, "water-off sorted overlap");
+					assertRgb(disabledPixels, 7, y, 0, foreground, 0, "water-off glass");
+				}
+				for (int repeat = 0; repeat < 2; repeat++) {
+					runtime.setOption("water_enabled", true);
+					for (String id : List.of("water_wave_strength", "water_refraction_strength",
+						"water_absorption", "water_foam", "water_underwater_distortion")) {
+						runtime.setOption(id, repeat == 0 ? 0.0 : 1.0);
+					}
+					runtime.setOption("water_reflection_quality", repeat == 0 ? "off" : "baseline");
+					var toggledGeometry = runtime.worldGeometry();
+					toggledGeometry.beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
+					var toggledWater = toggledGeometry.waterPipeline(original).orElseThrow();
+					if (!gpu.precompileLinearWorldPipeline(toggledWater, null).isValid()) {
+						throw new AssertionError("Water controls failed to compile after toggle");
+					}
+				}
 				if (Float.float16ToFloat(normalPixels.getShort(0)) <= 1.0F) {
 					throw new AssertionError("Forward-water baseline did not preserve HDR above 1");
 				}

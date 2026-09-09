@@ -346,12 +346,12 @@ fragment GBufferTargets gbuffer_terrain_fragment(
 #endif
 
 #ifdef MC_WATER_FORWARD
-    if (in.waterMaterial == 1.0
+    if (MC_OPTION_WATER_ENABLED && in.waterMaterial == 1.0
         && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u
             || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)) {
         float3 normalWorld = mc_water_animated_normal(
             in.waterNormalWorld, in.waterFlow, in.waterPeriodicWorldPosition,
-            waterFrame.animationSeconds, 1.0
+            waterFrame.animationSeconds, MC_OPTION_WATER_WAVE_STRENGTH
         );
         if (waterDraw.debugMode == 5u) {
             return float4(normalWorld * 0.5 + 0.5, 1.0);
@@ -378,10 +378,10 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                     // can change transmission, but cannot manufacture an outline around an object.
                     float contactFoam = mc_water_contact_foam(
                         thickness, in.waterNormalWorld, in.waterPeriodicWorldPosition,
-                        waterFrame.animationSeconds, waterDraw.debugMode == 7u ? 0.0 : 1.0);
+                        waterFrame.animationSeconds, waterDraw.debugMode == 7u ? 0.0 : MC_OPTION_WATER_FOAM);
                     float3 normalView = mc_water_safe_normalize(viewRotation * normalWorld, float3(0.0, 1.0, 0.0));
                     float2 refractedPixel = surfacePixel
-                        + mc_water_refraction_offset_pixels(normalView, thickness, 1.0);
+                        + mc_water_refraction_offset_pixels(normalView, thickness, MC_OPTION_WATER_REFRACTION_STRENGTH);
                     uint2 sampleCoord = undistortedCoord;
                     float3 backgroundView = undistortedView;
                     if (mc_water_sample_in_bounds(refractedPixel, extent)) {
@@ -404,8 +404,8 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                     float backgroundFog = mc_fog_amount(length(backgroundView),
                         max(length(backgroundView.xz), abs(backgroundView.y)), fog);
                     background = mc_unfog(background, fog, backgroundFog);
-                    float3 transmitted = mc_water_absorb(background, shaded.rgb, thickness);
-                    float3 surface = mc_water_reflection(
+                    float3 transmitted = mc_water_absorb(background, shaded.rgb, thickness * MC_OPTION_WATER_ABSORPTION);
+                    float3 surface = mc_water_configured_reflection(
                         transmitted, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
                         waterFrame.sunDirectionEnergy, waterFrame.environment
                     );
@@ -414,19 +414,19 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                     surface = mix(surface, float3(0.82, 0.86, 0.84), contactFoam * 0.34);
                     shaded = float4(surface, 1.0);
                 } else {
-                    shaded = float4(mc_water_reflection(
+                    shaded = float4(mc_water_configured_reflection(
                         shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
                         waterFrame.sunDirectionEnergy, waterFrame.environment
                     ), shaded.a);
                 }
             } else {
-                shaded = float4(mc_water_reflection(
+                shaded = float4(mc_water_configured_reflection(
                     shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
                     waterFrame.sunDirectionEnergy, waterFrame.environment
                 ), shaded.a);
             }
         } else {
-            shaded = float4(mc_water_reflection(
+            shaded = float4(mc_water_configured_reflection(
                 shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
                 waterFrame.sunDirectionEnergy, waterFrame.environment
             ), shaded.a);

@@ -118,6 +118,19 @@ static inline float3 mc_water_reflection(
     return reflected + float3(sunEnergy * visibility * fresnel * lobe);
 }
 
+// Keep the physical helper independently testable; quality zero disables both sky and sun.
+static inline float3 mc_water_configured_reflection(
+    float3 baseColor, float3 normalWorld, float3 viewToCameraWorld, float roughness,
+    float skyLight, float4 sunDirectionEnergy, float4 environment
+) {
+#if MC_OPTION_WATER_REFLECTION_QUALITY == 0
+    return baseColor;
+#else
+    return mc_water_reflection(baseColor, normalWorld, viewToCameraWorld, roughness,
+        skyLight, sunDirectionEnergy, environment);
+#endif
+}
+
 /// Returns view-space water path length, or -1 when the opaque sample is not behind the surface.
 /// Device depth zero is reverse-Z's clear/sky value and deliberately has no invented thickness.
 static inline float mc_water_thickness(

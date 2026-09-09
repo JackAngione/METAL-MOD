@@ -134,6 +134,74 @@
       "step": 16,
       "default": 96,
       "apply": "recompile"
+    },
+    {
+      "id": "water_enabled",
+      "category": "water",
+      "type": "bool",
+      "default": true,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_wave_strength",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_refraction_strength",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_absorption",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_foam",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_underwater_distortion",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_reflection_quality",
+      "category": "water",
+      "type": "enum",
+      "values": [
+        "off",
+        "baseline"
+      ],
+      "default": "baseline",
+      "apply": "recompile"
     }
   ]
 }
