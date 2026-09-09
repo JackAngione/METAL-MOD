@@ -1515,3 +1515,29 @@ existing NORMAL-world client fixture now builds explicit one- and five-block-dee
 Next tasks unlocked by W5 are W6 (foam and underwater appearance) and W7 (controls and
 optional SSR). W6 should replace the explicit underwater W4 fallback with one owned fog/
 absorption policy; W7 owns user-facing strength controls.
+
+
+### Pipeline cache lifetime fix — 2026-09-09 (`/root`)
+
+- [x] Implement and validate encoding-specific geometry program caches. Owner `/root`,
+  done. HDR close still restores legacy semantics for hand/HUD; the next world frame
+  reuses its cached substitutions and resolve instead of rebuilding 17 pipelines.
+  Channel refresh retires parked programs; adapter close/reload retires both sets.
+- [x] GPU regression: `WaterForwardPipelineSmoke` crosses LINEAR → LEGACY → LINEAR
+  and asserts identical water stand-in and compiled pipeline objects survive.
+- [x] `./gradlew build`: passed (12s), including Metal GPU smoke, explicit legacy/
+  linear selection, forced fallback and exception-safe activation tests.
+- [x] `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`:
+  passed (43s), NORMAL world, reload/resize/fullscreen/failure recovery and hand/HUD.
+- [x] Isolated committed-W5-host NORMAL seed-12345 water scene with the final cache
+  implementation: three repeats at 3840x2104 yield median 119.15 FPS
+  (118.95–119.37), with zero warmed pipeline creations. This later run is near the
+  presentation limit and is not a same-session before/after speedup claim.
+  Earlier interleaved diagnostic trials measured 51.69 → 102.49 FPS over water and
+  60.79 → 120.00 FPS on land. Logs: `/tmp/water-cache-fix-build.log`,
+  `/tmp/water-cache-fix-lifecycle.log`, `/tmp/water-final-cache-perf.log`.
+
+An initial diagnostic approach retained linear selection after frame close; lifecycle
+validation caught an encoded hand-pass incompatibility. The final implementation keeps
+all existing encoding transitions and caches each encoding separately. W6 visual work,
+W8 release budgets, and the exact reported 70% user-scene regression remain separate.

@@ -112,9 +112,15 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final int shadowFrameSlot;
 	private final int resolveCameraSlot;
 	private final int lightingFrameSlot;
-	private final Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
-	private final Map<RenderPipeline, Optional<RenderPipeline>> waterSubstitutions = new IdentityHashMap<>();
-	private final Map<RenderPipeline, RenderPipeline> linearColorPipelines = new IdentityHashMap<>();
+	private Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
+	private Map<RenderPipeline, Optional<RenderPipeline>> waterSubstitutions = new IdentityHashMap<>();
+	private Map<RenderPipeline, RenderPipeline> linearColorPipelines = new IdentityHashMap<>();
+	private record CachedPrograms(
+		Map<RenderPipeline, Optional<Substitution>> substitutions,
+		Map<RenderPipeline, Optional<RenderPipeline>> water,
+		Map<RenderPipeline, RenderPipeline> colors,
+		@Nullable MetalRenderPipeline resolve, MetalTexture.@Nullable Format resolveFormat, boolean unavailable) { }
+	private final Map<FrameBindings.ColorEncoding, CachedPrograms> parkedPrograms = new java.util.EnumMap<>(FrameBindings.ColorEncoding.class);
 	private @Nullable GpuFormat forwardPassColorFormat;
 	private final Set<String> declined = new LinkedHashSet<>();
 	private final Matrix4f inverseProjection = new Matrix4f();
@@ -382,10 +388,20 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			throw new IllegalStateException("Close the current world pass before beginning another frame");
 		}
 		if (this.colorEncoding != encoding) {
-			this.forgetSubstitutions();
-			this.clearResolvePipeline();
+			// The hand/HUD needs legacy semantics after each HDR world. Keep both sets
+			// of programs alive instead of compiling them again on every transition.
+			this.parkedPrograms.put(this.colorEncoding, new CachedPrograms(this.substitutions,
+				this.waterSubstitutions, this.linearColorPipelines, this.resolvePipeline,
+				this.resolveSceneFormat, this.resolveUnavailable));
+			CachedPrograms cached = this.parkedPrograms.remove(encoding);
+			this.substitutions = cached == null ? new IdentityHashMap<>() : cached.substitutions();
+			this.waterSubstitutions = cached == null ? new IdentityHashMap<>() : cached.water();
+			this.linearColorPipelines = cached == null ? new IdentityHashMap<>() : cached.colors();
+			this.resolvePipeline = cached == null ? null : cached.resolve();
+			this.resolveSceneFormat = cached == null ? null : cached.resolveFormat();
+			this.resolveUnavailable = cached != null && cached.unavailable();
+			this.forwardPassColorFormat = null;
 			this.colorEncoding = encoding;
-			this.resolveUnavailable = false;
 		}
 		this.pendingResolve = false;
 		this.gbufferPass = null;
@@ -395,6 +411,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 
 	void refreshChannels() {
 		this.channels = this.captureChannels();
+		this.retireParkedPrograms();
 		this.clearResolvePipeline();
 	}
 
@@ -905,7 +922,17 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 	}
 
+	private void retireParkedPrograms() {
+		for (CachedPrograms cached : this.parkedPrograms.values()) {
+			cached.substitutions().values().forEach(value -> value.ifPresent(s -> this.device.forgetNativePipeline(s.pipeline())));
+			cached.water().values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
+			if (cached.resolve() != null) cached.resolve().close();
+		}
+		this.parkedPrograms.clear();
+	}
+
 	private void forgetSubstitutions() {
+		this.retireParkedPrograms();
 		for (Optional<Substitution> substitution : this.substitutions.values()) {
 			substitution.ifPresent(value -> this.device.forgetNativePipeline(value.pipeline()));
 		}

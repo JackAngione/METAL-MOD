@@ -51,6 +51,13 @@ final class WaterForwardPipelineSmoke {
 			}
 			MetalCompiledRenderPipeline compiled = (MetalCompiledRenderPipeline)gpu.precompileLinearWorldPipeline(water, null);
 			MetalRenderPipeline pipeline = compiled.metal(false, MetalTexture.Format.RGBA16_FLOAT);
+			// Surface acquisition must reset inputs without retiring the previous HDR programs.
+			geometry.beginFrame();
+			geometry.beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
+			if (geometry.waterPipeline(original).orElseThrow() != water
+				|| gpu.precompileLinearWorldPipeline(water, null) != compiled) {
+				throw new AssertionError("Steady HDR frame rebuilt its cached water pipeline");
+			}
 
 			try (var queue = gpu.metal().createCommandQueue();
 				 var baseline = gpu.metal().createTexture(new MetalTexture.Descriptor(
