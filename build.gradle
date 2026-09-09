@@ -77,6 +77,7 @@ tasks.named('check') {
 
 // Benchmark knobs, forwarded from -P<gradle property> to -D<system property>.
 def benchmarkProperties = [
+	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
 	metalBenchmarkSeed: 'metalcraft.benchmarkSeed',
 	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
 	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',

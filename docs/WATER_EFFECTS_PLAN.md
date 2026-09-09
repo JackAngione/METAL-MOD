@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W5 complete; W6 implemented; broader shoreline visibility validation remains open after the separate pipeline-cache fix.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W5 and W7 complete; W6 implemented; broader shoreline visibility validation remains open after the separate pipeline-cache fix.
 
 ## Outcome and scope
 
@@ -47,7 +47,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | W4 | Animated surface and baseline reflections | W3 | /root | done | 2026-09-07: periodic normals, bounded Fresnel/environment/sun, GPU seam/roughness/fallback fixtures, and standard-world camera/noon/night/cave comparisons pass. Build and lifecycle pass; see W4 completion evidence. |
 | [x] | W5 | Refraction and depth absorption | W4 | /root | done | 2026-09-08: ordinary-mode opaque replacement, validated reverse-Z thickness/refraction, RGB absorption/scattering, GPU extremes, and standard-world shallow/deep/steep/underwater/Fabulous/transparent checks pass. See W5 completion evidence. |
 | [ ] | W6 | Shoreline foam and underwater appearance | W5 | /root | in progress | 2026-09-08: restrained contact foam, single vanilla underwater fog ownership, smoothly introduced world-only distortion; GPU, standard-world transition/cave/HUD captures and lifecycle pass. See W6 completion evidence. |
-| [ ] | W7 | Controls and optional screen-space reflections | W5 | /root | in progress | 2026-09-09: claimed; implement bounded settings and identity behavior first, then validate optional SSR and measure tiers. |
+| [x] | W7 | Controls and optional screen-space reflections | W5 | /root | done | 2026-09-09: bounded controls, restart/reload persistence, fallback recovery and low/high SSR pass GPU and NORMAL-world validation; clean captures and 4K M4 Max tier timings recorded below. Baseline remains default. |
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
 
 ## Implementation tasks and acceptance criteria
@@ -1788,14 +1788,19 @@ smoke, on top of `5ff4cda` (`/tmp/water-w6-precommit-build.log`).
 
 ### W7 controls increment — 2026-09-09 (`/root`)
 
+Continuation: controls committed as `40ac07f`. Coordinator `/root` owns integration,
+tracker updates and serialized GPU/live runs. GPT-5.6 Sol low agents own independent
+SSR shader (`/root/ssr`), GPU checks (`/root/ssr_gpu`), and live harness
+(`/root/live_controls`) work. W7 remains in progress.
+
 - [x] Claim W7 after its completed W5 dependency and audit settings propagation.
 - [x] Add water enable, wave/refraction strength, absorption, foam, underwater
   distortion, and off/baseline reflection quality to Standard's existing settings UI.
 - [x] Validate production forward water-off RGB/alpha ordering, reload retention,
   and zero/default control variant compilation in `WaterForwardPipelineSmoke`.
-- [ ] Validate saved controls across restart, live repeated toggles and failed
+- [x] Validate saved controls across restart, live repeated toggles and failed
   configuration recovery in a NORMAL world; capture off/on and zero-strength views.
-- [ ] Implement bounded optional SSR, GPU rejection fixtures and standard-world
+- [x] Implement bounded optional SSR, GPU rejection fixtures and standard-world
   camera/edge/thin-geometry/resolution checks; measure each tier before acceptance.
 
 This is the first implementation increment, not W7 completion or an SSR deferral.
@@ -1821,3 +1826,144 @@ against independent baseline HDR RGB and sorted overlap references, verifies fal
 survives runtime reload, and compiles zero/default variants after option changes.
 `git diff --check` passed. This increment has no new live screenshots, restart check,
 SSR implementation or performance results; those acceptance gates stay open above.
+
+### W7 optional SSR continuation — 2026-09-09 (`/root`)
+
+- [x] Commit the validated initial controls increment as `40ac07f`.
+- [x] Implement low/high SSR in shared water helpers and forward water composition.
+- [x] Add readable translated controls/tooltips and keep baseline as the default.
+- [x] Implement fresh-runtime disk persistence/recovery smoke, SSR GPU fixtures,
+  NORMAL-world controls/SSR captures, and interleaved full-frame quality benchmark.
+- [x] Static integration review: fix sun visibility on partial hits, retain the valid
+  refinement endpoint, reject excessive grazing ray penetration, preserve ordinary/
+  submerged fallback scope, correct fixture fill limits and zero-control expectations.
+- [x] Pass full build/GPU validation after the test compile-error correction: 2026-09-09, `./gradlew build`, 16s, `/tmp/water-w7-build-final.log`.
+- [x] Run and inspect live W7 captures and lifecycle regression.
+- [x] Record tier timings, spreads and visual acceptance; resolve remaining fixture
+  gaps before closing W7.
+
+Ownership: GPT-5.6 Sol low agents `/root/ssr`, `/root/ssr_gpu` and
+`/root/live_controls` supplied shader, GPU and live-fixture changes. Coordinator
+integrated review corrections, labels/tooltips, isolated persistence test and benchmark.
+The agents reached their usage limit during follow-up review; saved changes remain.
+
+SSR low uses 12 march steps plus up to 3 refinements, maximum distance 24 and
+maximum ray penetration 0.35; high uses 24 steps plus up to 5 refinements, distance
+48 and penetration 0.18. A 0.12 start bias is included in the distance bound.
+Both use pre-water opaque color/depth, reverse-Z reconstruction and bounded edge,
+distance and penetration confidence. Invalid/clear/off-screen/uncertain hits fall
+back to baseline; rejected first crossings deliberately terminate conservatively.
+Nearly screen-parallel rays also fall back. There is no temporal history or added
+texture allocation. Hits replace the Fresnel environment contribution while keeping
+the original sun visibility; sampled hit fog is removed before existing surface fog.
+Production SSR runs only for ordinary above-water composition. Transparent objects
+are absent from the snapshot; Fabulous and submerged paths retain baseline reflection.
+
+Historical validation state before the final runs: the first `./gradlew build` compiled client code but failed
+`compileShaderSmokeJava` because the new persistence fixture declared an uncaught
+checked exception (`/tmp/water-w7-build.log`). The coordinator corrected that declaration.
+The requested rerun was rejected by automatic approval review with a usage-limit
+error; no post-correction build or new GPU/live success is claimed. This is the
+current execution blocker, not evidence that SSR meets acceptance. W7 stays unchecked.
+Manifest/translation parsing and `git diff --check` pass after the final source edits.
+
+Next commands, serialized to avoid GPU contention:
+
+1. `./gradlew build`
+2. `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true -PmetalWaterQualityBenchmark=true`
+3. `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`
+
+The benchmark writes `run/water-w7-quality-results.json`: three interleaved repeats
+of water-off, reflection-off, baseline, low SSR and high SSR, each with 40 warmup
+ticks and 100 capture ticks. It records actual opaque snapshot extents, device,
+camera/settings, frame pacing, GPU/pass attribution and logical snapshot bytes
+(12 bytes/pixel for the already-existing color/depth pair; SSR adds zero textures).
+Pass spans overlap and must not be summed as frame time. These are fixture-scene
+measurements, not broad W8 release validation. Summarize medians/ranges after running.
+
+Final coverage combines the GPU fixture's positive hits, clear/off-screen/foreground/
+invalid misses, even/odd extents and cave/miss composition with inspected live captures
+for thin geometry, grazing/edge confidence, camera movement and half resolution. Restart
+coverage uses newly constructed runtime instances reading the saved settings file; reload
+and failed-pack recovery also run in the NORMAL-world client.
+
+### W7 completion check — 2026-09-09 (`/root`)
+
+User reports that the effects work well and requests a commit if W7 is complete.
+The prior approval-review usage blocker has cleared. `./gradlew build` now passes
+in 16s (`/tmp/water-w7-build-final.log`), including actual SSR GPU hits/misses,
+even/odd extents, cave sun gating, and fresh-runtime persistence/recovery checks.
+
+The NORMAL-world command with `-PmetalWaterQualityBenchmark=true` failed after
+1m58s (`/tmp/water-w7-client-final.log`) at `W7 repeated toggle left stale water
+output: 9336 changed samples`. Earlier W3–W6 and initial W7 off/baseline and
+reenable assertions reached this point successfully. Visually inspected captures
+`run/screenshots/0042_metalcraft-water-w7-disabled-first.png` and
+`run/screenshots/0045_metalcraft-water-w7-disabled-again.png`: both show the
+compatibility water surface, but the differing pixels require diagnosis before
+declaring stable toggles. No root cause or shader regression is established yet.
+Do not weaken the threshold without identifying the source of the difference.
+
+The run stopped before SSR tier captures and timing collection; there are no W7
+benchmark results or new lifecycle pass. W7 remains incomplete and unchecked.
+No completion commit was created because the user's commit request was conditional
+on W7 being done. Next: diagnose the image-comparison failure, rerun live/timing
+and lifecycle acceptance, then record evidence and commit if all W7 gates pass.
+
+Diagnosis: the two disabled captures were separated by two shader recompiles and
+compared Minecraft's vanilla animated water sprites several seconds apart. Server
+`tick freeze` does not stop render-time sprite animation, so the assertion measured
+legitimate texture-frame drift across the water surface. Both disabled captures
+visually showed the compatibility path, and the first disabled capture already
+matched its immediately adjacent vanilla-baseline capture. The repeated-toggle
+check now uses the same strict comparison against a second adjacent baseline capture;
+it does not raise the threshold or excuse a shader-state mismatch.
+
+### W7 completion evidence — 2026-09-09 (`/root`)
+
+W7 is complete. Baseline remains the release default; SSR Low and SSR High are explicit
+optional tiers. The implementation adds no temporal history and no SSR-only textures.
+
+Validation:
+
+- `./gradlew build` passed in 13s on Apple M4 Max, including production shader
+  compilation, forward water controls, fresh-runtime disk restore/recovery and GPU SSR
+  hit/refinement/miss/off-screen/foreground/even-odd/cave fixtures.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true
+  -PmetalWaterQualityBenchmark=true` passed in 4m23s in the seed-12345 NORMAL world.
+  It covered repeated off/on toggles, zero strengths, resource reload, low/high SSR,
+  failed-pack recovery, camera movement, thin glass/iron geometry, screen-edge rays,
+  native/half resolution and Fabulous fallback. Results:
+  `run/water-w7-quality-results.json`.
+- The first successful benchmark run exposed a Mojang reload fade in its SSR Low
+  screenshot. The harness now waits for `client.gui.overlay() == null`; the corrected
+  clean visual run, `./gradlew runClient -PmetalLifecycleTest
+  -PmetalWaterIdentityTest=true`, passed in 2m34s. Inspected captures
+  `run/screenshots/0041_metalcraft-water-w7-enabled.png` through
+  `run/screenshots/0055_metalcraft-water-w7-failure-recovered.png` show stable toggles,
+  bounded SSR fading, no thin-geometry streaks, stable camera/edge behavior and a clean
+  half-resolution result. The disabled pairs use adjacent vanilla baselines because
+  vanilla water sprite animation continues while game ticks are frozen.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true` passed
+  in 42s, including world close/reopen, resource lifetime and clean shutdown checks.
+- `git diff --check` passed.
+
+Tier measurements use three interleaved five-second samples at 3840x2160, native world
+resolution, unlocked presentation, with 40 warmup and 100 capture ticks per sample.
+Values below are median (min-max). `GPU frame` is the measured whole GPU frame and is
+not a sum of overlapping pass spans.
+
+| Tier | Average FPS | 1% low FPS | p50 interval | GPU frame |
+| --- | ---: | ---: | ---: | ---: |
+| Water off | 327.5 (263.0-334.0) | 77.5 (76.9-87.1) | 1.654 ms (1.608-1.939) | 2.832 ms (2.827-2.889) |
+| Reflection off | 308.8 (253.9-311.9) | 74.4 (73.8-82.5) | 1.805 ms (1.779-2.103) | 3.140 ms (3.026-3.568) |
+| Baseline | 304.7 (295.4-323.0) | 77.7 (75.2-79.1) | 1.869 ms (1.853-2.057) | 3.219 ms (3.080-3.544) |
+| SSR Low | 258.8 (238.6-264.5) | 78.4 (72.9-79.1) | 2.980 ms (2.861-3.592) | 4.743 ms (4.490-5.374) |
+| SSR High | 245.5 (242.1-252.6) | 76.9 (66.3-77.2) | 3.391 ms (3.146-3.414) | 5.127 ms (4.615-5.199) |
+
+Against baseline's median GPU frame, SSR Low adds 1.524ms and SSR High adds 1.908ms
+in this deliberately water-heavy 4K fixture. Baseline water adds 0.387ms over water-off.
+The existing RGBA16_FLOAT plus D32 opaque snapshots consume 99,532,800 logical bytes
+at this extent for every tier; SSR adds zero texture bytes. These focused W7 measurements
+justify keeping baseline as the default while exposing both SSR tiers. W8 still owns the
+broader release performance budget and composed-scene regression matrix.

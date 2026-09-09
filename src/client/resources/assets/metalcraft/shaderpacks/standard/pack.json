@@ -198,7 +198,9 @@
       "type": "enum",
       "values": [
         "off",
-        "baseline"
+        "baseline",
+        "ssr_low",
+        "ssr_high"
       ],
       "default": "baseline",
       "apply": "recompile"

@@ -362,6 +362,21 @@ fragment GBufferTargets gbuffer_terrain_fragment(
             section.ModelViewMat[2].xyz
         );
         float3 viewToCameraWorld = transpose(viewRotation) * -in.worldPos;
+        float3 normalView = mc_water_safe_normalize(
+            viewRotation * normalWorld, float3(0.0, 1.0, 0.0));
+        McWaterSsrHit ssr = {float3(0.0), 0.0, float3(0.0), 0.0};
+        // The captured opaque color is a valid reflection source only in the ordinary above-water
+        // composition path. Fabulous and submerged rendering retain the baseline environment.
+        if (waterFrame.cameraSubmerged == 0u && waterFrame.refractionEnabled != 0u) {
+            ssr = mc_water_screen_space_reflection(
+                in.worldPos, normalView, waterFrame.projection, waterFrame.inverseProjection,
+                opaqueColor, opaqueDepth);
+            if (ssr.confidence > 0.0) {
+                float hitFog = mc_fog_amount(length(ssr.viewPosition),
+                    max(length(ssr.viewPosition.xz), abs(ssr.viewPosition.y)), fog);
+                ssr.color = mc_unfog(ssr.color, fog, hitFog);
+            }
+        }
         if ((waterDraw.debugMode == 0u || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)
             && waterFrame.refractionEnabled != 0u
             && waterFrame.cameraSubmerged == 0u) {
@@ -379,7 +394,6 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                     float contactFoam = mc_water_contact_foam(
                         thickness, in.waterNormalWorld, in.waterPeriodicWorldPosition,
                         waterFrame.animationSeconds, waterDraw.debugMode == 7u ? 0.0 : MC_OPTION_WATER_FOAM);
-                    float3 normalView = mc_water_safe_normalize(viewRotation * normalWorld, float3(0.0, 1.0, 0.0));
                     float2 refractedPixel = surfacePixel
                         + mc_water_refraction_offset_pixels(normalView, thickness, MC_OPTION_WATER_REFRACTION_STRENGTH);
                     uint2 sampleCoord = undistortedCoord;
@@ -405,30 +419,30 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                         max(length(backgroundView.xz), abs(backgroundView.y)), fog);
                     background = mc_unfog(background, fog, backgroundFog);
                     float3 transmitted = mc_water_absorb(background, shaded.rgb, thickness * MC_OPTION_WATER_ABSORPTION);
-                    float3 surface = mc_water_configured_reflection(
+                    float3 surface = mc_water_configured_reflection_with_ssr(
                         transmitted, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
-                        waterFrame.sunDirectionEnergy, waterFrame.environment
+                        waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
                     );
                     // Keep the approximation restrained and in the same linear/fog ownership as
                     // the water surface. Biome tint remains visible beneath the warm foam crest.
                     surface = mix(surface, float3(0.82, 0.86, 0.84), contactFoam * 0.34);
                     shaded = float4(surface, 1.0);
                 } else {
-                    shaded = float4(mc_water_configured_reflection(
+                    shaded = float4(mc_water_configured_reflection_with_ssr(
                         shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
-                        waterFrame.sunDirectionEnergy, waterFrame.environment
+                        waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
                     ), shaded.a);
                 }
             } else {
-                shaded = float4(mc_water_configured_reflection(
+                shaded = float4(mc_water_configured_reflection_with_ssr(
                     shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
-                    waterFrame.sunDirectionEnergy, waterFrame.environment
+                    waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
                 ), shaded.a);
             }
         } else {
-            shaded = float4(mc_water_configured_reflection(
+            shaded = float4(mc_water_configured_reflection_with_ssr(
                 shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
-                waterFrame.sunDirectionEnergy, waterFrame.environment
+                waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
             ), shaded.a);
         }
     }

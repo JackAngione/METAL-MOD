@@ -13,6 +13,7 @@ import dev.metalcraft.client.shader.ShaderPackRuntime;
 import com.mojang.blaze3d.platform.NativeImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
 import dev.metalcraft.client.shader.world.WaterIdentityDebug;
 import dev.metalcraft.client.shader.water.WaterRoutingDebug;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -25,6 +26,11 @@ import net.minecraft.world.level.material.FogType;
 final class MetalWaterIdentityGameTest {
 	private static final int RESIZED_WIDTH = 1280;
 	private static final int RESIZED_HEIGHT = 720;
+	private static final String[] WATER_OPTIONS = {
+		"water_enabled", "water_wave_strength", "water_refraction_strength",
+		"water_absorption", "water_foam", "water_underwater_distortion",
+		"water_reflection_quality"
+	};
 
 	private final ClientGameTestContext context;
 
@@ -74,7 +80,12 @@ final class MetalWaterIdentityGameTest {
 			this.context.getInput().lookAt(180, 40);
 			this.context.runOnClient(client -> {
 				ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);
-				for (String id : new String[]{"exposure", "tonemap", "invert", "debug_view"}) {
+				for (String id : new String[]{
+					"exposure", "tonemap", "invert", "debug_view",
+					"water_enabled", "water_wave_strength", "water_refraction_strength",
+					"water_absorption", "water_foam", "water_underwater_distortion",
+					"water_reflection_quality"
+				}) {
 					originalOptions.put(id, ShaderPackRuntime.active().optionValue(id));
 				}
 				ShaderPackRuntime.active().setOption("exposure", 1.0F);
@@ -83,6 +94,8 @@ final class MetalWaterIdentityGameTest {
 				ShaderPackRuntime.active().setOption("debug_view", "off");
 				client.gui.hud.getChat().clearMessages(true);
 			});
+			// Earlier W3-W6 comparisons must not inherit a user's saved W7 zero/off settings.
+			this.setWaterDefaults("baseline");
 			this.context.waitTicks(100);
 			this.context.runOnClient(client -> {
 				if (!MetalLinearWorldActivation.lastLiveUsedHdr()) {
@@ -139,6 +152,7 @@ final class MetalWaterIdentityGameTest {
 			this.captureW4Comparisons(world);
 			this.captureW5Comparisons(world);
 			this.captureW6Comparisons(world);
+			this.captureW7Comparisons(world);
 
 			this.setFabulous(true);
 			Path fabulous = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-fabulous", true);
@@ -159,11 +173,173 @@ final class MetalWaterIdentityGameTest {
 			this.context.runOnClient(client -> {
 				client.options.improvedTransparency().set(originalFabulous);
 				MetalCraftRenderResolution.apply(client);
+				ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);
 				originalOptions.forEach((id, value) -> ShaderPackRuntime.active().setOption(id, value));
 				ShaderPackRuntime.active().selectPack(originalPack);
 				client.levelExtractor.allChanged();
 			});
 		}
+	}
+
+	/** W7 persisted controls, identity behavior, failure recovery, and SSR visual matrix. */
+	private void captureW7Comparisons(final TestSingleplayerContext world) {
+		world.getServer().runCommand("fill -34 174 142 34 199 159 minecraft:air");
+		world.getServer().runCommand("fill -34 174 160 34 199 177 minecraft:air");
+		world.getServer().runCommand("fill -34 174 178 34 199 194 minecraft:air");
+		world.getServer().runCommand("fill -28 178 148 28 184 188 minecraft:smooth_stone hollow");
+		world.getServer().runCommand("fill -27 184 149 27 184 187 minecraft:air");
+		world.getServer().runCommand("fill -27 179 149 27 183 187 minecraft:water");
+		// Glass is deliberately absent from the opaque snapshot and must miss SSR. Thin opaque
+		// bars, broken targets, and edge-adjacent objects exercise hit rejection and fading.
+		world.getServer().runCommand("fill -22 185 158 -22 191 178 minecraft:glass_pane");
+		world.getServer().runCommand("fill -10 185 162 -10 190 174 minecraft:iron_bars");
+		world.getServer().runCommand("fill 22 185 151 22 192 164 minecraft:white_concrete");
+		world.getServer().runCommand("fill 8 185 166 14 188 166 minecraft:red_concrete");
+		world.getServer().runCommand("time set 6000");
+		world.getServer().runCommand("weather clear");
+		world.getServer().runCommand("tp @a 0 193 193 180 27");
+		this.context.getInput().lookAt(180, 27);
+		this.context.waitTicks(80);
+		world.getServer().runCommand("tick freeze");
+
+		this.setWaterDefaults("baseline");
+		Path enabled = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-enabled", false);
+		this.setWaterOption("water_enabled", false);
+		Path disabledFirst = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-disabled-first", false);
+		Path vanillaBaseline = this.capture(WaterRoutingDebug.Mode.BASELINE,
+			"metalcraft-water-w7-vanilla-baseline", false);
+		assertVisualDifference(vanillaBaseline, enabled, 80,
+			"W7 enabled controls did not change the vanilla-compatible baseline");
+		assertImagesNear(disabledFirst, vanillaBaseline, 12, 30,
+			"W7 water-off did not restore the vanilla-compatible baseline");
+		this.setWaterOption("water_enabled", true);
+		Path enabledAgain = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-enabled-again", false);
+		assertVisualDifference(disabledFirst, enabledAgain, 80,
+			"W7 repeated enable did not restore water effects");
+		this.setWaterOption("water_enabled", false);
+		Path disabledAgain = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-disabled-again", false);
+		// Vanilla water sprites keep animating from render time while the server tick is frozen, so
+		// comparing the two disabled captures across an intervening recompile measures sprite drift.
+		// Compare the repeated toggle with an adjacent compatibility-baseline capture instead.
+		Path vanillaBaselineAgain = this.capture(WaterRoutingDebug.Mode.BASELINE,
+			"metalcraft-water-w7-vanilla-baseline-again", false);
+		assertImagesNear(disabledAgain, vanillaBaselineAgain, 12, 30,
+			"W7 repeated toggle left stale water output");
+
+		this.setWaterOption("water_enabled", true);
+		for (String id : new String[]{"water_wave_strength", "water_refraction_strength",
+			"water_absorption", "water_foam", "water_underwater_distortion"}) {
+			this.setWaterOption(id, 0.0F);
+		}
+		this.setWaterOption("water_reflection_quality", "off");
+		Path zeroStrengths = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-zero-strengths", false);
+		Path zeroStrengthsRepeat = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-zero-strengths-repeat", false);
+		assertImagesNear(zeroStrengths, zeroStrengthsRepeat, 12, 40,
+			"W7 zero-strength controls did not produce stable defined output");
+		assertVisualDifference(enabled, zeroStrengths, 50,
+			"W7 zero-strength controls did not disable the configured effects");
+
+		this.setWaterDefaults("ssr_low");
+		this.reloadResourcePacks();
+		this.assertWaterOptions(1.0F, "ssr_low");
+		Path ssrLow = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-ssr-low", false);
+		this.setWaterOption("water_reflection_quality", "baseline");
+		Path reflectionBaseline = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-reflection-baseline", false);
+		this.setWaterOption("water_reflection_quality", "ssr_high");
+		Path ssrHigh = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w7-ssr-high", false);
+		assertVisualDifference(reflectionBaseline, ssrLow, 25,
+			"W7 SSR low did not differ from baseline reflection");
+		assertVisualDifference(ssrLow, ssrHigh, 10,
+			"W7 SSR quality tiers produced indistinguishable output");
+
+		world.getServer().runCommand("tp @a 25 186 190 180 8");
+		this.context.getInput().lookAt(180, 8);
+		this.context.waitTicks(20);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w7-ssr-high-edge-offscreen", false);
+
+		world.getServer().runCommand("tp @a 7 193 193 180 27");
+		this.context.getInput().lookAt(180, 27);
+		this.context.waitTicks(20);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w7-ssr-high-camera-moved", false);
+		this.setHalfResolution(true);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w7-ssr-high-half-resolution", false);
+		this.setHalfResolution(false);
+
+		this.context.runOnClient(client -> {
+			ShaderPackRuntime runtime = ShaderPackRuntime.active();
+			runtime.selectPack("metalcraft-water-w7-missing-pack");
+			if (runtime.isActive() || runtime.lastError().isEmpty()) {
+				throw new AssertionError("W7 failed pack configuration did not select vanilla fallback");
+			}
+			runtime.selectPack(ShaderPackRuntime.BUILTIN_ID);
+			if (!runtime.isActive() || runtime.lastError().isPresent()) {
+				throw new AssertionError("W7 shader pack did not recover after failed configuration");
+			}
+		});
+		this.context.waitTicks(20);
+		this.assertWaterOptions(1.0F, "ssr_high");
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w7-failure-recovered", false);
+
+		// The coordinator owns this helper and the Gradle property because GPU tests are serialized.
+		if (Boolean.getBoolean("metalcraft.waterQualityBenchmark")) {
+			new WaterQualityBenchmark(this.context).run();
+		}
+		world.getServer().runCommand("tick unfreeze");
+	}
+
+	private void setWaterDefaults(final String reflectionQuality) {
+		this.setWaterOption("water_enabled", true);
+		for (String id : new String[]{"water_wave_strength", "water_refraction_strength",
+			"water_absorption", "water_foam", "water_underwater_distortion"}) {
+			this.setWaterOption(id, 1.0F);
+		}
+		this.setWaterOption("water_reflection_quality", reflectionQuality);
+	}
+
+	private void setWaterOption(final String id, final Object value) {
+		this.context.runOnClient(client -> ShaderPackRuntime.active().setOption(id, value));
+		this.context.waitTicks(10);
+	}
+
+	private void assertWaterOptions(final float strength, final String reflectionQuality) {
+		this.context.runOnClient(client -> {
+			ShaderPackRuntime runtime = ShaderPackRuntime.active();
+			if (!Boolean.TRUE.equals(runtime.optionValue("water_enabled"))) {
+				throw new AssertionError("W7 persisted water_enabled value was lost");
+			}
+			for (String id : WATER_OPTIONS) {
+				if (id.equals("water_enabled") || id.equals("water_reflection_quality")) continue;
+				if (!(runtime.optionValue(id) instanceof Number value)
+					|| Double.compare(value.doubleValue(), strength) != 0) {
+					throw new AssertionError("W7 persisted " + id + " value was lost: " + runtime.optionValue(id));
+				}
+			}
+			if (!reflectionQuality.equals(runtime.optionValue("water_reflection_quality"))) {
+				throw new AssertionError("W7 persisted reflection quality was lost: "
+					+ runtime.optionValue("water_reflection_quality"));
+			}
+		});
+	}
+
+	private void reloadResourcePacks() {
+		CompletableFuture<Void> reload = this.context.computeOnClient(client -> client.reloadResourcePacks());
+		this.context.waitFor(ignored -> reload.isDone(), 2400);
+		if (reload.isCompletedExceptionally()) {
+			throw new AssertionError("W7 resource reload failed", reload.handle((ignored, error) -> error).join());
+		}
+		// The reload future can complete before the Mojang loading overlay finishes its fade-out.
+		// Waiting for the actual GUI state keeps SSR comparisons free of non-world pixels.
+		this.context.waitFor(client -> client.gui.overlay() == null);
+		this.context.waitTicks(2);
 	}
 
 	/** W6 shoreline/contact foam and underwater transition matrix in the NORMAL-world fixture. */
@@ -551,6 +727,14 @@ final class MetalWaterIdentityGameTest {
 		final int minimumSamples, final String message) {
 		int changed = differentSamples(first, second, 0.0, 1.0);
 		if (changed < minimumSamples) {
+			throw new AssertionError(message + ": " + changed + " changed samples");
+		}
+	}
+
+	private static void assertImagesNear(final Path first, final Path second,
+		final int rgbThreshold, final int maximumSamples, final String message) {
+		int changed = differentSamples(first, second, 0.0, 1.0, rgbThreshold);
+		if (changed > maximumSamples) {
 			throw new AssertionError(message + ": " + changed + " changed samples");
 		}
 	}
