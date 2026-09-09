@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 /** GPU checks for the production animated-water and reflection helpers. */
 final class WaterSurfaceSmoke {
-	private static final int RESULT_COUNT = 37;
+	private static final int RESULT_COUNT = 45;
 	private static final int FLOAT4_BYTES = 4 * Float.BYTES;
 	private static final float EPSILON = 2.0e-5F;
 
@@ -84,6 +84,15 @@ final class WaterSurfaceSmoke {
 			    out[34] = float4(mc_water_absorb(float3(1), float3(0), 24), 0);
 			    out[35] = float4(mc_water_absorb(float3(0.8, 0.6, 0.4), float3(0.1), NAN), 0);
 			    out[36] = float4(mc_water_thickness(float3(0, 0, 0), float3(0, 0, -2), 0.5), 0, 0, 0);
+			    float3 foamPosition = mc_water_periodic_world_position(int3(4, 0, -7), float3(2.5, 8, 3.25));
+			    out[37] = float4(mc_water_contact_foam(0.2, float3(0, 1, 0), foamPosition, 17.25, 0), 0, 0, 0);
+			    out[38] = float4(mc_water_contact_foam(0.2, float3(0, 1, 0), foamPosition, 0.0, 1), 0, 0, 0);
+			    out[39] = float4(mc_water_contact_foam(0.2, float3(0, 1, 0), foamPosition, 1.0, 1), 0, 0, 0);
+			    out[40] = float4(mc_water_contact_foam(-1, float3(0, 1, 0), foamPosition, 17.25, 1), 0, 0, 0);
+			    out[41] = float4(mc_water_contact_foam(1.0, float3(0, 1, 0), foamPosition, 17.25, 1), 0, 0, 0);
+			    out[42] = float4(mc_water_contact_foam(0.2, float3(1, 0, 0), foamPosition, 17.25, 1), 0, 0, 0);
+			    out[43] = float4(mc_water_contact_foam(0.2, float3(0, -1, 0), foamPosition, 17.25, 1), 0, 0, 0);
+			    out[44] = float4(mc_water_contact_foam(NAN, float3(0, 1, 0), foamPosition, 17.25, 1), 0, 0, 0);
 			}
 			""";
 
@@ -135,10 +144,29 @@ final class WaterSurfaceSmoke {
 				assertAbsorptionOrdering(bytes, 34);
 				assertVector(bytes, 35, new float[]{0.8F, 0.6F, 0.4F}, EPSILON, "invalid-thickness absorption identity");
 				assertVector(bytes, 36, new float[]{-1}, EPSILON, "near-plane surface rejection");
+				assertVector(bytes, 37, new float[]{0}, EPSILON, "zero-strength foam identity");
+				assertUnitInterval(bytes, 38, true, "valid shallow contact foam");
+				assertUnitInterval(bytes, 39, false, "animated shallow contact foam");
+				if (Math.abs(get(bytes, 38, 0) - get(bytes, 39, 0)) <= EPSILON) {
+					throw new AssertionError("Contact foam did not animate");
+				}
+				assertVector(bytes, 40, new float[]{0}, EPSILON, "missing/sky foam rejection");
+				assertVector(bytes, 41, new float[]{0}, EPSILON, "distant opaque foam rejection");
+				assertVector(bytes, 42, new float[]{0}, EPSILON, "vertical-face foam rejection");
+				assertVector(bytes, 43, new float[]{0}, EPSILON, "downward-face foam rejection");
+				assertVector(bytes, 44, new float[]{0}, EPSILON, "invalid-thickness foam rejection");
 			}
 		}
-		System.out.println("Water surface GPU: normals/reflections plus bounded thickness, invalid depth, "
-			+ "refraction-off/bounds rejection and depth absorption extremes passed");
+		System.out.println("Water surface GPU: normals/reflections, bounded refraction/absorption, and "
+			+ "animated contact-foam identity/rejection fixtures passed");
+	}
+
+	private static void assertUnitInterval(final ByteBuffer bytes, final int result,
+		final boolean requirePositive, final String label) {
+		float value = get(bytes, result, 0);
+		if (!Float.isFinite(value) || value < 0.0F || value > 1.0F || (requirePositive && value <= 0.0F)) {
+			throw new AssertionError(label + " was outside the expected unit interval: " + value);
+		}
 	}
 
 	private static void assertAbsorptionOrdering(final ByteBuffer bytes, final int result) {

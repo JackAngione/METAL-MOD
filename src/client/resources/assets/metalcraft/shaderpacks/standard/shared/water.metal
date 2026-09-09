@@ -12,6 +12,7 @@ constant float MC_WATER_TIME_PERIOD = 1024.0;
 constant float MC_WATER_TAU = 6.28318530717958647692;
 constant float MC_WATER_MAX_THICKNESS = 24.0;
 constant float MC_WATER_MAX_REFRACTION_PIXELS = 8.0;
+constant float MC_WATER_FOAM_MAX_CONTACT_DISTANCE = 0.65;
 
 static inline float3 mc_water_safe_normalize(float3 value, float3 fallback) {
     float magnitudeSquared = dot(value, value);
@@ -153,6 +154,37 @@ static inline float3 mc_water_absorb(float3 scene, float3 biomeTint, float thick
     float3 transmittance = exp(-float3(0.18, 0.065, 0.025) * boundedThickness);
     float3 scattering = safeTint * 0.18;
     return safeScene * transmittance + scattering * (1.0 - transmittance);
+}
+
+/// Restrained screen-space contact foam from the undistorted water-to-opaque distance.
+/// This is deliberately limited to upward source faces; strength zero is an exact identity.
+static inline float mc_water_contact_foam(
+    float thickness,
+    float3 faceNormalWorld,
+    float3 periodicWorldPosition,
+    float animationSeconds,
+    float strength
+) {
+    float boundedStrength = saturate(isfinite(strength) ? strength : 0.0);
+    if (boundedStrength == 0.0 || !isfinite(thickness) || thickness < 0.0
+        || thickness >= MC_WATER_FOAM_MAX_CONTACT_DISTANCE
+        || !all(isfinite(faceNormalWorld))) return 0.0;
+
+    float3 faceNormal = mc_water_safe_normalize(faceNormalWorld, float3(0.0));
+    float upward = smoothstep(0.72, 0.92, faceNormal.y);
+    if (upward == 0.0) return 0.0;
+
+    float3 position = select(float3(0.0), periodicWorldPosition, isfinite(periodicWorldPosition));
+    float boundedTime = isfinite(animationSeconds)
+        ? animationSeconds - floor(animationSeconds / MC_WATER_TIME_PERIOD) * MC_WATER_TIME_PERIOD
+        : 0.0;
+    float phaseA = MC_WATER_TAU * (dot(position, float3(19.0, 0.0, 23.0)) / MC_WATER_SPATIAL_PERIOD
+        - 317.0 * boundedTime / MC_WATER_TIME_PERIOD);
+    float phaseB = MC_WATER_TAU * (dot(position, float3(-31.0, 0.0, 13.0)) / MC_WATER_SPATIAL_PERIOD
+        + 229.0 * boundedTime / MC_WATER_TIME_PERIOD);
+    float noise = saturate(0.58 + 0.24 * sin(phaseA) + 0.18 * sin(phaseB));
+    float proximity = 1.0 - smoothstep(0.12, MC_WATER_FOAM_MAX_CONTACT_DISTANCE, thickness);
+    return saturate(boundedStrength * upward * proximity * smoothstep(0.30, 0.82, noise));
 }
 
 #endif

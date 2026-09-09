@@ -79,6 +79,19 @@ abstract class GameRendererWorldGradeMixin {
 		MetalLinearWorldActivation.Frame frame = MetalLinearWorldActivation.beginLive(
 			gpu, color, depth, fabulous);
 		this.metalcraft$linearWorld = frame;
+		// Match the extracted camera's WATER classification; ease only the new distortion
+		// over the first quarter block. Vanilla retains biome fog and its water overlay.
+		var level = Minecraft.getInstance().level;
+		if (level != null && cameraState.fogType == FogType.WATER) {
+			var eyeBlock = net.minecraft.core.BlockPos.containing(cameraState.pos);
+			var fluid = level.getFluidState(eyeBlock);
+			double immersion = eyeBlock.getY() + fluid.getHeight(level, eyeBlock) - cameraState.pos.y;
+			float seconds = (Math.floorMod(self.gameRenderState().levelRenderState.gameTime,
+				WaterFrameInputs.ANIMATION_PERIOD_TICKS) + deltaTracker.getGameTimeDeltaPartialTick(false)) / 20.0F;
+			frame.underwaterInputs(dev.metalcraft.client.shader.water.UnderwaterFrameInputs.create(
+				seconds, true, immersion, dev.metalcraft.client.shader.water.WaterRoutingDebug.mode()
+					!= dev.metalcraft.client.shader.water.WaterRoutingDebug.Mode.UNDERWATER_DISTORTION_OFF));
+		}
 		try {
 			if (gpu != null && gpu.linearWorldSession() != null) {
 				gpu.linearWorldSession().waterFrameInputs(WaterFrameInputs.create(this.metalcraft$waterProjection,

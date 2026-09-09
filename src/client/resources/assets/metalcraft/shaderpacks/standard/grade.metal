@@ -32,8 +32,16 @@ fragment float4 grade_fragment(
     texture2d<float> sceneTex [[texture(MC_TEX_SCENE)]],
     sampler sceneSampler [[sampler(MC_TEX_SCENE)]],
     constant PackOptions &options [[buffer(0)]]
+#ifdef MC_BUFFER_UNDERWATER_FRAME
+    , constant McUnderwaterFrame &underwater [[buffer(MC_BUFFER_UNDERWATER_FRAME)]]
+#endif
 ) {
-    float3 sampled = sceneTex.sample(sceneSampler, in.uv).rgb;
+    float2 uv = in.uv;
+#if MC_SCENE_LINEAR_HDR && defined(MC_BUFFER_UNDERWATER_FRAME)
+    uv = mc_underwater_uv(uv, float2(sceneTex.get_width(), sceneTex.get_height()),
+        underwater.animationSeconds, underwater.strength);
+#endif
+    float3 sampled = sceneTex.sample(sceneSampler, uv).rgb;
     if (options.debugView == 1) {
 #if MC_SCENE_LINEAR_HDR
         return float4(mc_linear_to_srgb(sampled), 1.0);

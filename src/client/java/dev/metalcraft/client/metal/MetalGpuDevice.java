@@ -357,6 +357,11 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 
 	/** Explicit linear producer handoff. The caller must have finished the whole world graph. */
 	public void gradeLinearWorld(final GpuTextureView output) {
+		this.gradeLinearWorld(output, dev.metalcraft.client.shader.water.UnderwaterFrameInputs.NONE);
+	}
+
+	public void gradeLinearWorld(final GpuTextureView output,
+		final dev.metalcraft.client.shader.water.UnderwaterFrameInputs underwater) {
 		this.requireOpen();
 		if (this.shaderPackRuntime == null || !this.shaderPackRuntime.isActive() || this.linearWorldTargets == null) {
 			throw new IllegalStateException("Linear world grading requires active pack and prepared world targets");
@@ -368,7 +373,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		if (this.worldGrade == null) this.worldGrade = new MetalWorldGrade();
 		this.worldGrade.encode(this, this.commandEncoder.commands(), this.shaderPackRuntime,
 			this.linearWorldTargets.color(), this.linearWorldTargets.depth(), destination,
-			dev.metalcraft.client.shader.FrameBindings.ColorEncoding.LINEAR_SRGB);
+			dev.metalcraft.client.shader.FrameBindings.ColorEncoding.LINEAR_SRGB, underwater);
 	}
 
 	/** Borrowed native resources for world modules; ownership stays with Blaze3D. */

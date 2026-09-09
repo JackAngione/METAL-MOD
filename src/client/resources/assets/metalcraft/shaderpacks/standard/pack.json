@@ -1,7 +1,7 @@
 {
   "format": 2,
   "name": "MetalCraft Standard",
-  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/water.metal"],
+  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/water.metal", "shared/underwater.metal"],
   "targets": {
     "gbuffer_albedo": {
       "format": "rgba8_unorm",
@@ -47,6 +47,7 @@
       "kind": "fullscreen",
       "source": "grade.metal",
       "reads": ["scene"],
+      "buffers": ["underwater_frame"],
       "writes": ["post_color"]
     }
   ],

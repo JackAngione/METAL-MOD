@@ -14,12 +14,14 @@ final class MetalWorldGrade implements AutoCloseable {
 
 	void encode(final MetalGpuDevice device, final MetalCommandBuffer commands,
 		final ShaderPackRuntime runtime, final MetalGpuTextureView scene, final MetalGpuTextureView worldDepth) {
-		this.encode(device, commands, runtime, scene, worldDepth, scene, FrameBindings.ColorEncoding.LEGACY_ENCODED);
+		this.encode(device, commands, runtime, scene, worldDepth, scene, FrameBindings.ColorEncoding.LEGACY_ENCODED,
+			dev.metalcraft.client.shader.water.UnderwaterFrameInputs.NONE);
 	}
 
 	void encode(final MetalGpuDevice device, final MetalCommandBuffer commands, final ShaderPackRuntime runtime,
 		final MetalGpuTextureView scene, final MetalGpuTextureView worldDepth, final MetalGpuTextureView output,
-		final FrameBindings.ColorEncoding encoding) {
+		final FrameBindings.ColorEncoding encoding,
+		final dev.metalcraft.client.shader.water.UnderwaterFrameInputs underwater) {
 		int width = scene.getWidth(0), height = scene.getHeight(0);
 		if (output.getWidth(0) != width || output.getHeight(0) != height
 			|| worldDepth.getWidth(0) != width || worldDepth.getHeight(0) != height) {
@@ -36,7 +38,7 @@ final class MetalWorldGrade implements AutoCloseable {
 		runtime.resizeToScene(width, height);
 		commands.copyTexture(worldDepth.attachment(), this.depth, 0, 0, 0, 0, 0, width, height);
 		if (!runtime.executor().orElseThrow().encode(commands, WorldComposition.world(
-			scene.attachment(), scene.metal(), width, height, this.depth, this.depthView, null, encoding))) {
+			scene.attachment(), scene.metal(), width, height, this.depth, this.depthView, null, encoding).withUnderwater(underwater))) {
 			throw new IllegalStateException("World grade inputs are unavailable");
 		}
 		MetalTexture post = runtime.target("post_color");

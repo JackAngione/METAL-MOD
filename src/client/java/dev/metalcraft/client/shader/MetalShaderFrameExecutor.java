@@ -30,6 +30,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 	private final MetalSampler filtered;
 	private final MetalSampler unfiltered;
 	private final UniformRing uniforms;
+	private final UniformRing underwaterUniforms;
 	private final List<ExecutablePass> passes;
 	private final boolean readsDepth;
 	private final boolean supportsLinearScene;
@@ -78,6 +79,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		MetalSampler filteredSampler = null;
 		MetalSampler unfilteredSampler = null;
 		UniformRing uniformRing = null;
+		UniformRing underwaterRing = null;
 		List<ExecutablePass> compiled = new ArrayList<>();
 		boolean needsDepth = false;
 		try {
@@ -88,6 +90,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 				MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE
 			));
 			uniformRing = new UniformRing(device, Math.max(4, this.uniformOptions.size() * 4));
+			underwaterRing = new UniformRing(device, 16);
 			Map<String, Object> values = pack.manifest().options().stream()
 				.collect(java.util.stream.Collectors.toMap(ShaderPack.Option::id, option -> optionValue.apply(option.id())));
 			Map<String, ShaderGraphCompiler.CompiledPass> byId = new java.util.LinkedHashMap<>();
@@ -109,6 +112,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			}
 		} catch (RuntimeException | ShaderPackLoader.LoadException error) {
 			compiled.forEach(ExecutablePass::close);
+			if (underwaterRing != null) underwaterRing.close();
 			if (uniformRing != null) {
 				uniformRing.close();
 			}
@@ -123,6 +127,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		this.filtered = filteredSampler;
 		this.unfiltered = unfilteredSampler;
 		this.uniforms = uniformRing;
+		this.underwaterUniforms = underwaterRing;
 		this.passes = List.copyOf(compiled);
 		this.readsDepth = needsDepth;
 	}
@@ -165,14 +170,20 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			return false;
 		}
 		UniformBinding uniform = this.uniforms.write(this::packOptions);
+		UniformBinding underwater = this.underwaterUniforms.write(bytes -> {
+			bytes.clear();
+			(bindings.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB
+				? bindings.underwater() : dev.metalcraft.client.shader.water.UnderwaterFrameInputs.NONE).write(bytes);
+		});
 		for (ExecutablePass pass : this.passes) {
 			if (pass.compute() != null) {
 				this.encodeCompute(commands, pass, bindings, testingPost, uniform);
 			} else {
-				this.encodeFullscreen(commands, pass, bindings, testingPost, uniform);
+				this.encodeFullscreen(commands, pass, bindings, testingPost, uniform, underwater);
 			}
 		}
 		this.uniforms.signal(commands, uniform);
+		this.underwaterUniforms.signal(commands, underwater);
 		return true;
 	}
 
@@ -198,7 +209,8 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		final ExecutablePass pass,
 		final FrameBindings bindings,
 		final @Nullable MetalTexture testingPost,
-		final UniformBinding uniform
+		final UniformBinding uniform,
+		final UniformBinding underwater
 	) {
 		List<MetalRenderPass.ColorAttachment> colors = new ArrayList<>();
 		for (ShaderGraphCompiler.WriteDecision write : pass.compiled().writes()) {
@@ -227,6 +239,9 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 				slot++;
 			}
 			render.setUniformBuffer(0, uniform.buffer(), uniform.offset(), MetalRenderPass.STAGE_FRAGMENT);
+			if (pass.declaration().buffers().contains("underwater_frame")) {
+				render.setUniformBuffer(1, underwater.buffer(), underwater.offset(), MetalRenderPass.STAGE_FRAGMENT);
+			}
 			render.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 		}
 	}
@@ -368,7 +383,8 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 				"Pass '" + pass.id() + "' samples and writes " + aliased + "; use explicit ping-pong targets"
 			);
 		}
-		if (!pass.buffers().isEmpty()) {
+		if (!pass.buffers().isEmpty() && !(pass.kind() == ShaderPack.PassKind.FULLSCREEN
+			&& pass.buffers().equals(List.of("underwater_frame")))) {
 			throw new ShaderPackLoader.LoadException(
 				"Pass '" + pass.id() + "' declares host buffers " + pass.buffers()
 					+ " that the frame executor cannot bind"
@@ -494,6 +510,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		this.boundOutput = null;
 		this.passes.forEach(ExecutablePass::close);
 		this.uniforms.close();
+		this.underwaterUniforms.close();
 		this.filtered.close();
 		this.unfiltered.close();
 	}

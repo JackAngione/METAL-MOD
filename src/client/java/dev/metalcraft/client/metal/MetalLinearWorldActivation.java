@@ -175,6 +175,13 @@ public final class MetalLinearWorldActivation {
 		private final @Nullable WorldGeometryAdapter geometry;
 		private boolean closed;
 		private boolean graded;
+		private dev.metalcraft.client.shader.water.UnderwaterFrameInputs underwater =
+			dev.metalcraft.client.shader.water.UnderwaterFrameInputs.NONE;
+
+		public void underwaterInputs(final dev.metalcraft.client.shader.water.UnderwaterFrameInputs inputs) {
+			if (this.closed) throw new IllegalStateException("World frame is closed");
+			this.underwater = inputs;
+		}
 
 		Frame(
 			final @Nullable MetalGpuDevice device,
@@ -213,7 +220,9 @@ public final class MetalLinearWorldActivation {
 			if (this.device == null) return;
 			if (this.linear) {
 				try {
-					this.device.gradeLinearWorld(this.encodedColor);
+					this.device.gradeLinearWorld(this.encodedColor,
+						this.session != null && !this.session.isPoisoned() ? this.underwater
+						: dev.metalcraft.client.shader.water.UnderwaterFrameInputs.NONE);
 				} catch (RuntimeException error) {
 					ShaderPackRuntime runtime = this.device.shaderPackRuntime();
 					if (runtime != null) {

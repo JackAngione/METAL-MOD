@@ -331,6 +331,8 @@ public final class MetalShaderTranslationSmoke {
 			WaterForwardPipelineSmoke.run();
 			WaterDepthDebugSmoke.run();
 			WaterSurfaceSmoke.run();
+			UnderwaterSurfaceSmoke.run();
+			dev.metalcraft.client.shader.water.UnderwaterFrameInputsSmoke.run();
 			dev.metalcraft.client.shader.water.WaterVertexMetadataSmoke.run();
 			dev.metalcraft.client.shader.water.WaterFrameInputsSmoke.run();
 			LinearWorldSessionSmoke.run();

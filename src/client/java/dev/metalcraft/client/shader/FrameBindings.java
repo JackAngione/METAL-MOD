@@ -24,10 +24,26 @@ public record FrameBindings(
 	int worldDepthWidth,
 	int worldDepthHeight,
 	WorldComposition.Stage stage,
-	ColorEncoding colorEncoding
+	ColorEncoding colorEncoding,
+	dev.metalcraft.client.shader.water.UnderwaterFrameInputs underwater
 ) {
 	/** Encoding is a producer contract, never inferred from a floating-point texture format. */
 	public enum ColorEncoding { LEGACY_ENCODED, LINEAR_SRGB }
+
+	public FrameBindings(final MetalTexture scene, final MetalTextureView sceneView, final int width, final int height,
+		final @Nullable MetalTexture worldDepth, final @Nullable MetalTextureView worldDepthView,
+		final @Nullable Matrix4fc worldProjection, final int worldDepthWidth, final int worldDepthHeight,
+		final WorldComposition.Stage stage, final ColorEncoding encoding) {
+		this(scene, sceneView, width, height, worldDepth, worldDepthView, worldProjection,
+			worldDepthWidth, worldDepthHeight, stage, encoding,
+			dev.metalcraft.client.shader.water.UnderwaterFrameInputs.NONE);
+	}
+
+	public FrameBindings withUnderwater(final dev.metalcraft.client.shader.water.UnderwaterFrameInputs inputs) {
+		return new FrameBindings(this.scene, this.sceneView, this.width, this.height, this.worldDepth,
+			this.worldDepthView, this.worldProjection, this.worldDepthWidth, this.worldDepthHeight,
+			this.stage, this.colorEncoding, inputs);
+	}
 
 	public FrameBindings(final MetalTexture scene, final MetalTextureView sceneView, final int width, final int height,
 		final @Nullable MetalTexture worldDepth, final @Nullable MetalTextureView worldDepthView,
@@ -47,6 +63,7 @@ public record FrameBindings(
 	}
 
 	public FrameBindings {
+		if (underwater == null) throw new NullPointerException("underwater");
 		if (scene == null) {
 			throw new NullPointerException("scene");
 		}

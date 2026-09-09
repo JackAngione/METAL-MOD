@@ -1,6 +1,6 @@
 # Water visual effects implementation plan
 
-Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W4 complete; W5 is next.
+Created: 2026-09-05. Status: started on `codex/water-effects`; W1–W5 complete; W6 implemented; broader shoreline visibility validation remains open after the separate pipeline-cache fix.
 
 ## Outcome and scope
 
@@ -46,7 +46,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | W3 | Water routing and stable frame inputs | W1, W2 | grok | done | 2026-09-07: surface/opaque depth debug views, GPU reconstruction at native and odd half extents, live native/half identity, resize/world-change snapshot extents, and ordinary vs forced Fabulous water routing. See W3 completion evidence. |
 | [x] | W4 | Animated surface and baseline reflections | W3 | /root | done | 2026-09-07: periodic normals, bounded Fresnel/environment/sun, GPU seam/roughness/fallback fixtures, and standard-world camera/noon/night/cave comparisons pass. Build and lifecycle pass; see W4 completion evidence. |
 | [x] | W5 | Refraction and depth absorption | W4 | /root | done | 2026-09-08: ordinary-mode opaque replacement, validated reverse-Z thickness/refraction, RGB absorption/scattering, GPU extremes, and standard-world shallow/deep/steep/underwater/Fabulous/transparent checks pass. See W5 completion evidence. |
-| [ ] | W6 | Shoreline foam and underwater appearance | W5 | unassigned | not started | Implement foam and one underwater fog policy. |
+| [ ] | W6 | Shoreline foam and underwater appearance | W5 | /root | in progress | 2026-09-08: restrained contact foam, single vanilla underwater fog ownership, smoothly introduced world-only distortion; GPU, standard-world transition/cave/HUD captures and lifecycle pass. See W6 completion evidence. |
 | [ ] | W7 | Controls and optional screen-space reflections | W5 | unassigned | not started | Add quality controls and measure bounded SSR. |
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
 
@@ -1517,6 +1517,234 @@ optional SSR). W6 should replace the explicit underwater W4 fallback with one ow
 absorption policy; W7 owns user-facing strength controls.
 
 
+### W5 continuation audit — 2026-09-08 (`/root`)
+
+- [x] Verify the existing W5 completion against committed implementation and retained
+  validation artifacts. Owner `/root`, with GPT-5.6 Sol low worker
+  `/root/w5_acceptance_audit`; status done. W5 landed in `865b042`.
+  Both audits found no remaining W5 acceptance gap within its documented ordinary-mode
+  scope. Confirmed all three retained validation logs above end `BUILD SUCCESSFUL`,
+  the client selects NORMAL generation with seed 12345, and W5 captures exist.
+  Reinspected captures 0026 and 0027 for shallow/deep attenuation and stable silhouettes,
+  steep views, borders and sky. GPU fixtures cover the listed numerical extremes;
+  visual depth/transparent behavior remains screenshot-based evidence.
+  Corrected the stale opening status to W1–W5 complete. No shader changes or redundant
+  test reruns were needed; `git diff --check` passed. Existing Fabulous, underwater,
+  and submerged-transparency limitations remain as documented above.
+
+
+### W6 progress — claimed 2026-09-08 by `/root`
+
+Coordinator serializes tracker changes; GPT-5.6 Sol low workers own independent files.
+
+- [x] W6a: bounded contact foam and GPU fixtures; owner `/root/w6_foam`.
+- [x] W6b: standard-world foam, entry/exit, partial-submersion, cave and upward captures; owner `/root/w6_live`.
+- [x] W6c: single underwater fog/absorption policy, mild distortion and integration; owner `/root`.
+- [x] W6d: build, GPU/live/lifecycle validation and visual inspection; owner `/root`.
+
+W6 acceptance passed; completion evidence follows the partial-progress history below.
+
+2026-09-08 partial progress: W6a shader and helper GPU fixtures implemented; W6b live
+matrix implemented, camera waterline positions under refinement. First build exposed a
+standalone grade fixture without the new host binding; an optional-binding fallback fixed
+that compatibility case, and the next `./gradlew build` passed (11s,
+`/tmp/water-w6-build.log`). New distortion-specific fixtures and live validation are next.
+Mapped 26.2 audit confirms `WaterFogEnvironment` owns attribute/biome fog color and
+water-vision-scaled distances; `ScreenEffectRenderer.submitWater` retains its 0.1-alpha
+immersion veil after hand rendering. W6 retains those owners, adds no second fog term,
+and distorts composed world color only before tone/output transfer and hand/HUD. Captured
+camera WATER state and fluid-surface depth ease distortion through the first 0.25 block;
+a named immutable `underwater_frame` binding uses completion-retired uniform storage.
+
+
+### W6 completion evidence — 2026-09-08 (`/root`, GPT-5.6 Sol low workers)
+
+W6 is complete. Contact foam lives in `shared/water.metal` and `gbuffer.metal`;
+`shared/underwater.metal` and `grade.metal` implement world-only distortion.
+`UnderwaterFrameInputs`, `FrameBindings`, `MetalShaderFrameExecutor`, the world grade/
+activation bridge and `GameRendererWorldGradeMixin` carry the immutable named
+`underwater_frame` binding. Standard's manifest declares that binding and helper.
+
+**Appearance and ownership contract**
+
+- Foam uses the valid **undistorted** opaque thickness, upward material face normal,
+  and world-periodic animated noise. Its contact band fades from 0.12 to 0.65 blocks;
+  warm-white mixing is capped at 0.34 before existing surface fog. Sky/clear/missing
+  depth, foreground hits, distant surfaces and vertical/downward faces produce no foam.
+  This is screen-space contact approximation, not physical shoreline simulation.
+  Ordinary above-water replacement owns foam; the existing Fabulous and submerged
+  forward-surface fallbacks remain intact.
+- Minecraft `WaterFogEnvironment`/`FogRenderer` exclusively own underwater distance
+  attenuation, fog color, biome/environment attributes and water-vision scaling.
+  `ScreenEffectRenderer.submitWater` retains its separate 0.1-alpha encoded immersion
+  veil. No second underwater absorption/fog term is added by Standard. W5's surface-to-
+  bed RGB absorption remains above-water only, avoiding a duplicate underwater column.
+- Distortion samples already-composed world color in the existing grade pass, before
+  tone/output conversion, hand, overlay and HUD. Each axis is bounded to 1.5 render
+  pixels; a 12-pixel edge fade prevents border streaking. The same extracted camera
+  WATER classification drives the effect, with a smoothstep over the first 0.25 block
+  below the fluid surface. Leaving water immediately supplies identity. Time repeats
+  after 1024 seconds. The immutable 16-byte payload survives world-session close on
+  the activation frame; a dedicated completion-retired uniform ring protects GPU reads.
+  Missing inputs, poisoned sessions and encoded fallback use zero distortion.
+- `FOAM_OFF` (7) keeps W5 refraction but supplies exact-zero foam strength;
+  `UNDERWATER_DISTORTION_OFF` (8) keeps production surface effects and exact original
+  scene UVs. User-facing strength controls remain W7 scope.
+
+**Validation**
+
+- `./gradlew build`: final pass in 10s (`/tmp/water-w6-build-final.log`). Production
+  forward/grade Metal pipelines compile; `WaterSurfaceSmoke` covers positive/animated
+  contact, zero foam and sky/invalid/foreground/distance/face rejection. New
+  `UnderwaterSurfaceSmoke` runs the actual Metal helper for exact identity, periodic
+  time, bounded native/odd extents and edge behavior. `UnderwaterFrameInputsSmoke`
+  verifies transition smoothness, zero/exit/invalid input, clamping and GPU layout.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed in
+  1m47s (`/tmp/water-w6-client.log`). Uses explicit NORMAL generation, seed 12345;
+  fixture structures are above generated terrain. W3–W5 regressions plus W6 paired
+  foam and underwater captures pass. Camera fog assertions prove air, partial WATER,
+  submerged WATER, cave WATER and returned-air states.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed
+  in 39s (`/tmp/water-w6-lifecycle.log`), including resource reload, resize, fullscreen,
+  failure fallback and recovery. This fixture also explicitly selects NORMAL generation.
+- Visually inspected foam off/on, entry, partial submersion, distortion off/on, upward,
+  exit and cave/HUD captures. Foam is sparse at shallow contacts; dry fences and sky
+  are not outlined. Underwater geometry stays readable and upward views remain bounded.
+  Cave visibility remains low-light, with the hand and white HUD composed afterward.
+  Entry/exit views retain matching geometry and no residual underwater veil; they are
+  not asserted pixel-identical because vanilla lighting/vision varies over the sequence.
+- Pixel evidence (`/tmp/water-w6-visual-metrics.txt`): foam changes 677 pixels at summed
+  RGB delta >12 and 177 at >80; dry fence/sky control changes zero pixels at >12.
+  Underwater distortion changes 113626 pixels at >12 (mean per-channel delta 2.045/255).
+  Cave title retains 31104 near-white pixels. These are image comparisons, not timings.
+- Initial standalone grade fixture binding and live fixture camera-field compile errors
+  were corrected before the passing runs. A GPT-5.6 Sol low independent integration
+  audit found no actionable lifetime, binding, camera-state or edge-handling defect.
+  `git diff --check` passed.
+
+**Local visual artifacts** (generated, not committed)
+
+- [Foam off](../run/screenshots/0032_metalcraft-water-w6-contact-foam-off.png),
+  [foam on](../run/screenshots/0033_metalcraft-water-w6-contact-foam-on.png).
+- [Entry air](../run/screenshots/0034_metalcraft-water-w6-entry-air.png),
+  [partial submersion](../run/screenshots/0035_metalcraft-water-w6-partial-submersion.png).
+- [Distortion off](../run/screenshots/0036_metalcraft-water-w6-underwater-distortion-off.png),
+  [underwater entry](../run/screenshots/0037_metalcraft-water-w6-underwater-entry.png),
+  [looking upward](../run/screenshots/0038_metalcraft-water-w6-underwater-looking-up.png).
+- [Exit air](../run/screenshots/0039_metalcraft-water-w6-exit-air.png),
+  [cave with hand/HUD](../run/screenshots/0040_metalcraft-water-w6-underwater-cave-hud.png).
+
+W7 controls/optional SSR and W8 integrated performance/release validation remain open.
+The previously documented Fabulous opaque-composite and submerged-transparent-object
+limitations are unchanged; W6 does not claim to resolve them.
+
+### Latest-commit FPS audit — 2026-09-08 (`/root`)
+
+2026-09-08 follow-up: user tested with W6 stashed and still observed roughly 70%
+lower FPS. Owner `/root`; status in progress. Comparison expanded to W3 `8923222`,
+W4 `0be0f6d`, and W5 `865b042`. Temporary direct production-pipeline GPU probe:
+`./gradlew -I /tmp/water-commit-probe.init.gradle waterCommitPerformanceProbe`.
+Two interleaved 60-repeat 4K runs measured W3/W4/W5 water-and-glass draw medians
+0.2532/0.5103/0.7187 ms and 0.2524/0.5038/0.7205 ms. Glass-only medians were
+0.2495/0.2678/0.2739 ms and 0.2433/0.2593/0.2688 ms. These are amortized
+submission-to-completion times for 12 repeated synthetic draws, not game FPS;
+the cumulative water-heavy cost is reproducibly about 2.85x. Logs:
+`/tmp/water-commit-probe.log`, `/tmp/water-commit-probe-repeat.log`.
+An isolated W5 checkout at `/tmp/water-commit-world` is running a NORMAL seed-12345
+world comparison with committed W3/W4/W5 pack resources, warmed interleaved repeats,
+water-heavy and inland scenes, and full-frame/pass metrics. No shader fix yet.
+
+Full-world partial result: at actual 3840x2104, 12-chunk requested render distance,
+NORMAL seed 12345, three interleaved water-heavy repeats give median FPS
+W3 57.30 (56.76–58.08), W4 53.14 (53.08–53.15), W5 50.61 (50.42–50.94).
+This W5-host/committed-pack comparison isolates pack changes, not every historical
+host binary. The inland noise-site search was stopped after the water measurements;
+the follow-up uses existing generated spawn-area land to avoid that lengthy search.
+Log `/tmp/water-commit-world.log`; inspected screenshot
+`/tmp/water-commit-world/run/screenshots/0002_commit-probe-scene0-w5.png`.
+The full-frame trace reveals 17 native pipeline creations every warmed frame,
+roughly 9–11 ms CPU. `Frame.close()` restores LEGACY_ENCODED, and
+`WorldGeometryAdapter.beginFrame(encoding)` forgets substitutions/resolve whenever
+the encoding changes. The following live frame selects LINEAR_SRGB and rebuilds.
+This mechanism predates W4/W5: close restoration was added in `2bfdf878`, cache
+invalidation in `635b4e79`, and live HDR was enabled in `fec69b4`.
+An isolated diagnostic toggle now suppresses the two redundant legacy transitions
+(frame close and surface acquisition) while retaining explicit beginLive selection.
+The controlled original/cached W5 full-world comparison is in progress; this is
+temporary instrumentation, not a production fix or lifecycle acceptance claim.
+
+Controlled cache experiment completed successfully (`/tmp/water-cache-world.log`,
+`/tmp/water-cache-world-results.json`). Three interleaved repeats per mode/scene,
+same committed W5 shaders and NORMAL world at 3840x2104:
+
+| Scene | Original median FPS (range) | Cache preserved median FPS (range) |
+| --- | --- | --- |
+| Water-heavy pool | 51.69 (51.14–52.40) | 102.49 (99.97–104.52) |
+| Generated land at 96,136,-32 | 60.79 (57.83–63.52) | 120.00 (119.57–120.01) |
+
+Warmed pipeline creation drops from 17/frame to zero; land median CPU render time
+falls from approximately 15.9 ms to 4.1 ms. The cached land run is presentation-paced
+near 120 Hz, so this does not measure its unconstrained maximum FPS. This confirms
+per-frame encoding transitions evicting pipeline caches as a substantial performance
+defect, including on land. It does not establish the user's exact 70% regression or
+prove that W4/W5 introduced it: the triggering HDR path predates those commits.
+W4/W5 increase shader work and the cost of the repeated rebuilds. Production files
+were not changed for the experiment; the diagnostic modifications remain only in
+`/tmp/water-commit-world`. A production fix must retain safe encoded fallback,
+hand/HUD behavior, reload/resize, and resource retirement and pass lifecycle checks.
+
+- [x] Identify and experimentally isolate a substantial FPS defect.
+- [ ] Implement and validate production pipeline-cache lifetime fix; exact user-scene
+  before/after comparison remains outstanding. W6/W8 performance acceptance stays open.
+
+- [x] Compare `865b042` (W5) against parent `0be0f6d`, separating the existing
+  uncommitted W6 changes. Static audit complete: the production shader adds up to two
+  opaque-depth reads and one opaque-color read per eligible water fragment, two
+  position reconstructions, background fog removal and RGB exponential absorption.
+  The branch is gated to ordinary above-water water rendering. This commit does not
+  change the executor, snapshot allocation/copy implementation, or fullscreen grade.
+- [ ] Reproduce the reported FPS decrease with matched standard-world full-frame
+  measurements. Status: blocked on identification of the affected running build and
+  last known-good build/scene. The retained W5/W6 grade probe tests a different
+  comparison and cannot establish the performance impact of W4-to-W5 water shading.
+  Existing benchmark infrastructure supports NORMAL terrain and repeated frame/pass
+  measurements, but no matched W4/W5 result establishes this report's cause yet.
+  No performance fix or measured causal finding is claimed by this static audit.
+
+
+### W6 regression investigation — reopened 2026-09-08 (`/root`)
+
+User reports massive performance regression and no visible new water effects. Prior
+correctness-only captures did not measure performance and are insufficient to close this
+report. W6 is reopened. Next: reproduce with paired same-scene timings and inspect actual
+effect coverage; preserve current changes while comparing against W5.
+
+- [ ] Establish reproducible performance and visible-effect feedback loops.
+- [ ] Identify cause, fix, and rerun paired standard-world validation.
+
+
+Regression investigation partial evidence (2026-09-08): user clarifies roughly half FPS
+while walking on land, not just underwater. W6 remains open; no performance fix is claimed.
+A temporary differential harness compiles the committed W5 executor/resources and current
+W6 executor/resources, runs the real LINEAR_SRGB grade at 3840x2160, and alternates 60
+repeats of eight encodes per batch. Command:
+`./gradlew -I /tmp/water-w6-probe.init.gradle waterGradePerformanceProbe`.
+The harness has a >50% grade-cost regression assertion. Two successful runs measured
+W5/W6 medians 0.1428/0.1543 ms and 0.1373/0.1793 ms, respectively
+(`/tmp/water-w6-grade-perf.log`, `/tmp/water-w6-grade-perf-repeat.log`). These include CPU
+submission and completion waits for the isolated grade, not full-frame times. Variation
+and a concurrent OpenGL game prevent treating this as a full-game performance result;
+it has not reproduced the reported halving of FPS. Original baseline/build identification
+and a paired land-scene full-frame measurement remain required.
+
+Reanalysis of the prior foam off/on captures shows only 677 of 921600 pixels (0.07346%)
+change by summed RGB >12, concentrated beside stairs (187 left, 310 right) and the wall;
+the broad shallow shelf changes zero pixels. Thus the earlier nonzero-pixel assertion
+proves a localized effect but not useful ordinary shoreline coverage. The original W6
+completion claim above is superseded by this reopened investigation. No speculative
+shader changes have been applied during diagnosis.
+
+
 ### Pipeline cache lifetime fix — 2026-09-09 (`/root`)
 
 - [x] Implement and validate encoding-specific geometry program caches. Owner `/root`,
@@ -1541,3 +1769,19 @@ An initial diagnostic approach retained linear selection after frame close; life
 validation caught an encoded hand-pass incompatibility. The final implementation keeps
 all existing encoding transitions and caches each encoding separately. W6 visual work,
 W8 release budgets, and the exact reported 70% user-scene regression remain separate.
+
+
+### W6 implementation commit — 2026-09-09 (`/root`)
+
+User reports the performance bug was found in a separate task and requests committing
+W6. The pipeline-cache fix is now committed as `5ff4cda`, preserving encoding-specific
+programs across HDR transitions; its evidence is recorded above. Commit the implemented
+W6 foam, underwater distortion, frame bindings and tests on top of that fix. The prior
+W6 standard-world and lifecycle evidence remains recorded. Broader ordinary-shoreline
+visibility remains open: the separate cache fix does not establish improved foam coverage.
+W6's checkbox therefore stays unchecked pending that visual acceptance, rather than
+conflating an implementation commit with completion of all reopened validation.
+
+Precommit integration validation: `./gradlew build` passed in 11s, including Metal GPU
+smoke, on top of `5ff4cda` (`/tmp/water-w6-precommit-build.log`).
+`git diff --check` passed.

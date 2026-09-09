@@ -347,7 +347,8 @@ fragment GBufferTargets gbuffer_terrain_fragment(
 
 #ifdef MC_WATER_FORWARD
     if (in.waterMaterial == 1.0
-        && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u)) {
+        && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u
+            || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)) {
         float3 normalWorld = mc_water_animated_normal(
             in.waterNormalWorld, in.waterFlow, in.waterPeriodicWorldPosition,
             waterFrame.animationSeconds, 1.0
@@ -361,7 +362,8 @@ fragment GBufferTargets gbuffer_terrain_fragment(
             section.ModelViewMat[2].xyz
         );
         float3 viewToCameraWorld = transpose(viewRotation) * -in.worldPos;
-        if (waterDraw.debugMode == 0u && waterFrame.refractionEnabled != 0u
+        if ((waterDraw.debugMode == 0u || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)
+            && waterFrame.refractionEnabled != 0u
             && waterFrame.cameraSubmerged == 0u) {
             float2 extent = float2(float(opaqueDepth.get_width()), float(opaqueDepth.get_height()));
             float2 surfacePixel = in.position.xy;
@@ -372,6 +374,11 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                     surfacePixel, undistortedDeviceDepth, extent, waterFrame.inverseProjection);
                 float thickness = mc_water_thickness(in.worldPos, undistortedView, undistortedDeviceDepth);
                 if (thickness >= 0.0) {
+                    // Contact foam is derived only from the undistorted hit. A refracted candidate
+                    // can change transmission, but cannot manufacture an outline around an object.
+                    float contactFoam = mc_water_contact_foam(
+                        thickness, in.waterNormalWorld, in.waterPeriodicWorldPosition,
+                        waterFrame.animationSeconds, waterDraw.debugMode == 7u ? 0.0 : 1.0);
                     float3 normalView = mc_water_safe_normalize(viewRotation * normalWorld, float3(0.0, 1.0, 0.0));
                     float2 refractedPixel = surfacePixel
                         + mc_water_refraction_offset_pixels(normalView, thickness, 1.0);
@@ -398,10 +405,14 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                         max(length(backgroundView.xz), abs(backgroundView.y)), fog);
                     background = mc_unfog(background, fog, backgroundFog);
                     float3 transmitted = mc_water_absorb(background, shaded.rgb, thickness);
-                    shaded = float4(mc_water_reflection(
+                    float3 surface = mc_water_reflection(
                         transmitted, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
                         waterFrame.sunDirectionEnergy, waterFrame.environment
-                    ), 1.0);
+                    );
+                    // Keep the approximation restrained and in the same linear/fog ownership as
+                    // the water surface. Biome tint remains visible beneath the warm foam crest.
+                    surface = mix(surface, float3(0.82, 0.86, 0.84), contactFoam * 0.34);
+                    shaded = float4(surface, 1.0);
                 } else {
                     shaded = float4(mc_water_reflection(
                         shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,

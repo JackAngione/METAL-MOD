@@ -19,6 +19,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.level.material.FogType;
 
 /** Paired real-mesh captures; visual review is required before closing water routing gates. */
 final class MetalWaterIdentityGameTest {
@@ -137,6 +138,7 @@ final class MetalWaterIdentityGameTest {
 
 			this.captureW4Comparisons(world);
 			this.captureW5Comparisons(world);
+			this.captureW6Comparisons(world);
 
 			this.setFabulous(true);
 			Path fabulous = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-fabulous", true);
@@ -162,6 +164,103 @@ final class MetalWaterIdentityGameTest {
 				client.levelExtractor.allChanged();
 			});
 		}
+	}
+
+	/** W6 shoreline/contact foam and underwater transition matrix in the NORMAL-world fixture. */
+	private void captureW6Comparisons(final TestSingleplayerContext world) {
+		// Isolate a shallow pool whose bed rises in steps toward the camera. Stone stairs provide
+		// sloping contacts, while the dry posts prove that unrelated silhouettes are not outlined.
+		world.getServer().runCommand("fill -28 174 92 28 198 132 minecraft:air");
+		world.getServer().runCommand("fill -22 179 96 22 184 124 minecraft:stone hollow");
+		world.getServer().runCommand("fill -21 184 97 21 184 123 minecraft:air");
+		world.getServer().runCommand("fill -21 180 97 21 180 105 minecraft:smooth_stone");
+		world.getServer().runCommand("fill -21 181 106 21 181 113 minecraft:smooth_stone");
+		world.getServer().runCommand("fill -21 182 114 21 182 123 minecraft:smooth_stone");
+		world.getServer().runCommand("fill -21 181 97 21 183 113 minecraft:water");
+		world.getServer().runCommand("fill -21 183 114 21 183 123 minecraft:water");
+		world.getServer().runCommand("fill -14 183 112 -8 183 112 minecraft:stone_stairs[facing=south,half=bottom]");
+		world.getServer().runCommand("fill 8 183 112 14 183 112 minecraft:stone_stairs[facing=south,half=bottom]");
+		// Let source water run over a stair lip; the flowing surface exposes the foam shader's
+		// strongest 0.1--0.25-block proximity band instead of only full-block-deep contacts.
+		world.getServer().runCommand("fill -6 183 114 6 183 118 minecraft:air");
+		world.getServer().runCommand("fill -6 183 117 6 183 118 minecraft:water");
+		world.getServer().runCommand("fill -2 184 103 2 190 103 minecraft:oak_fence");
+		// A sealed side chamber supplies a cave-water and low-light underwater control.
+		world.getServer().runCommand("fill 25 178 98 43 191 122 minecraft:deepslate_tiles hollow");
+		world.getServer().runCommand("fill 27 179 100 41 184 120 minecraft:water");
+		world.getServer().runCommand("fill 27 185 100 41 189 120 minecraft:air");
+		world.getServer().runCommand("setblock 34 185 101 minecraft:soul_lantern");
+		world.getServer().runCommand("time set 6000");
+		world.getServer().runCommand("weather clear");
+		world.getServer().runCommand("tp @a 0 193 130 180 31");
+		this.context.getInput().lookAt(180, 31);
+		this.context.waitTicks(100);
+		world.getServer().runCommand("tick freeze");
+
+		Path foamOff = this.capture(WaterRoutingDebug.Mode.FOAM_OFF,
+			"metalcraft-water-w6-contact-foam-off", false);
+		Path foamOn = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w6-contact-foam-on", false);
+		assertVisualDifference(foamOff, foamOn, 50,
+			"W6 shallow contact scene did not change when water effects were enabled");
+
+		// Enter from just above the surface, stop with the eye at the waterline, then submerge.
+		world.getServer().runCommand("tp @a 0 182.4 109 180 4");
+		this.context.getInput().lookAt(180, 4);
+		this.context.waitTicks(20);
+		this.assertCameraFog(false, "entry above water");
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w6-entry-air", false);
+		world.getServer().runCommand("tp @a 0 182.25 109 180 1");
+		this.context.getInput().lookAt(180, 1);
+		this.context.waitTicks(20);
+		this.assertCameraFog(true, "partial submersion");
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w6-partial-submersion", false);
+		world.getServer().runCommand("tp @a 0 181.8 109 180 -10");
+		this.context.getInput().lookAt(180, -10);
+		this.context.waitTicks(20);
+		this.assertCameraFog(true, "submerged distortion comparison");
+		Path distortionOff = this.capture(WaterRoutingDebug.Mode.UNDERWATER_DISTORTION_OFF,
+			"metalcraft-water-w6-underwater-distortion-off", false);
+		Path underwaterEntry = this.capture(WaterRoutingDebug.Mode.OFF,
+			"metalcraft-water-w6-underwater-entry", false);
+		if (differentSamples(distortionOff, underwaterEntry, 0.0, 1.0, 12) < 20) {
+			throw new AssertionError("W6 underwater distortion did not change the frozen submerged view");
+		}
+		this.context.getInput().lookAt(180, -75);
+		this.context.waitTicks(20);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w6-underwater-looking-up", false);
+		world.getServer().runCommand("tp @a 0 182.4 109 180 4");
+		this.context.getInput().lookAt(180, 4);
+		this.context.waitTicks(20);
+		this.assertCameraFog(false, "exit above water");
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w6-exit-air", false);
+
+		world.getServer().runCommand("gamemode creative @a");
+		world.getServer().runCommand("item replace entity @a weapon.mainhand with minecraft:prismarine_shard");
+		world.getServer().runCommand("tp @a 34 182 110 180 -8");
+		this.context.getInput().lookAt(180, -8);
+		this.context.waitTicks(60);
+		this.assertCameraFog(true, "underwater cave");
+		world.getServer().runCommand("title @a times 0 100 0");
+		world.getServer().runCommand("title @a title {\"text\":\"UNDERWATER HUD\",\"color\":\"white\"}");
+		this.context.waitTicks(2);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w6-underwater-cave-hud", false);
+
+		world.getServer().runCommand("tick unfreeze");
+		world.getServer().runCommand("gamemode spectator @a");
+		world.getServer().runCommand("tp @a 0 193 130 180 31");
+		this.context.getInput().lookAt(180, 31);
+		this.context.waitTicks(20);
+	}
+
+	private void assertCameraFog(final boolean water, final String scene) {
+		this.context.runOnClient(client -> {
+			FogType actual = client.gameRenderer.gameRenderState().levelRenderState.cameraRenderState.fogType;
+			if ((actual == FogType.WATER) != water) {
+				throw new AssertionError("W6 " + scene + " camera fog expected water=" + water
+					+ " actual=" + actual);
+			}
+		});
 	}
 
 	/** W5 uses a deep and shallow pool in the NORMAL-world fixture, with transparent controls. */
