@@ -143,6 +143,16 @@
       "apply": "recompile"
     },
     {
+      "id": "water_detail",
+      "category": "water",
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "default": 2,
+      "apply": "recompile"
+    },
+    {
       "id": "water_wave_strength",
       "category": "water",
       "type": "float",

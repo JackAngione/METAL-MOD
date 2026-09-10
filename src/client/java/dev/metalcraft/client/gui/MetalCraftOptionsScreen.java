@@ -166,7 +166,9 @@ public final class MetalCraftOptionsScreen extends Screen {
 	private static Component optionMessage(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
 		if (isStandardWaterOption(runtime, option)) {
 			Object value = runtime.optionValue(option.id());
-			Component label = value instanceof Number number
+			Component label = option.id().equals("water_detail")
+				? Component.translatable("metalcraft.water.detail." + ((Number)value).intValue())
+				: value instanceof Number number
 				? Component.literal(Math.round(number.doubleValue() * 100) + "%")
 				: Component.translatable("metalcraft.water.value." + value);
 			return Component.translatable("metalcraft.water." + option.id(), label);

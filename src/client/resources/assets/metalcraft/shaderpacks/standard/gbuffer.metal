@@ -346,12 +346,15 @@ fragment GBufferTargets gbuffer_terrain_fragment(
 #endif
 
 #ifdef MC_WATER_FORWARD
+    float3 waterPixelDx = dfdx(in.waterPeriodicWorldPosition);
+    float3 waterPixelDy = dfdy(in.waterPeriodicWorldPosition);
     if (MC_OPTION_WATER_ENABLED && in.waterMaterial == 1.0
         && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u
             || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)) {
-        float3 normalWorld = mc_water_animated_normal(
+        float3 normalWorld = mc_water_detailed_normal(
             in.waterNormalWorld, in.waterFlow, in.waterPeriodicWorldPosition,
-            waterFrame.animationSeconds, MC_OPTION_WATER_WAVE_STRENGTH
+            waterFrame.animationSeconds, MC_OPTION_WATER_WAVE_STRENGTH,
+            MC_OPTION_WATER_DETAIL, waterPixelDx, waterPixelDy
         );
         if (waterDraw.debugMode == 5u) {
             return float4(normalWorld * 0.5 + 0.5, 1.0);

@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 /** GPU checks for the production animated-water and reflection helpers. */
 final class WaterSurfaceSmoke {
-	private static final int RESULT_COUNT = 46;
+	private static final int RESULT_COUNT = 71;
 	private static final int FLOAT4_BYTES = 4 * Float.BYTES;
 	private static final float EPSILON = 2.0e-5F;
 
@@ -94,6 +94,49 @@ final class WaterSurfaceSmoke {
 			    out[43] = float4(mc_water_contact_foam(0.2, float3(0, -1, 0), foamPosition, 17.25, 1), 0, 0, 0);
 			    out[44] = float4(mc_water_contact_foam(NAN, float3(0, 1, 0), foamPosition, 17.25, 1), 0, 0, 0);
 			    out[45] = float4(mc_water_contact_foam(2.0, float3(0, 1, 0), foamPosition, 17.25, 1), 0, 0, 0);
+			    out[46] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position, 17.25, 1, 0, float3(0), float3(0)), 0);
+			    out[47] = float4(mc_water_animated_normal(float3(0,1,0), float3(0), position, 17.25, 1), 0);
+			    out[48] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position, 17.25, 1, 3, float3(0), float3(0)), 0);
+			    out[49] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position + float3(256,0,0), 17.25, 1, 3, float3(0), float3(0)), 0);
+			    out[50] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position, 1041.25, 1, 3, float3(0), float3(0)), 0);
+			    out[51] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position, 17.25, 1, 3, float3(100,0,0), float3(0,0,100)), 0);
+			    out[52] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position, 17.25, 0, 3, float3(0), float3(0)), 0);
+			    out[53] = float4(mc_water_detailed_normal(float3(1,0,0), float3(0,-1,0), position, 17.25, 1, 3, float3(0), float3(0)), 0);
+			    out[54] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position + float3(0.1,0,0), 17.25, 1, 3, float3(0), float3(0)), 0);
+			    out[55] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position + float3(0.015,0,0), 17.25, 1, 3, float3(0), float3(0)), 0);
+			    out[56] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position, 17.5, 1, 3, float3(0), float3(0)), 0);
+			    out[57] = float4(mc_water_detail_noise(float3(2.3,4.7,8.9)), mc_water_detail_noise(float3(34.3,4.7,8.9)),
+			        mc_water_detail_noise(float3(3.3,4.7,8.9)), 0);
+			    out[58] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position, 17.25, 1, 1, float3(0), float3(0)), 0);
+			    out[59] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position, 17.25, 1, 2, float3(0), float3(0)), 0);
+			    out[60] = float4(mc_water_geometric_clumps(float2(2.3,4.7)), mc_water_geometric_clumps(float2(34.3,4.7)),
+			        mc_water_geometric_clumps(float2(3.3,4.7)), 0);
+			    out[61] = float4(mc_water_detailed_normal(float3(0,1,0), float3(0), position + float3(1,0,0.5), 19.25, 1, 3, float3(0), float3(0)), 0);
+			    out[62] = float4(mc_water_detailed_normal(float3(1,0,0), float3(0,-1,0), position + float3(0,-1,0), 19.25, 1, 3, float3(0), float3(0)), 0);
+			    out[63] = float4(mc_water_animated_normal(float3(0,1,0), float3(0), position + float3(1,0,0.5), 19.25, 1), 0);
+			    float transportError = 0.0;
+			    for (int tier = 0; tier <= 3; ++tier) {
+			        float3 before = mc_water_detailed_normal(float3(0,1,0), float3(0), position, 17.25, 1, tier, float3(0), float3(0));
+			        float3 after = mc_water_detailed_normal(float3(0,1,0), float3(0), position + float3(1,0,0.5), 19.25, 1, tier, float3(0), float3(0));
+			        transportError = max(transportError, length(before - after));
+			    }
+			    out[64] = float4(transportError, 0, 0, 0);
+			    // Equal N dot V, different reflected sky elevations: isolate environment response.
+			    out[65] = float4(mc_water_reflection(float3(0.02,0.04,0.06), float3(0,sqrt(0.99),0.1), float3(0,0,1),
+			        0.08, 1, float4(0), float4(0.2,0.4,0.8,1)), 0);
+			    out[66] = float4(mc_water_reflection(float3(0.02,0.04,0.06), float3(0.5,sqrt(0.74),0.1), float3(0,0,1),
+			        0.08, 1, float4(0), float4(0.2,0.4,0.8,1)), 0);
+			    float2 gp = float2(0.37,0.61);
+			    float e = 0.001;
+			    out[67] = float4(mc_water_height_noise_gradient(gp),0);
+			    out[68] = float4(out[67].x,
+			        (mc_water_height_noise_gradient(gp+float2(e,0)).x-mc_water_height_noise_gradient(gp-float2(e,0)).x)/(2*e),
+			        (mc_water_height_noise_gradient(gp+float2(0,e)).x-mc_water_height_noise_gradient(gp-float2(0,e)).x)/(2*e),0);
+			    gp = float2(2.31,4.73);
+			    out[69] = float4(mc_water_detail_height_gradient(gp,0.0002,2),0);
+			    out[70] = float4(out[69].x,
+			        (mc_water_detail_height_gradient(gp+float2(e,0),0.0002,2).x-mc_water_detail_height_gradient(gp-float2(e,0),0.0002,2).x)/(2*e),
+			        (mc_water_detail_height_gradient(gp+float2(0,e),0.0002,2).x-mc_water_detail_height_gradient(gp-float2(0,e),0.0002,2).x)/(2*e),0);
 			}
 			""";
 
@@ -157,6 +200,39 @@ final class WaterSurfaceSmoke {
 				assertVector(bytes, 43, new float[]{0}, EPSILON, "downward-face foam rejection");
 				assertVector(bytes, 44, new float[]{0}, EPSILON, "invalid-thickness foam rejection");
 				assertVector(bytes, 45, new float[]{0}, EPSILON, "distant opaque foam rejection");
+				assertEqual(bytes, 46, 47, EPSILON, "detail None preserves broad normals");
+				assertUnitFinite(bytes, 48, "high detail normal");
+				assertEqual(bytes, 48, 49, 2.0e-4F, "high detail wrapped chunk seam");
+				assertEqual(bytes, 48, 50, EPSILON, "high detail time wrap");
+				assertEqual(bytes, 47, 51, EPSILON, "subpixel detail filters to broad normal");
+				assertVector(bytes, 52, new float[]{0,1,0}, EPSILON, "zero waves disables fine detail");
+				assertUnitFinite(bytes, 53, "waterfall detail normal");
+				assertUnitFinite(bytes, 58, "low detail normal");
+				assertUnitFinite(bytes, 59, "medium detail normal");
+				assertEqual(bytes, 48, 61, EPSILON, "common-direction detailed transport");
+				assertEqual(bytes, 53, 62, EPSILON, "downward waterfall transport");
+				assertEqual(bytes, 47, 63, EPSILON, "broad waves share detail transport");
+				assertVector(bytes, 64, new float[]{0}, EPSILON, "all tiers follow one transport velocity");
+				assertEqual(bytes, 67, 68, 0.002F, "noise analytic gradient matches height differences");
+				assertEqual(bytes, 69, 70, 0.02F, "full height gradient includes clump envelope derivatives");
+				if (Math.abs(get(bytes, 65, 2) - get(bytes, 66, 2)) < 0.003F) {
+					throw new AssertionError("Water lighting ignores reflected sky direction: fine normals cannot reveal sky detail");
+				}
+				if (Math.abs(get(bytes, 60, 0) - get(bytes, 60, 1)) > EPSILON
+					|| Math.abs(get(bytes, 60, 0) - get(bytes, 60, 2)) < 0.01F) {
+					throw new AssertionError("Geometric clumps lack periodicity or spatial variation");
+				}
+				if (Math.abs(get(bytes, 48, 0) - get(bytes, 55, 0)) < 0.002F
+					|| Math.abs(get(bytes, 48, 0) - get(bytes, 56, 0)) < 0.005F) {
+					throw new AssertionError("Micro-ripples lack fine spatial or temporal variation");
+				}
+				if (Math.abs(get(bytes, 57, 0) - get(bytes, 57, 1)) > EPSILON
+					|| Math.abs(get(bytes, 57, 0) - get(bytes, 57, 2)) < 0.01F) {
+					throw new AssertionError("Local current noise lacks periodicity or spatial variation");
+				}
+				if (Math.abs(get(bytes, 48, 0) - get(bytes, 54, 0)) < 0.005F) {
+					throw new AssertionError("High detail lacks sub-block variation");
+				}
 			}
 		}
 		System.out.println("Water surface GPU: normals/reflections, bounded refraction/absorption, and "

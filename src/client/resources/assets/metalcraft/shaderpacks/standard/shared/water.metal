@@ -43,6 +43,13 @@ static inline float3 mc_water_tangent_direction(float3 direction, float3 normal,
     return mc_water_safe_normalize(direction - normal * dot(direction, normal), fallback);
 }
 
+// One common transport coordinate for every wave and noise layer. Horizontal water
+// travels along +X/+Z; vertical faces descend. Over 1024 seconds both velocities
+// cover whole 256-block periods, preserving the existing time-wrap contract.
+static inline float3 mc_water_pattern_velocity(float3 normal) {
+    return abs(normal.y) >= 0.5 ? float3(0.5, 0.0, 0.25) : float3(0.0, -0.5, 0.0);
+}
+
 /// Two analytic wave scales. The result is a world-space unit normal on horizontal and vertical faces.
 static inline float3 mc_water_animated_normal(
     float3 baseNormal,
@@ -60,23 +67,137 @@ static inline float3 mc_water_animated_normal(
     float3 waveA = mc_water_tangent_direction(float3(11.0, 3.0, 7.0), normal, fallbackTangent);
     float3 waveB = mc_water_tangent_direction(float3(-5.0, 13.0, 17.0), normal,
         mc_water_safe_normalize(cross(normal, waveA), fallbackTangent));
-    float3 safeFlow = select(float3(0.0), flow, isfinite(flow));
-    safeFlow -= normal * dot(safeFlow, normal);
-    // Flow selects wave travel direction without rotating the integer-cycle spatial basis. This
-    // preserves exact chunk-period seams while waterfalls and opposing currents still travel in
-    // their metadata direction. Still water uses the positive default direction.
-    float travelA = dot(safeFlow, waveA) < -1.0e-4 ? -1.0 : 1.0;
-    float travelB = dot(safeFlow, waveB) < -1.0e-4 ? -1.0 : 1.0;
     float boundedTime = isfinite(animationSeconds)
         ? animationSeconds - floor(animationSeconds / MC_WATER_TIME_PERIOD) * MC_WATER_TIME_PERIOD
         : 0.0;
     float3 position = select(float3(0.0), periodicWorldPosition, isfinite(periodicWorldPosition));
-    float phaseA = MC_WATER_TAU * (dot(position, float3(11.0, 3.0, 7.0)) / MC_WATER_SPATIAL_PERIOD
-        - travelA * 205.0 * boundedTime / MC_WATER_TIME_PERIOD);
-    float phaseB = MC_WATER_TAU * (dot(position, float3(-5.0, 13.0, 17.0)) / MC_WATER_SPATIAL_PERIOD
-        - travelB * 451.0 * boundedTime / MC_WATER_TIME_PERIOD);
+    position = fract((position - mc_water_pattern_velocity(normal) * boundedTime) / 256.0) * 256.0;
+    float phaseA = MC_WATER_TAU * dot(position, float3(11.0, 3.0, 7.0)) / MC_WATER_SPATIAL_PERIOD;
+    float phaseB = MC_WATER_TAU * dot(position, float3(-5.0, 13.0, 17.0)) / MC_WATER_SPATIAL_PERIOD;
     float3 slope = waveA * (0.13 * cos(phaseA)) + waveB * (0.065 * cos(phaseB));
     return mc_water_safe_normalize(normal - slope * boundedStrength, normal);
+}
+
+// Periodic value noise supplies coherent local currents rather than per-frame randomness.
+// Integer hashing is independent of floating-point sine precision at chunk boundaries.
+static inline float mc_water_detail_hash(int3 cell) {
+    uint3 c = uint3((cell % 32 + 32) % 32);
+    uint h = c.x * 1597334677u ^ c.y * 3812015801u ^ c.z * 2798796415u;
+    h = (h ^ (h >> 16)) * 2246822519u;
+    h = (h ^ (h >> 13)) * 3266489917u;
+    return float(h ^ (h >> 16)) / 4294967295.0;
+}
+
+static inline float mc_water_detail_noise(float3 p) {
+    int3 cell = int3(floor(p));
+    float3 f = fract(p);
+    f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    float a = mix(mc_water_detail_hash(cell), mc_water_detail_hash(cell + int3(1,0,0)), f.x);
+    float b = mix(mc_water_detail_hash(cell + int3(0,1,0)), mc_water_detail_hash(cell + int3(1,1,0)), f.x);
+    float c = mix(mc_water_detail_hash(cell + int3(0,0,1)), mc_water_detail_hash(cell + int3(1,0,1)), f.x);
+    float d = mix(mc_water_detail_hash(cell + int3(0,1,1)), mc_water_detail_hash(cell + int3(1,1,1)), f.x);
+    return mix(mix(a, b, f.y), mix(c, d, f.y), f.z);
+}
+
+// Rounded cellular clumps: jittered geometric centers with compact smooth kernels.
+// Periodic hashing keeps neighboring chunks identical; weighted overlapping cells
+// avoid Voronoi edge discontinuities while retaining distinct clustered shapes.
+static inline float3 mc_water_geometric_clumps_gradient(float2 p) {
+    int2 cell = int2(floor(p));
+    float2 local = fract(p);
+    float sum = 0.0;
+    float weights = 0.0;
+    float2 numeratorGradient = float2(0), weightGradient = float2(0);
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            int3 key = int3(cell + int2(x, y), 7);
+            float2 center = float2(x, y) + 0.3 + 0.4 * float2(
+                mc_water_detail_hash(key), mc_water_detail_hash(key + int3(0,0,11)));
+            float2 delta = local - center;
+            float cellWeight = saturate(1.0 - dot(delta, delta) / 1.44);
+            float2 derivative = (-6.0/1.44) * delta * cellWeight * cellWeight;
+            cellWeight = cellWeight * cellWeight * cellWeight;
+            float height = mc_water_detail_hash(key + int3(0,0,19));
+            numeratorGradient += derivative * height;
+            weightGradient += derivative;
+            sum += cellWeight * height;
+            weights += cellWeight;
+        }
+    }
+    float height = sum / max(weights, 1.0e-6);
+    return float3(height, (numeratorGradient - height*weightGradient) / max(weights, 1.0e-6));
+}
+
+static inline float mc_water_geometric_clumps(float2 p) {
+    return mc_water_geometric_clumps_gradient(p).x;
+}
+
+// Periodic geometric height plus exact analytic derivatives (value, d/du, d/dv).
+// Four lattice corners form rounded cells; ridging below turns them into irregular crests.
+static inline float3 mc_water_height_noise_gradient(float2 p) {
+    int2 cell = int2(floor(p));
+    float2 f = fract(p);
+    float2 w = f*f*f*(f*(f*6.0-15.0)+10.0);
+    float2 dw = 30.0*f*f*(f-1.0)*(f-1.0);
+    float a = mc_water_detail_hash(int3(cell, 0));
+    float b = mc_water_detail_hash(int3(cell+int2(1,0), 0));
+    float c = mc_water_detail_hash(int3(cell+int2(0,1), 0));
+    float d = mc_water_detail_hash(int3(cell+int2(1,1), 0));
+    return float3(mix(mix(a,b,w.x), mix(c,d,w.x), w.y),
+        dw.x * mix(b-a,d-c,w.y), dw.y * mix(c-a,d-b,w.x));
+}
+
+static inline float3 mc_water_detail_height_gradient(float2 surface, float footprint, int quality) {
+    float3 clump = mc_water_geometric_clumps_gradient(surface * 0.25);
+    float envelope = 0.5 + clump.x;
+    float2 envelopeGradient = clump.yz * 0.25;
+    const float slopes[7] = {0.32, 0.26, 0.19, 0.14, 0.10, 0.075, 0.05};
+    int bands = quality <= 0 ? 0 : min(quality, 3) * 2 + 1;
+    float frequency = 0.25;
+    float3 result = float3(0);
+    for (int band = 0; band < bands; ++band) {
+        // Integer rotations preserve the 256-block repeat while hiding grid alignment.
+        float2 axisU = band % 2 == 0 ? float2(1,2) : float2(2,-1);
+        float2 axisV = float2(-axisU.y,axisU.x);
+        float2 uv = float2(dot(surface,axisU),dot(surface,axisV)) * frequency;
+        float3 noise = mc_water_height_noise_gradient(uv + float2(7,13)*float(band));
+        float centered = 2.0*noise.x-1.0;
+        float rounded = sqrt(centered*centered+0.04);
+        float height = 1.0-rounded;
+        float2 gradient = (-2.0*centered/rounded) * noise.yz;
+        float weight = 1.0-smoothstep(0.15,0.45,footprint*frequency*2.236068);
+        float amplitude = slopes[band] * weight / (frequency*2.236068);
+        float2 worldGradient = (axisU*gradient.x + axisV*gradient.y)*frequency;
+        result.x += amplitude*envelope*height;
+        result.yz += amplitude*(envelope*worldGradient + height*envelopeGradient);
+        frequency *= 2.0;
+    }
+    return result;
+}
+
+// Tiered multiscale height gradients replace the old phase-modulated sine bands.
+// Higher tiers add shorter irregular crests, sharing the same advection coordinate.
+static inline float3 mc_water_detailed_normal(
+    float3 baseNormal, float3 flow, float3 position, float seconds, float strength,
+    int quality, float3 pixelDx, float3 pixelDy
+) {
+    float3 broad = mc_water_animated_normal(baseNormal, flow, position, seconds, strength);
+    if (quality <= 0 || !isfinite(strength) || strength <= 0.0) return broad;
+    float3 normal = mc_water_safe_normalize(baseNormal, float3(0, 1, 0));
+    float3 axis = abs(normal.y) < 0.9 ? float3(0, 1, 0) : float3(1, 0, 0);
+    float3 tangent = mc_water_safe_normalize(cross(axis, normal), float3(0, 0, 1));
+    position = select(float3(0), position, isfinite(position));
+    position = fract(position / 256.0) * 256.0;
+    float time = isfinite(seconds) ? seconds - floor(seconds / 1024.0) * 1024.0 : 0.0;
+    position = fract((position - mc_water_pattern_velocity(normal) * time) / 256.0) * 256.0;
+    float2 surface = abs(normal.y) >= 0.5 ? position.xz
+        : (abs(normal.x) > abs(normal.z) ? position.zy : position.xy);
+    float footprint = max(length(pixelDx), length(pixelDy));
+    float3 height = mc_water_detail_height_gradient(surface, footprint, quality);
+    float3 slope = abs(normal.y) >= 0.5 ? float3(height.y,0,height.z)
+        : (abs(normal.x) > abs(normal.z) ? float3(0,height.z,height.y) : float3(height.y,height.z,0));
+    slope -= normal * dot(slope,normal);
+    return mc_water_safe_normalize(broad - slope * clamp(strength, 0.0, 2.0), broad);
 }
 
 /// Roughness-aware Schlick Fresnel for water (IOR approximately 1.33, F0 rounded to 0.02).
@@ -88,6 +209,20 @@ static inline float mc_water_fresnel(float nDotV, float roughness) {
     float oneMinus = 1.0 - cosine;
     return clamp(f0 + (grazing - f0) * oneMinus * oneMinus * oneMinus * oneMinus * oneMinus,
         f0, grazing);
+}
+
+// Approximate the existing sky's horizon/zenith gradient in reflection direction.
+// This is a directional fallback, not a captured sky/cloud probe. Environment and
+// cave/daylight availability remain owned by the caller's existing gates.
+static inline float3 mc_water_environment_radiance(float3 skyColor, float3 normal, float3 view) {
+    float3 ray = reflect(-view, normal);
+    float elevation = saturate(ray.y);
+    float horizonWeight = pow(1.0 - elevation, 3.0);
+    float luminance = dot(skyColor, float3(0.2126, 0.7152, 0.0722));
+    float3 zenith = skyColor * float3(0.55, 0.70, 0.90);
+    float3 horizon = mix(skyColor, float3(luminance), 0.45) * 1.75;
+    float aboveGround = mix(0.25, 1.0, smoothstep(-0.25, 0.0, ray.y));
+    return mix(zenith, horizon, horizonWeight) * aboveGround;
 }
 
 /// Adds the baseline sky and sun reflection while retaining vanilla lightmap/blocklight as baseColor.
@@ -111,7 +246,7 @@ static inline float3 mc_water_reflection(
     float3 envColor = max(select(float3(0.0), environment.rgb, isfinite(environment.rgb)), float3(0.0));
     float boundedRoughness = saturate(isfinite(roughness) ? roughness : 1.0);
     float fresnel = mc_water_fresnel(dot(normal, view), boundedRoughness);
-    float3 reflected = mix(base, envColor, fresnel * envAvailability);
+    float3 reflected = mix(base, mc_water_environment_radiance(envColor, normal, view), fresnel * envAvailability);
 
     float sunEnergy = clamp(isfinite(sunDirectionEnergy.w) ? sunDirectionEnergy.w : 0.0, 0.0, 8.0);
     float3 sunRaw = select(float3(0.0), sunDirectionEnergy.xyz, isfinite(sunDirectionEnergy.xyz));
@@ -155,7 +290,7 @@ static inline float3 mc_water_reflection_with_ssr(
     float3 view = mc_water_safe_normalize(viewToCameraWorld, normal);
     if (dot(normal, view) < 0.0) normal = -normal;
     float fresnel = mc_water_fresnel(dot(normal, view), roughness);
-    float3 fallbackSurface = mix(safeBase, fallbackColor, fresnel * fallbackAvailability);
+    float3 fallbackSurface = mix(safeBase, mc_water_environment_radiance(fallbackColor, normal, view), fresnel * fallbackAvailability);
     float3 hitSurface = mix(safeBase, hitColor, fresnel);
     float3 baseline = mc_water_reflection(baseColor, normalWorld, viewToCameraWorld, roughness,
         skyLight, sunDirectionEnergy, environment);

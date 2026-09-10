@@ -81,7 +81,7 @@ final class MetalWaterIdentityGameTest {
 			this.context.runOnClient(client -> {
 				ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);
 				for (String id : new String[]{
-					"exposure", "tonemap", "invert", "debug_view",
+					"exposure", "tonemap", "invert", "debug_view", "water_detail",
 					"water_enabled", "water_wave_strength", "water_refraction_strength",
 					"water_absorption", "water_foam", "water_underwater_distortion",
 					"water_reflection_quality"
@@ -105,6 +105,13 @@ final class MetalWaterIdentityGameTest {
 					throw new AssertionError("Ordinary transparency expected before the Fabulous check");
 				}
 			});
+			if (Boolean.getBoolean("metalcraft.waterDetailProbe")) {
+				this.context.getInput().resizeWindow(RESIZED_WIDTH, RESIZED_HEIGHT);
+				this.context.waitFor(client -> client.getWindow().getWidth() == RESIZED_WIDTH
+					&& client.getWindow().getHeight() == RESIZED_HEIGHT);
+				this.captureW7Comparisons(world);
+				return;
+			}
 			int[] nativeSnapshot = new int[2];
 			Path baseline = this.capture(WaterRoutingDebug.Mode.BASELINE, "metalcraft-water-identity-baseline", false);
 			Path water = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-water", false);
@@ -153,6 +160,7 @@ final class MetalWaterIdentityGameTest {
 			this.captureW5Comparisons(world);
 			this.captureW6Comparisons(world);
 			this.captureW7Comparisons(world);
+			this.captureNaturalWater(world);
 
 			this.setFabulous(true);
 			Path fabulous = this.capture(WaterRoutingDebug.Mode.IDENTITY, "metalcraft-water-identity-fabulous", true);
@@ -203,6 +211,81 @@ final class MetalWaterIdentityGameTest {
 		world.getServer().runCommand("tick freeze");
 
 		this.setWaterDefaults("baseline");
+		Path previousDetail = null;
+		for (int detail = 0; detail <= 3; detail++) {
+			this.setWaterOption("water_detail", detail);
+			Path currentDetail = this.capture(WaterRoutingDebug.Mode.OFF,
+				"metalcraft-water-detail-" + detail, false);
+			if (previousDetail != null) {
+				// Fine normal changes are deliberately subtler than the full-effect RGB>80 check.
+				int changed = differentSamples(previousDetail, currentDetail, 0.05, 0.95, 0.45, 0.90, 8);
+				int sky = differentSamples(previousDetail, currentDetail, 0.05, 0.95, 0.0, 0.15, 8);
+				// Higher tiers may intentionally converge at overview distance after footprint filtering.
+				if ((detail == 1 && changed < 100) || sky > 10) throw new AssertionError(
+					"Detail tier " + detail + " coverage=" + changed + " sky=" + sky);
+				System.out.println("Water detail tier " + detail + ": changed=" + changed + " sky=" + sky);
+			}
+			previousDetail = currentDetail;
+		}
+		// Camera eye is about 1.75 blocks above the surface, rather than the overview's 10+.
+		world.getServer().runCommand("tp @a 0 184 180 180 40");
+		this.context.getInput().lookAt(180, 40);
+		this.context.waitTicks(20);
+		// Pin the client animation clock, not only server daylight, for identical reruns.
+		this.context.runOnClient(client -> client.level.setTimeFromServer(340L));
+		Path closePrevious = null;
+		Path detailNoneNormals = null;
+		for (int detail = 0; detail <= 3; detail++) {
+			this.setWaterOption("water_detail", detail);
+			Path close = this.capture(WaterRoutingDebug.Mode.OFF,
+				"metalcraft-water-micro-close-" + detail, false);
+			if (closePrevious != null && differentSamples(closePrevious, close, 0.1, 0.9, 0.25, 0.95, 8) < 100) {
+				throw new AssertionError("Near-camera water detail tier " + detail + " was not visible");
+			}
+			if (detail == 0 || detail == 3) {
+				Path normals = this.capture(WaterRoutingDebug.Mode.NORMALS,
+					"metalcraft-water-detail-route-" + detail, false);
+				if (detail == 0) detailNoneNormals = normals;
+				else {
+					int normalChanges = differentSamples(detailNoneNormals, normals, 0.1, 0.9, 0.25, 0.95, 8);
+					if (normalChanges < 1000) throw new AssertionError("Detail did not reach live water normals: " + normalChanges);
+					System.out.println("Water detail route: None/High normal changes=" + normalChanges);
+				}
+			}
+			final int expectedDetail = detail;
+			this.context.runOnClient(client -> {
+				var runtime = ShaderPackRuntime.active();
+				if (!runtime.isActive() || !ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId())
+					|| ((Number)runtime.optionValue("water_detail")).intValue() != expectedDetail) {
+					throw new AssertionError("Live water detail setting or Standard pack was not active");
+				}
+			});
+			closePrevious = close;
+		}
+		Path closeNormals = this.capture(WaterRoutingDebug.Mode.NORMALS,
+			"metalcraft-water-micro-close-normals-t0", false);
+		world.getServer().runCommand("tick step 10");
+		this.context.waitTicks(15);
+		this.context.runOnClient(client -> client.level.setTimeFromServer(350L));
+		Path movingNormals = this.capture(WaterRoutingDebug.Mode.NORMALS,
+			"metalcraft-water-micro-close-normals-t1", false);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-micro-close-moving", false);
+		if (differentSamples(closeNormals, movingNormals, 0.1, 0.9, 0.25, 0.95, 8) < 1000) {
+			throw new AssertionError("Close micro-ripples did not evolve over time");
+		}
+		this.context.getInput().lookAt(180, 8);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-micro-grazing", false);
+		this.setHalfResolution(true);
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-micro-grazing-half", false);
+		this.setHalfResolution(false);
+		world.getServer().runCommand("tp @a 0 193 193 180 27");
+		this.context.getInput().lookAt(180, 27);
+		this.context.waitTicks(20);
+		this.setWaterOption("water_detail", 2);
+		if (Boolean.getBoolean("metalcraft.waterDetailProbe")) {
+			world.getServer().runCommand("tick unfreeze");
+			return;
+		}
 		Path enabled = this.capture(WaterRoutingDebug.Mode.OFF,
 			"metalcraft-water-w7-enabled", false);
 		this.setWaterOption("water_enabled", false);
@@ -296,7 +379,53 @@ final class MetalWaterIdentityGameTest {
 		world.getServer().runCommand("tick unfreeze");
 	}
 
+	/** Validate actual generated water, avoiding the high-contrast tiled fixture bed. */
+	private void captureNaturalWater(final TestSingleplayerContext world) {
+		int[] selected = new int[4];
+		world.getServer().runOnServer(server -> {
+			var level = server.overworld();
+			int sea = level.getSeaLevel();
+			search: for (int x = -224; x <= 224; x += 16) {
+				for (int z = -32; z <= 384; z += 16) {
+					boolean openWater = true;
+					for (int[] offset : new int[][]{{0,0},{-6,0},{6,0},{0,-6},{0,6}}) {
+						var pos = new net.minecraft.core.BlockPos(x+offset[0], sea-1, z+offset[1]);
+						if (!level.hasChunkAt(pos) || !level.getFluidState(pos).is(net.minecraft.tags.FluidTags.WATER)
+							|| !level.getFluidState(pos.below(3)).is(net.minecraft.tags.FluidTags.WATER)) {
+							openWater = false;
+							break;
+						}
+					}
+					if (openWater) {
+						selected[0]=x; selected[1]=sea; selected[2]=z; selected[3]=1;
+						break search;
+					}
+				}
+			}
+		});
+		if (selected[3] == 0) throw new AssertionError("No generated deep water found in loaded NORMAL terrain");
+		world.getServer().runCommand("tick unfreeze");
+		world.getServer().runCommand("tp @a " + selected[0] + " " + (selected[1]+0.15) + " " + selected[2] + " 180 35");
+		world.getServer().runCommand("time set noon");
+		this.context.getInput().lookAt(180,35);
+		this.context.waitTicks(80);
+		world.getServer().runCommand("tick freeze");
+		this.context.runOnClient(client -> client.level.setTimeFromServer(340L));
+		this.setWaterDefaults("baseline");
+		this.setWaterOption("water_detail",0);
+		Path none = this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-natural-none",false);
+		this.setWaterOption("water_detail",3);
+		Path high = this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-natural-high",false);
+		int changes = differentSamples(none,high,0.1,0.9,0.3,0.9,8);
+		if (changes < 1000) throw new AssertionError("Generated-water detail remains too weak: " + changes);
+		System.out.println("Natural water detail: camera=" + java.util.Arrays.toString(selected) + " changed=" + changes);
+		this.context.getInput().lookAt(180,8);
+		this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-natural-grazing",false);
+		world.getServer().runCommand("tick unfreeze");
+	}
+
 	private void setWaterDefaults(final String reflectionQuality) {
+		this.setWaterOption("water_detail", 2);
 		this.setWaterOption("water_enabled", true);
 		for (String id : new String[]{"water_wave_strength", "water_refraction_strength",
 			"water_absorption", "water_foam", "water_underwater_distortion"}) {
@@ -598,6 +727,9 @@ final class MetalWaterIdentityGameTest {
 			if (fabulous != MetalLinearWorldActivation.lastLiveFabulous()) {
 				throw new AssertionError("Fabulous state for " + name + " expected=" + fabulous
 					+ " actual=" + MetalLinearWorldActivation.lastLiveFabulous());
+			}
+			if (client.options.renderDistance().get() != 16 || client.options.simulationDistance().get() != 16) {
+				throw new AssertionError("Water validation requires 16 render and simulation distance");
 			}
 			var device = MetalGpuDevices.current();
 			if (device == null || !device.lastWorldHadOpaqueWaterInputs()) {

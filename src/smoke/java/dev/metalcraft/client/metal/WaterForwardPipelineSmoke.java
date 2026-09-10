@@ -142,8 +142,9 @@ final class WaterForwardPipelineSmoke {
 					assertRgb(disabledPixels, 3, y, foreground, behind, 0, "water-off sorted overlap");
 					assertRgb(disabledPixels, 7, y, 0, foreground, 0, "water-off glass");
 				}
-				for (int repeat = 0; repeat < 2; repeat++) {
+				for (int repeat = 0; repeat < 4; repeat++) {
 					runtime.setOption("water_enabled", true);
+					runtime.setOption("water_detail", repeat);
 					for (String id : List.of("water_wave_strength", "water_refraction_strength",
 						"water_absorption", "water_foam", "water_underwater_distortion")) {
 						runtime.setOption(id, repeat == 0 ? 0.0 : 1.0);

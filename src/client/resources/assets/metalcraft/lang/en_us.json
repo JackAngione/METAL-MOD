@@ -32,5 +32,11 @@
   "metalcraft.water.value.off": "Off",
   "metalcraft.water.value.baseline": "Baseline",
   "metalcraft.water.value.ssr_low": "Screen-space Low",
-  "metalcraft.water.value.ssr_high": "Screen-space High"
+  "metalcraft.water.value.ssr_high": "Screen-space High",
+  "metalcraft.water.water_detail": "Water detail: %s",
+  "metalcraft.water.water_detail.tooltip": "Fine surface ripples. None retains broad waves; higher levels add smaller ripples. Distant detail fades to prevent shimmer.",
+  "metalcraft.water.detail.0": "None",
+  "metalcraft.water.detail.1": "Low",
+  "metalcraft.water.detail.2": "Medium",
+  "metalcraft.water.detail.3": "High"
 }

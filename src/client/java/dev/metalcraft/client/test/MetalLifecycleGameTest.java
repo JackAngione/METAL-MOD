@@ -70,6 +70,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 
 	@Override
 	public void runTest(final ClientGameTestContext context) {
+		context.runOnClient(client -> {
+			client.options.renderDistance().set(16);
+			client.options.simulationDistance().set(16);
+		});
 		String expectedBackend = System.getProperty("metalcraft.lifecycleExpectedBackend", "Metal");
 		boolean benchmark = Boolean.getBoolean("metalcraft.lifecycleBenchmark");
 		String backend = context.computeOnClient(ignored -> RenderSystem.getDevice().getDeviceInfo().backendName());

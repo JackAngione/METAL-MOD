@@ -48,6 +48,9 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | W5 | Refraction and depth absorption | W4 | /root | done | 2026-09-08: ordinary-mode opaque replacement, validated reverse-Z thickness/refraction, RGB absorption/scattering, GPU extremes, and standard-world shallow/deep/steep/underwater/Fabulous/transparent checks pass. See W5 completion evidence. |
 | [x] | W6 | Shoreline foam and underwater appearance | W5 | /root | done | 2026-09-09: one-block shoreline coverage regression fixed and locked down across three shelf regions with zero sky/dry-fence leakage; GPU, NORMAL-world water matrix and lifecycle pass. See W6 final closure evidence. |
 | [x] | W7 | Controls and optional screen-space reflections | W5 | /root | done | 2026-09-09: bounded controls, restart/reload persistence, fallback recovery and low/high SSR pass GPU and NORMAL-world validation; clean captures and 4K M4 Max tier timings recorded below. Baseline remains default. |
+| [x] | WD | Fine surface ripples and detail slider | W4, W7 | /root | done | 2026-09-09: four filtered detail tiers, persistence, GPU seams/identity and live NORMAL-world 16/16 comparisons pass. Build and lifecycle pass; see WD completion evidence below. |
+| [x] | WD2 | Irregular motion and close-up micro-ripples | WD | /root | done | 2026-09-09: coherent randomized currents, 4/8/12 detail bands, GPU and close-camera NORMAL-world 16/16 checks pass. See WD2 completion evidence. |
+| [x] | WD3 | Clumped geometric patterns with shared travel direction | WD2 | /root | done | 2026-09-09: visibility regression fixed with true noise-height gradients and directional reflections; final-image checks, natural ocean, build, shader-package identity and lifecycle pass. See visible-detail closure evidence. |
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
 
 ## Implementation tasks and acceptance criteria
@@ -1996,3 +1999,276 @@ The existing RGBA16_FLOAT plus D32 opaque snapshots consume 99,532,800 logical b
 at this extent for every tier; SSR adds zero texture bytes. These focused W7 measurements
 justify keeping baseline as the default while exposing both SSR tiers. W8 still owns the
 broader release performance budget and composed-scene regression matrix.
+
+### WD — Fine water surface detail (2026-09-09, `/root`)
+
+User-requested ocean-inspired fine ripples, retaining the stylized broad waves.
+
+- [x] Claim task and inspect existing water/settings contracts.
+- [x] Add None/Low/Medium/High detail slider and filtered, periodic fine normals.
+- [x] Validate GPU identity, seams, filtering, tier compilation and saved setting.
+- [x] Inspect live tier comparisons in a NORMAL world at 16/16 using default Metal; run build and lifecycle checks.
+
+Acceptance: None preserves existing broad normals; higher tiers add progressively finer
+animated detail without chunk seams or distant aliasing. Wave strength zero remains
+still. Settings survive reload/restart. Record visual evidence before closure.
+
+WD partial evidence: `./gradlew build` passed with actual Metal GPU checks
+(`/tmp/water-detail-build.log`). All four forward variants compile; fresh-runtime
+persistence retains High; helper fixtures pass None/broad identity, zero waves,
+256-block seams, 1024-second looping, waterfall normalization, sub-block variation
+and filtering back to the broad normal. Medium is the default (four additional
+bands); Low adds two and High six. No additional textures or passes. Live visual
+validation is running; checkbox remains open until inspection and lifecycle pass.
+
+WD visual-check correction: the initial live run reached the Low capture but its
+new assertion reused the full-effect summed RGB >80 threshold (only 3 samples).
+Inspection of None/Low showed coherent visible ripples across the pool, so the
+new detail-specific check now requires at least 100 changed water-region samples
+at RGB >8 and at most 10 changed sky samples. This measures fine surface detail
+without changing existing W4–W7 thresholds or altering the shader to satisfy a
+large-effect test. The rerun also asserts 16/16 at every capture.
+
+### WD completion evidence — 2026-09-09 (`/root`)
+
+- `./gradlew build`: final pass, 14s, `/tmp/water-detail-build.log`, including
+  production forward compilation at every detail tier and GPU/persistence fixtures.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed
+  in 2m51s, `/tmp/water-detail-client.log`. NORMAL seed 12345, default Metal
+  renderer, render/simulation 16/16 asserted at every capture. Existing animation,
+  moving camera, cave/night, refraction, foam, underwater, toggles/reload, SSR,
+  half-resolution and Fabulous regressions pass.
+- Inspected `run/screenshots/0041_metalcraft-water-detail-0.png` (None),
+  `0042_metalcraft-water-detail-1.png` (Low), `0043_metalcraft-water-detail-2.png`
+  (Medium), and `0044_metalcraft-water-detail-3.png` (High), all in the same
+  screenshots directory. Fine ripples are visible over the existing broad waves;
+  higher tiers add smaller variation. Adjacent tier water-region changed samples
+  at summed RGB >8: 21,951 / 9,889 / 1,347; sky changes: 0 / 0 / 0.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed
+  in 43s, `/tmp/water-detail-lifecycle.log`, including reload, resize/fullscreen,
+  failure recovery and shutdown in a NORMAL world with default Metal at 16/16.
+- `git diff --check`: passed.
+
+The Standard pack's **Water detail** numeric slider displays None / Low / Medium /
+High, defaults to Medium and uses existing recompile/persistence semantics. None
+removes only the added fine detail; Wave strength zero disables both broad and
+fine normals. Fine bands are anchored to periodic world coordinates and filtered
+by pixel footprint before Nyquist; detail changes reflection/refraction normals
+without moving mesh edges. No textures or extra passes are allocated. This task
+does not establish new full-frame performance measurements or close W8's release gate.
+
+### WD2 — Irregular fine water motion (`/root`, 2026-09-09)
+
+- [x] Claim follow-up and inspect water/detail contracts.
+- [x] Implement coherent randomized motion and finer detail across existing tiers.
+- [x] Verify GPU periodicity, time evolution, filtering and zero/None identity.
+- [x] Inspect close surface tier/time captures in NORMAL world on default Metal at 16/16.
+- [x] Run build and lifecycle checks, record evidence.
+
+Optional vertex displacement is being evaluated; retain mesh edges unless the
+benefit justifies changes to fluid silhouettes, depth and waterlogged boundaries.
+Acceptance: visibly less uniform motion, finer near-camera ripples, stable distance
+filtering, all existing controls and water regressions preserved.
+
+WD2 partial evidence: build and Metal GPU fixtures passed in 20s
+(`/tmp/water-micro-build.log`). Replaced the shared sinusoidal modulation with
+three quintic-smoothed, periodically hashed current fields, independently advected
+over time. They bend phase and modulate packet strength without frame-to-frame
+random jumps. Tiers now evaluate 4/8/12 bands; High reaches ~0.027-block wavelengths
+and stronger slopes. Conservative footprint filtering includes a phase-warp margin.
+None still retains the original two broad waves. Tests verify 0.015-block variation,
+time evolution, periodic current noise, normal normalization and prior identities.
+
+Use normal relief rather than optional mesh displacement: block-fluid faces lack
+the tessellation to represent these micro-wavelengths; moving their corners would
+change boundaries without resolving the fine shape. No new geometry, textures or
+passes. Live close-up inspection and lifecycle checks remain pending. Overview
+higher tiers may converge after filtering; distinct-tier visibility is required
+in the new close-camera comparison, not for unresolved distant frequencies.
+
+### WD2 completion evidence — 2026-09-09 (`/root`)
+
+- `./gradlew build`: passed in 20s including actual Metal forward variants and
+  extended micro-normal/current-noise GPU fixtures (`/tmp/water-micro-build.log`).
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed
+  in 3m16s (`/tmp/water-micro-client.log`), NORMAL seed 12345, default Metal backend,
+  16 render and simulation distance asserted at every capture. All existing
+  water regressions pass, including toggles, resource reload, SSR and underwater.
+- Close camera: player `(0,184,180)`, yaw 180, pitch 40; eye approximately 1.75
+  blocks above the water. Inspected None/High captures
+  `run/screenshots/0045_metalcraft-water-micro-close-0.png` and
+  `run/screenshots/0048_metalcraft-water-micro-close-3.png`. Low/Medium are 0046/0047
+  with the same basename and tier suffix. Each adjacent close tier passed the
+  water-region visibility assertion (at least 100 samples at summed RGB >8).
+- Inspected normal captures `0049_metalcraft-water-micro-close-normals-t0.png` and
+  `0050_metalcraft-water-micro-close-normals-t1.png` plus final-color
+  `0051_metalcraft-water-micro-close-moving.png`, all in `run/screenshots/`.
+  A 10-tick time step changes at least 1,000 close normal samples at RGB >8.
+  Curved wave packets and smaller normal/refraction variation evolve continuously.
+- Inspected `0052_metalcraft-water-micro-grazing.png` and
+  `0053_metalcraft-water-micro-grazing-half.png`: near detail remains visible with
+  distance filtering; no torn surface edges. At overview distance High/Medium
+  appropriately converge (7 changed samples); every overview sky comparison is 0.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed
+  in 43s (`/tmp/water-micro-lifecycle.log`), including reload, resize/fullscreen,
+  recovery and shutdown in a NORMAL world using default Metal at 16/16.
+- `git diff --check`: passed.
+
+The existing None–High slider and Medium default are retained. Additional apparent
+depth comes from stronger surface normals; actual mesh height displacement remains
+unimplemented by design. This is coherent procedural water motion, not a fluid
+simulation. Full-frame performance for these new detail bands was not benchmarked;
+W8 remains open.
+
+### WD3 — Clumped geometric waves (`/root`)
+
+- [x] Claim request and inspect current motion.
+- [x] Add cellular geometric clumps and one shared advection coordinate.
+- [x] Verify common-direction transport, clump periodicity and existing GPU contracts.
+- [x] Inspect close tier/time/grazing views; run build and lifecycle checks at NORMAL 16/16 on default Metal.
+
+All horizontal wave scales must travel together; random clump structure should
+shape packets without independently moving noise layers or opposing wave phases.
+Waterfall faces retain downward travel. None still disables fine bands but adopts
+the requested common direction for the broad waves.
+
+WD3 partial evidence: `./gradlew build` passes in 17s
+(`/tmp/water-clumps-build.log`) after correcting an initial reserved Metal identifier.
+The 3x3 cellular field uses jittered geometric centers and overlapping compact
+cubic weights to form smooth clumps. Those clumps modulate crest phase, spacing
+and strength. All broad/detail/noise coordinates now share velocity `(0.5,0,0.25)`
+blocks/second on horizontal faces; vertical faces descend at `(0,-0.5,0)`.
+Independent band clocks and counter-moving noise layers are removed.
+
+GPU fixtures prove `normal(p + velocity*dt, t + dt) == normal(p,t)` at all four
+tiers, including the broad waves and downward waterfall case; clump spatial
+periodicity/variation and existing fine detail/filtering tests pass. The global
+horizontal direction intentionally replaces individual fluid-flow directions per
+the user's request. Live close-camera and lifecycle checks remain pending.
+
+### WD3 completion evidence — 2026-09-09 (`/root`)
+
+- `./gradlew build`: passed in 17s (`/tmp/water-clumps-build.log`). Extended Metal
+  fixtures validate shared translation at all tiers, broad/detail agreement,
+  downward waterfall transport, geometric-clump periodicity and spatial variation,
+  with prior normal/identity/filtering/persistence tests passing.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`: passed
+  in 3m10s (`/tmp/water-clumps-client.log`), NORMAL seed 12345, default Metal,
+  render/simulation 16/16 asserted at each capture. Existing routing, animation,
+  camera, cave/night, foam, refraction, underwater, toggles, reload and SSR checks pass.
+- Inspected close camera High `run/screenshots/0048_metalcraft-water-micro-close-3.png`,
+  the later time sample `0051_metalcraft-water-micro-close-moving.png`, and grazing
+  `0052_metalcraft-water-micro-grazing.png` in the same directory. The camera remains
+  approximately 1.75 blocks above the water. Clumped stronger ripples sit between
+  calmer patches, with finer near-surface distortion retained. All adjacent close
+  tiers pass visibility checks; the close normal time-pair passes animation checks.
+  The exact common direction is established by GPU transport identity tests rather
+  than inferred solely from still screenshots. Overview sky changes are all zero.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`: passed
+  in 40s (`/tmp/water-clumps-lifecycle.log`), covering reload, resize/fullscreen,
+  fallback recovery and shutdown in NORMAL terrain on default Metal at 16/16.
+- `git diff --check`: passed.
+
+The None–High slider and Medium default remain. All surface wave scales now share
+one travel vector; clumps randomize the pattern's shape/spacing/strength, not its
+transport direction. Mesh geometry and memory allocations are unchanged. W8's
+full-frame performance/release gate remains separate.
+
+### WD3 reopened — visible-detail diagnosis (`/root`)
+
+User reports the result looks unchanged. Prior GPU identities and tiny changed-pixel
+thresholds do not establish the requested visible, clumped water texture.
+
+- [x] Build and run a deterministic final-image visibility feedback loop.
+- [x] Verify active shader routing/build; distinguish normal generation from lighting.
+- [x] Research primary-source game-water techniques and adapt the appropriate fix.
+- [x] Validate a clearly visible before/after on the live Metal surface, plus regression checks.
+
+Research agent `/root/water_research` owns only `docs/WATER_DETAIL_RESEARCH.md`;
+coordinator owns implementation, tests and this tracker.
+
+Visible-detail diagnosis evidence (2026-09-09):
+
+- Replay command `java tools/diagnostics/WaterDetailVisibility.java
+  build/water-detail-before/0045_metalcraft-water-micro-close-0.png
+  build/water-detail-before/0048_metalcraft-water-micro-close-3.png` fails in 0.24s:
+  fine-detail RMS 2.439/255, total RMS 3.344/255, coverage above 5/255 = 8.65%.
+  Thresholds require RMS >=2.5 and coverage >=10%; previous sparse pixel checks
+  could not establish a useful fine texture. These are measured final rendered PNGs.
+- Focused live command `./gradlew runClient -PmetalLifecycleTest
+  -PmetalWaterIdentityTest=true -PmetalWaterDetailProbe=true` passed with the old
+  appearance: active Standard/detail setting verified, 47,746 None/High normal
+  samples changed. The helper does reach real forward water draws. No separate
+  running Minecraft process was found during the instance check; the user-viewed
+  instance has not independently been identified.
+- Ranked hypotheses: flat reflection radiance hides normals; sine phase modulation
+  fails to generate distinct shape; filtering erases detail; stale client build.
+- The new GPU reflection test fails on the old helper: equal N dot V but different
+  reflected sky directions give identical radiance. A horizon/zenith directional
+  approximation fixes this, keeping cave/night gates and consistent SSR fallback.
+  That isolated fix passes GPU tests but still fails the final-image detail check.
+- Research: [WATER_DETAIL_RESEARCH.md](WATER_DETAIL_RESEARCH.md), primary-source
+  Uru, Pacific Fighters and Valve water techniques. The adopted change replaces
+  phase-warped sine detail with analytic derivatives of a ridged multiscale height
+  field, including the clump envelope derivative. Low/Medium/High now use 3/5/7
+  height bands. Integer rotated coordinates preserve wrapping and shared advection;
+  footprint filtering removes unresolved scales. No new textures or mesh displacement.
+- GPU tests verify the analytic noise and full height derivatives against finite
+  differences, alongside the prior transport/normal/filtering/reflection contracts.
+  Build passes (`/tmp/water-visible-build.log`, 10s).
+- Fixed-time focused live run passes (`/tmp/water-height-client.log`, 1m3s).
+  `java tools/diagnostics/WaterDetailVisibility.java
+  build/water-visible-evidence/focused-none.png
+  build/water-visible-evidence/focused-high.png` passes: RMS 4.652/255, total
+  RMS 13.299/255, coverage 41.36%. The client animation clock is now fixed at
+  tick 340 (350 for the later sample), not merely frozen at an arbitrary tick.
+  Inspected High capture clearly shows irregular connected crests. The old and
+  new pairs each use matched settings internally; their wave phases differ, so
+  these numbers are acceptance results, not a precise same-phase speedup/ratio.
+
+Full composed-water regression, generated natural-water inspection and lifecycle
+validation remain running; WD3 stays open until those pass.
+
+### Visible-detail closure evidence — 2026-09-09 (`/root`)
+
+The old code reached live water normals, but its weak stripe-like detail and
+direction-independent sky radiance did not establish the requested appearance.
+The final implementation uses true multiscale ridged height derivatives (including
+clump-amplitude derivatives) plus a directional sky fallback. This supersedes WD3's
+earlier sine-band completion claim. Single-direction transport and None–High
+controls remain; Medium is still the default.
+
+- Final `./gradlew build` passes in 10s (`/tmp/water-visible-final-build.log`).
+  Both `shared/water.metal` and `gbuffer.metal` in
+  `build/libs/metalcraft-0.2.0-dev.1.jar` match the tested source byte-for-byte.
+- Full `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`
+  passes in 3m16s (`/tmp/water-visible-client.log`). NORMAL seed 12345, default
+  Metal engine, render/simulation 16/16. Prior water controls, SSR, cave/night,
+  underwater, refraction, foam, camera and resolution checks all pass.
+- Full-run close comparison passes the same stricter replay check: fine-detail
+  RMS 4.761/255, total RMS 13.502/255, coverage 44.95%. Captures are
+  `run/screenshots/0045_metalcraft-water-micro-close-0.png` and
+  `run/screenshots/0049_metalcraft-water-micro-close-3.png`.
+- Generated deep water (no fixture blocks placed there) at player
+  `(-224,63.15,-32)`, yaw180/pitch35, passes with 263,814 changed water samples.
+  Inspected natural None/High and grazing images, retained as
+  `build/water-visible-evidence/natural-none.png`, `natural-high.png`,
+  and `natural-grazing.png`. The finer connected crests remain visible over the
+  ocean and its underwater vegetation, rather than depending on a tiled pool bed.
+- `java tools/diagnostics/WaterDetailVisibility.java
+  build/water-visible-evidence/natural-none.png
+  build/water-visible-evidence/natural-high.png` passes in 0.40s: fine-detail
+  RMS 3.226/255, total RMS 15.559/255, coverage 36.81%.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`
+  passes in 41s (`/tmp/water-visible-lifecycle.log`), covering reload, resize,
+  fullscreen, recovery and shutdown with NORMAL terrain and default Metal at 16/16.
+- `git diff --check` passes; no temporary debug logging remains. The focused
+  `-PmetalWaterDetailProbe=true` scenario and standalone visibility check are
+  retained explicitly as diagnostic/regression tools. Research is documented in
+  [WATER_DETAIL_RESEARCH.md](WATER_DETAIL_RESEARCH.md).
+
+The sky fallback approximates horizon/zenith radiance rather than capturing actual
+clouds. Geometry remains undisplaced. New full-frame performance measurements and
+W8 release qualification remain outside this visibility fix. The user's separate
+instance, if any, was not identified; packaging verification applies to the rebuilt
+workspace JAR and live validation applies to the workspace-launched Metal renderer.

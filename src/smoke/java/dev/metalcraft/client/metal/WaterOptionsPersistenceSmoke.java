@@ -22,6 +22,7 @@ final class WaterOptionsPersistenceSmoke {
 		var settings = root.resolve("settings.json");
 		Map<String, Object> expected = new LinkedHashMap<>();
 		expected.put("water_enabled", false);
+		expected.put("water_detail", 3);
 		expected.put("water_wave_strength", 0.2);
 		expected.put("water_refraction_strength", 0.3);
 		expected.put("water_absorption", 0.4);
