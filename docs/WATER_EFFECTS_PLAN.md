@@ -51,6 +51,8 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | WD | Fine surface ripples and detail slider | W4, W7 | /root | done | 2026-09-09: four filtered detail tiers, persistence, GPU seams/identity and live NORMAL-world 16/16 comparisons pass. Build and lifecycle pass; see WD completion evidence below. |
 | [x] | WD2 | Irregular motion and close-up micro-ripples | WD | /root | done | 2026-09-09: coherent randomized currents, 4/8/12 detail bands, GPU and close-camera NORMAL-world 16/16 checks pass. See WD2 completion evidence. |
 | [x] | WD3 | Clumped geometric patterns with shared travel direction | WD2 | /root | done | 2026-09-09: visibility regression fixed with true noise-height gradients and directional reflections; final-image checks, natural ocean, build, shader-package identity and lifecycle pass. See visible-detail closure evidence. |
+| [x] | WD4 | Crossing wave motion and scattered reflections | WD3 | /root | done | 2026-09-10: independent crossing layers and bounded local sun glints; GPU, full NORMAL-world Metal 16/16 motion/appearance and lifecycle checks pass. See WD4 completion evidence. |
+| [x] | WD5 | Water detail render distance | WD4 | /root | done | 2026-09-10: 2–32 chunk slider/default 16, filtered distant waves, persistence/GPU and natural-ocean distance comparison pass; build and NORMAL/Metal/16/16 lifecycle pass. See WD5 completion evidence. |
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
 
 ## Implementation tasks and acceptance criteria
@@ -2272,3 +2274,114 @@ clouds. Geometry remains undisplaced. New full-frame performance measurements an
 W8 release qualification remain outside this visibility fix. The user's separate
 instance, if any, was not identified; packaging verification applies to the rebuilt
 workspace JAR and live validation applies to the workspace-launched Metal renderer.
+
+### WD4 — Crossing waves and scattered reflections (`/root`, 2026-09-10)
+
+This request supersedes WD3's shared horizontal travel requirement. Preserve the
+ridged clump texture while independent, deterministic wave layers cross and evolve.
+Keep downward waterfall transport, periodic seams/time wrap, filtering and controls.
+Resolve sun reflections into local wave glints with bounded lighting.
+
+- [x] Claim task and inspect motion/reflection implementation.
+- [x] Implement crossing motion and local sun glints.
+- [x] Validate GPU transport diversity, reflection response and existing contracts.
+- [x] Inspect live motion/reflections in NORMAL terrain, default Metal, 16/16; run build and lifecycle.
+
+WD4 partial evidence: `./gradlew build` passes in 11s
+(`/tmp/water-crossing-build.log`). Metal fixtures establish departure from rigid
+horizontal transport for both broad and detailed waves, preserved waterfall
+transport, seams/time wrap, analytic height derivatives, detail filtering and zero
+strength. A slope-aligned sun glint is over ten times the tilted-slope response;
+cave suppression and extreme-roughness finite checks pass. Live NORMAL-world
+regressions and natural-ocean time/glint captures are running.
+
+WD4 live progress: first full NORMAL/Metal 16/16 run passed in 3m24s
+(`/tmp/water-crossing-client.log`). Inspected close High and natural-ocean
+flat/wavy sunset-facing captures: retained clumped ridges and reflection breakup.
+Natural None/High replay passes (fine RMS 4.541/255, coverage 36.53%). The new
+natural-ocean time series initially reused frozen extracted frames; corrected
+the harness to step eight server ticks between samples and assert at least
+1,000 changed water samples. Rerunning that validation before closure.
+
+### WD4 completion evidence — 2026-09-10 (`/root`)
+
+- `shared/water.metal`: independently transported broad waves and 3/5/7 ridged
+  detail bands, with a slowly drifting clump envelope. Crossing directions/speeds
+  preserve integer spatial/time periods. Existing height shapes, amplitudes and
+  detail defaults remain. Waterfalls retain coherent downward transport.
+- Sun lighting now uses a bounded narrow core plus a weaker broad shoulder and
+  half-vector Fresnel, selecting bright individual wave slopes. Environment/SSR
+  continue to use those same detailed normals; cave/night gates remain intact.
+- `./gradlew build` passed in 14s (`/tmp/water-crossing-final-build.log`), with
+  actual Metal GPU fixtures and production forward variants. Final packaged
+  `shared/water.metal` matches source byte-for-byte.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true` passed
+  in 3m25s (`/tmp/water-crossing-final-client.log`), NORMAL seed 12345, default
+  Metal, render/simulation 16/16. Includes close detail/time, underwater, cave,
+  foam/refraction, resolution, SSR, reload/fallback and transparency regressions.
+- Inspected natural-ocean sequence `build/water-crossing-evidence/metalcraft-water-crossing-0.png`
+  through `metalcraft-water-crossing-3.png` (eight server ticks per sample); each
+  adjacent pair exceeds 1,000 changed water samples at summed RGB >8. Crests
+  evolve visibly; independent transport is additionally established by GPU tests.
+- Inspected flat/wavy sunset-facing comparison in the same directory:
+  `metalcraft-water-glints-flat.png` and `metalcraft-water-glints-waves.png`.
+  Reflections break across the local wave surface. GPU isolation verifies
+  >10x aligned/tilted sun-glint contrast and zero cave contribution.
+- Natural None/High replay with `java tools/diagnostics/WaterDetailVisibility.java`
+  and the saved `metalcraft-water-natural-none.png` / `metalcraft-water-natural-high.png`
+  passes: fine-detail RMS 4.673/255, total RMS 17.827/255, coverage 37.12%.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true` passed
+  in 41s (`/tmp/water-crossing-lifecycle.log`), NORMAL/default Metal/16/16,
+  including reload, resize/fullscreen, failure recovery and shutdown.
+- `git diff --check` passes. No new textures, render passes or geometry displacement.
+  W8's full-frame performance/release qualification remains open.
+
+### WD5 — Water detail render distance (`/root`, 2026-09-10)
+
+- [x] Claim task and inspect detail filtering/settings.
+- [x] Add 2–32 chunk slider, default 16, and distant wave detail.
+- [x] Verify persistence, distance/normal/filtering contracts and build.
+- [x] Inspect natural-ocean distance comparisons and run lifecycle on NORMAL/default Metal/16/16.
+
+Retain close ripples and prevent subpixel shimmer using coarser distant wave
+scales. The slider controls shading of already loaded water, not chunk loading.
+
+WD5 partial evidence: build passes in 10s (`/tmp/water-distance-build.log`).
+GPU fixtures verify visible extra detail at 128 blocks for 16 vs 2 chunks, spatial
+and time periodicity, unit normals, zero-strength identity, unresolved-detail
+filtering and exact fade to broad waves at 256 blocks. Fresh runtime persistence
+retains a changed 24-chunk setting and verifies default 16. UI uses chunk counts
+instead of percentage formatting. Full NORMAL/Metal/16/16 client run is pending.
+
+### WD5 completion evidence — 2026-09-10 (`/root`)
+
+- Standard `pack.json` exposes **Water detail render distance**, an integer
+  slider from 2–32 chunks, step 1, default 16. `MetalCraftOptionsScreen` and
+  English translations show chunk units. Settings use existing disk persistence.
+- `gbuffer.metal` supplies camera distance to the water helper. Three larger
+  crossing noise-gradient scales (64/32/16-block noise cells, integer-rotated)
+  preserve middle/distant surface variation while near ripples retain their
+  shape. Detail fades over the last quarter of the selected range and skips
+  evaluation outside it; None/zero waves remain defined. Pixel-footprint
+  filtering remains active, so subpixel detail and fogged horizon cannot
+  retain near-camera sharpness. The setting does not load additional chunks.
+- `./gradlew build` passes in 15s (`/tmp/water-distance-final-build.log`).
+  Added GPU tests cover long/short distance distinction at 128 blocks,
+  spatial/time wrapping, filtering, zero waves and the 256-block cutoff.
+  Persistence tests verify default 16 and restart with 24. Packaged water
+  helper, forward shader and manifest match source byte-for-byte.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true`
+  passes in 3m32s (`/tmp/water-distance-client.log`), NORMAL seed 12345,
+  default Metal, render/simulation 16/16. Existing water/SSR/underwater,
+  close-detail motion and resolution regressions remain green.
+- Inspected matched natural-ocean screenshots
+  `build/water-distance-evidence/metalcraft-water-distance-2.png` and
+  `build/water-distance-evidence/metalcraft-water-distance-16.png`. Longer
+  range visibly retains wave variation in the middle-distance strip; the
+  final-image assertion passes >1,000 changed samples at RGB sum >8 in
+  x=10–90%, y=42–65%. Camera/clock/settings otherwise match.
+- `./gradlew runClient -PmetalLifecycleTest -PmetalShaderLifecycleTest=true`
+  passes in 41s (`/tmp/water-distance-lifecycle.log`), NORMAL/default Metal/16/16,
+  including reload, resize/fullscreen, recovery and shutdown.
+- `git diff --check` passes. No new textures or passes. Full performance
+  qualification remains tracked by W8.

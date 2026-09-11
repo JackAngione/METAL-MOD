@@ -168,6 +168,8 @@ public final class MetalCraftOptionsScreen extends Screen {
 			Object value = runtime.optionValue(option.id());
 			Component label = option.id().equals("water_detail")
 				? Component.translatable("metalcraft.water.detail." + ((Number)value).intValue())
+				: option.id().equals("water_detail_distance")
+				? Component.literal(Integer.toString(((Number)value).intValue()))
 				: value instanceof Number number
 				? Component.literal(Math.round(number.doubleValue() * 100) + "%")
 				: Component.translatable("metalcraft.water.value." + value);

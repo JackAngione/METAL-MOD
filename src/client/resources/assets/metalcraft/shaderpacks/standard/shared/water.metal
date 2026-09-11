@@ -43,11 +43,14 @@ static inline float3 mc_water_tangent_direction(float3 direction, float3 normal,
     return mc_water_safe_normalize(direction - normal * dot(direction, normal), fallback);
 }
 
-// One common transport coordinate for every wave and noise layer. Horizontal water
-// travels along +X/+Z; vertical faces descend. Over 1024 seconds both velocities
-// cover whole 256-block periods, preserving the existing time-wrap contract.
-static inline float3 mc_water_pattern_velocity(float3 normal) {
-    return abs(normal.y) >= 0.5 ? float3(0.5, 0.0, 0.25) : float3(0.0, -0.5, 0.0);
+// Independent crossing packets; each velocity covers whole spatial periods per time loop.
+// Vertical faces retain coherent downward flow instead of cross-surface ocean motion.
+static inline float3 mc_water_pattern_velocity(float3 normal, int band) {
+    const float2 velocities[7] = {float2(0.5,0.25), float2(-0.25,0.5),
+        float2(0.25,-0.5), float2(-0.5,-0.25), float2(0.0,0.25),
+        float2(0.25,0.0), float2(-0.25,0.25)};
+    float2 v = velocities[band % 7];
+    return abs(normal.y) >= 0.5 ? float3(v.x,0,v.y) : float3(0,-0.5,0);
 }
 
 /// Two analytic wave scales. The result is a world-space unit normal on horizontal and vertical faces.
@@ -71,9 +74,10 @@ static inline float3 mc_water_animated_normal(
         ? animationSeconds - floor(animationSeconds / MC_WATER_TIME_PERIOD) * MC_WATER_TIME_PERIOD
         : 0.0;
     float3 position = select(float3(0.0), periodicWorldPosition, isfinite(periodicWorldPosition));
-    position = fract((position - mc_water_pattern_velocity(normal) * boundedTime) / 256.0) * 256.0;
+    float3 positionB = fract((position - mc_water_pattern_velocity(normal, 1) * boundedTime) / 256.0) * 256.0;
+    position = fract((position - mc_water_pattern_velocity(normal, 0) * boundedTime) / 256.0) * 256.0;
     float phaseA = MC_WATER_TAU * dot(position, float3(11.0, 3.0, 7.0)) / MC_WATER_SPATIAL_PERIOD;
-    float phaseB = MC_WATER_TAU * dot(position, float3(-5.0, 13.0, 17.0)) / MC_WATER_SPATIAL_PERIOD;
+    float phaseB = MC_WATER_TAU * dot(positionB, float3(-5.0, 13.0, 17.0)) / MC_WATER_SPATIAL_PERIOD;
     float3 slope = waveA * (0.13 * cos(phaseA)) + waveB * (0.065 * cos(phaseB));
     return mc_water_safe_normalize(normal - slope * boundedStrength, normal);
 }
@@ -134,21 +138,24 @@ static inline float mc_water_geometric_clumps(float2 p) {
 
 // Periodic geometric height plus exact analytic derivatives (value, d/du, d/dv).
 // Four lattice corners form rounded cells; ridging below turns them into irregular crests.
-static inline float3 mc_water_height_noise_gradient(float2 p) {
+static inline float3 mc_water_height_noise_gradient(float2 p, int period = 32) {
     int2 cell = int2(floor(p));
     float2 f = fract(p);
     float2 w = f*f*f*(f*(f*6.0-15.0)+10.0);
     float2 dw = 30.0*f*f*(f-1.0)*(f-1.0);
-    float a = mc_water_detail_hash(int3(cell, 0));
-    float b = mc_water_detail_hash(int3(cell+int2(1,0), 0));
-    float c = mc_water_detail_hash(int3(cell+int2(0,1), 0));
-    float d = mc_water_detail_hash(int3(cell+int2(1,1), 0));
+    float a = mc_water_detail_hash(int3((cell % period + period) % period, 0));
+    float b = mc_water_detail_hash(int3(((cell+int2(1,0)) % period + period) % period, 0));
+    float c = mc_water_detail_hash(int3(((cell+int2(0,1)) % period + period) % period, 0));
+    float d = mc_water_detail_hash(int3(((cell+int2(1,1)) % period + period) % period, 0));
     return float3(mix(mix(a,b,w.x), mix(c,d,w.x), w.y),
         dw.x * mix(b-a,d-c,w.y), dw.y * mix(c-a,d-b,w.x));
 }
 
-static inline float3 mc_water_detail_height_gradient(float2 surface, float footprint, int quality) {
-    float3 clump = mc_water_geometric_clumps_gradient(surface * 0.25);
+static inline float3 mc_water_detail_height_gradient(
+    float2 surface, float footprint, int quality, float time = 0.0, bool horizontal = true
+) {
+    float2 clumpVelocity = horizontal ? float2(0.25,0.0) : float2(0,-0.5);
+    float3 clump = mc_water_geometric_clumps_gradient((surface - clumpVelocity * time) * 0.25);
     float envelope = 0.5 + clump.x;
     float2 envelopeGradient = clump.yz * 0.25;
     const float slopes[7] = {0.32, 0.26, 0.19, 0.14, 0.10, 0.075, 0.05};
@@ -159,7 +166,9 @@ static inline float3 mc_water_detail_height_gradient(float2 surface, float footp
         // Integer rotations preserve the 256-block repeat while hiding grid alignment.
         float2 axisU = band % 2 == 0 ? float2(1,2) : float2(2,-1);
         float2 axisV = float2(-axisU.y,axisU.x);
-        float2 uv = float2(dot(surface,axisU),dot(surface,axisV)) * frequency;
+        float3 velocity = mc_water_pattern_velocity(horizontal ? float3(0,1,0) : float3(1,0,0), band);
+        float2 packet = surface - (horizontal ? velocity.xz : velocity.zy) * time;
+        float2 uv = float2(dot(packet,axisU),dot(packet,axisV)) * frequency;
         float3 noise = mc_water_height_noise_gradient(uv + float2(7,13)*float(band));
         float centered = 2.0*noise.x-1.0;
         float rounded = sqrt(centered*centered+0.04);
@@ -175,11 +184,31 @@ static inline float3 mc_water_detail_height_gradient(float2 surface, float footp
     return result;
 }
 
+// Coarser world-anchored waves replace unresolved close detail at distance.
+// Four-cell noise at 1/64 frequency retains the existing 256-block spatial repeat.
+static inline float2 mc_water_distant_slope(float2 surface, float time, float footprint) {
+    float2 slope = float2(0);
+    float frequency = 1.0 / 64.0;
+    for (int band = 0; band < 3; ++band) {
+        float2 axisU = band % 2 == 0 ? float2(1,2) : float2(2,-1);
+        float2 axisV = float2(-axisU.y,axisU.x);
+        float2 packet = surface - mc_water_pattern_velocity(float3(0,1,0),band).xz * time;
+        float2 uv = float2(dot(packet,axisU),dot(packet,axisV)) * frequency;
+        float3 noise = mc_water_height_noise_gradient(uv + float2(7,13)*float(band),4);
+        float centered = 2.0*noise.x-1.0;
+        float2 gradient = (-2.0*centered/sqrt(centered*centered+0.04)) * noise.yz;
+        float weight = 1.0-smoothstep(0.15,0.45,footprint*frequency*2.236068);
+        slope += (axisU*gradient.x + axisV*gradient.y) * (0.16*weight/2.236068);
+        frequency *= 2.0;
+    }
+    return slope;
+}
+
 // Tiered multiscale height gradients replace the old phase-modulated sine bands.
-// Higher tiers add shorter irregular crests, sharing the same advection coordinate.
+// Higher tiers add shorter irregular crests with independent crossing transport.
 static inline float3 mc_water_detailed_normal(
     float3 baseNormal, float3 flow, float3 position, float seconds, float strength,
-    int quality, float3 pixelDx, float3 pixelDy
+    int quality, float3 pixelDx, float3 pixelDy, float cameraDistance = 0.0, float detailChunks = 16.0
 ) {
     float3 broad = mc_water_animated_normal(baseNormal, flow, position, seconds, strength);
     if (quality <= 0 || !isfinite(strength) || strength <= 0.0) return broad;
@@ -189,11 +218,18 @@ static inline float3 mc_water_detailed_normal(
     position = select(float3(0), position, isfinite(position));
     position = fract(position / 256.0) * 256.0;
     float time = isfinite(seconds) ? seconds - floor(seconds / 1024.0) * 1024.0 : 0.0;
-    position = fract((position - mc_water_pattern_velocity(normal) * time) / 256.0) * 256.0;
     float2 surface = abs(normal.y) >= 0.5 ? position.xz
         : (abs(normal.x) > abs(normal.z) ? position.zy : position.xy);
     float footprint = max(length(pixelDx), length(pixelDy));
-    float3 height = mc_water_detail_height_gradient(surface, footprint, quality);
+    float range = clamp(detailChunks,2.0,32.0) * 16.0;
+    float detailWeight = 1.0-smoothstep(range*0.75,range,max(0.0,cameraDistance));
+    if (detailWeight <= 0.0) return broad;
+    float3 height = mc_water_detail_height_gradient(surface, footprint, quality, time, abs(normal.y) >= 0.5);
+    if (abs(normal.y) >= 0.5 && cameraDistance > 16.0 && detailWeight > 0.0) {
+        height.yz += mc_water_distant_slope(surface,time,footprint)
+            * smoothstep(16.0,64.0,cameraDistance);
+    }
+    height *= detailWeight;
     float3 slope = abs(normal.y) >= 0.5 ? float3(height.y,0,height.z)
         : (abs(normal.x) > abs(normal.z) ? float3(0,height.z,height.y) : float3(height.y,height.z,0));
     slope -= normal * dot(slope,normal);
@@ -255,11 +291,15 @@ static inline float3 mc_water_reflection(
     float3 sun = sunRaw * rsqrt(sunMagnitudeSquared);
     float nDotL = saturate(dot(normal, sun));
     float3 halfVector = mc_water_safe_normalize(sun + view, normal);
-    float exponent = mix(128.0, 8.0, boundedRoughness);
-    // This normalized-looking highlight is intentionally clamped: a point-sun GGX peak would be
-    // singular at zero roughness without a finite solar disc representation.
-    float lobe = min(pow(saturate(dot(normal, halfVector)), exponent) * nDotL, 1.0);
-    return reflected + float3(sunEnergy * visibility * fresnel * lobe);
+    // A narrow core picks out individual crests; a weaker shoulder scatters glints.
+    float exponent = mix(1024.0, 16.0, boundedRoughness * boundedRoughness);
+    // Both lobes have bounded peaks, including zero roughness. The finite shoulder
+    // keeps some scattered light between the brighter, slope-selected glints.
+    float nDotH = saturate(dot(normal, halfVector));
+    float lobe = (0.85 * pow(nDotH, exponent)
+        + 0.15 * pow(nDotH, max(8.0, exponent * 0.125))) * nDotL;
+    float sunFresnel = mc_water_fresnel(dot(view, halfVector), boundedRoughness);
+    return reflected + float3(sunEnergy * visibility * sunFresnel * lobe * 4.0);
 }
 
 /// Composes a screen-space hit as a replacement for the environment radiance. A miss takes the

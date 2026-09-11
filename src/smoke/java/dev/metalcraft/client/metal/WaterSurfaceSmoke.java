@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 /** GPU checks for the production animated-water and reflection helpers. */
 final class WaterSurfaceSmoke {
-	private static final int RESULT_COUNT = 71;
+	private static final int RESULT_COUNT = 81;
 	private static final int FLOAT4_BYTES = 4 * Float.BYTES;
 	private static final float EPSILON = 2.0e-5F;
 
@@ -137,6 +137,18 @@ final class WaterSurfaceSmoke {
 			    out[70] = float4(out[69].x,
 			        (mc_water_detail_height_gradient(gp+float2(e,0),0.0002,2).x-mc_water_detail_height_gradient(gp-float2(e,0),0.0002,2).x)/(2*e),
 			        (mc_water_detail_height_gradient(gp+float2(0,e),0.0002,2).x-mc_water_detail_height_gradient(gp-float2(0,e),0.0002,2).x)/(2*e),0);
+			    float3 glintView = normalize(float3(0,0.3,1));
+			    float4 glintSun = float4(normalize(float3(0,0.3,-1)),4);
+			    out[71] = float4(mc_water_reflection(float3(0),float3(0,1,0),glintView,0.08,1,glintSun,float4(0)),0);
+			    out[72] = float4(mc_water_reflection(float3(0),normalize(float3(0.2,1,0)),glintView,0.08,1,glintSun,float4(0)),0);
+			    out[73] = float4(mc_water_reflection(float3(0),float3(0,1,0),glintView,0.08,0,glintSun,float4(0)),0);
+			    out[74] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,17.25,1,3,float3(1,0,0),float3(0,0,1),128,16),0);
+			    out[75] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,17.25,1,3,float3(1,0,0),float3(0,0,1),128,2),0);
+			    out[76] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position+float3(256,0,256),17.25,1,3,float3(1,0,0),float3(0,0,1),128,16),0);
+			    out[77] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,1041.25,1,3,float3(1,0,0),float3(0,0,1),128,16),0);
+			    out[78] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,17.25,1,3,float3(100,0,0),float3(0,0,100),128,16),0);
+			    out[79] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,17.25,0,3,float3(1,0,0),float3(0,0,1),128,16),0);
+			    out[80] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,17.25,1,3,float3(1,0,0),float3(0,0,1),256,16),0);
 			}
 			""";
 
@@ -209,10 +221,22 @@ final class WaterSurfaceSmoke {
 				assertUnitFinite(bytes, 53, "waterfall detail normal");
 				assertUnitFinite(bytes, 58, "low detail normal");
 				assertUnitFinite(bytes, 59, "medium detail normal");
-				assertEqual(bytes, 48, 61, EPSILON, "common-direction detailed transport");
+				assertDifferent(bytes, 48, 61, 0.02F, "detail must evolve beyond rigid translation");
 				assertEqual(bytes, 53, 62, EPSILON, "downward waterfall transport");
-				assertEqual(bytes, 47, 63, EPSILON, "broad waves share detail transport");
-				assertVector(bytes, 64, new float[]{0}, EPSILON, "all tiers follow one transport velocity");
+				assertDifferent(bytes, 47, 63, 0.005F, "broad waves must cross");
+				if (get(bytes, 64, 0) < 0.02F) throw new AssertionError("Wave layers still translate rigidly");
+				assertUnitFinite(bytes, 74, "distant normal");
+				assertDifferent(bytes, 74, 75, 0.02F, "16 chunks retain detail beyond short range");
+				assertEqual(bytes, 74, 76, 0.0002F, "distant spatial seam");
+				assertEqual(bytes, 74, 77, EPSILON, "distant time wrap");
+				assertEqual(bytes, 47, 78, EPSILON, "unresolved distant detail filters out");
+				assertVector(bytes, 79, new float[]{0,1,0}, EPSILON, "zero strength disables distant waves");
+				assertEqual(bytes, 47, 80, EPSILON, "detail fades at selected chunk range");
+				assertFinite(bytes, 71, "bounded crest glint");
+				if (get(bytes, 71, 0) < 0.1F || get(bytes, 72, 0) > get(bytes, 71, 0) * 0.1F) {
+					throw new AssertionError("Sun reflection does not resolve individual wave slopes");
+				}
+				assertVector(bytes, 73, new float[]{0,0,0}, EPSILON, "cave suppresses glints");
 				assertEqual(bytes, 67, 68, 0.002F, "noise analytic gradient matches height differences");
 				assertEqual(bytes, 69, 70, 0.02F, "full height gradient includes clump envelope derivatives");
 				if (Math.abs(get(bytes, 65, 2) - get(bytes, 66, 2)) < 0.003F) {
@@ -237,6 +261,12 @@ final class WaterSurfaceSmoke {
 		}
 		System.out.println("Water surface GPU: normals/reflections, bounded refraction/absorption, and "
 			+ "animated contact-foam identity/rejection fixtures passed");
+	}
+
+	private static void assertDifferent(ByteBuffer bytes, int first, int second, float minimum, String label) {
+		float distance = 0;
+		for (int c = 0; c < 3; c++) distance += Math.pow(get(bytes, first, c) - get(bytes, second, c), 2);
+		if (!Float.isFinite(distance) || Math.sqrt(distance) < minimum) throw new AssertionError(label);
 	}
 
 	private static void assertUnitInterval(final ByteBuffer bytes, final int result,

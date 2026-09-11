@@ -354,7 +354,8 @@ fragment GBufferTargets gbuffer_terrain_fragment(
         float3 normalWorld = mc_water_detailed_normal(
             in.waterNormalWorld, in.waterFlow, in.waterPeriodicWorldPosition,
             waterFrame.animationSeconds, MC_OPTION_WATER_WAVE_STRENGTH,
-            MC_OPTION_WATER_DETAIL, waterPixelDx, waterPixelDy
+            MC_OPTION_WATER_DETAIL, waterPixelDx, waterPixelDy,
+            length(in.worldPos), MC_OPTION_WATER_DETAIL_DISTANCE
         );
         if (waterDraw.debugMode == 5u) {
             return float4(normalWorld * 0.5 + 0.5, 1.0);

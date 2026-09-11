@@ -81,7 +81,7 @@ final class MetalWaterIdentityGameTest {
 			this.context.runOnClient(client -> {
 				ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);
 				for (String id : new String[]{
-					"exposure", "tonemap", "invert", "debug_view", "water_detail",
+					"exposure", "tonemap", "invert", "debug_view", "water_detail", "water_detail_distance",
 					"water_enabled", "water_wave_strength", "water_refraction_strength",
 					"water_absorption", "water_foam", "water_underwater_distortion",
 					"water_reflection_quality"
@@ -421,10 +421,42 @@ final class MetalWaterIdentityGameTest {
 		System.out.println("Natural water detail: camera=" + java.util.Arrays.toString(selected) + " changed=" + changes);
 		this.context.getInput().lookAt(180,8);
 		this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-natural-grazing",false);
+		this.setWaterOption("water_detail_distance",2);
+		Path shortRange = this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-distance-2",false);
+		this.setWaterOption("water_detail_distance",16);
+		Path longRange = this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-distance-16",false);
+		if (differentSamples(shortRange,longRange,0.1,0.9,0.42,0.65,8) < 1000) {
+			throw new AssertionError("16-chunk water detail did not extend visible distant waves");
+		}
+
+		// Time samples preserve the same natural-water camera and settings.
+		Path previousMotion = null;
+		for (int sample = 0; sample < 4; sample++) {
+			if (sample > 0) {
+				world.getServer().runCommand("tick step 8");
+				this.context.waitTicks(12);
+			}
+			final long animationTick = 340L + sample * 8L;
+			this.context.runOnClient(client -> client.level.setTimeFromServer(animationTick));
+			Path motion = this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-crossing-" + sample,false);
+			if (previousMotion != null && differentSamples(previousMotion,motion,0.1,0.9,0.5,0.95,8) < 1000) {
+				throw new AssertionError("Natural ocean motion samples did not advance");
+			}
+			previousMotion = motion;
+		}
+		world.getServer().runCommand("time set 11000");
+		this.context.getInput().lookAt(90,8);
+		this.context.waitTicks(10);
+		this.setWaterOption("water_wave_strength",0.0F);
+		this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-glints-flat",false);
+		this.setWaterOption("water_wave_strength",1.0F);
+		this.capture(WaterRoutingDebug.Mode.OFF,"metalcraft-water-glints-waves",false);
+
 		world.getServer().runCommand("tick unfreeze");
 	}
 
 	private void setWaterDefaults(final String reflectionQuality) {
+		this.setWaterOption("water_detail_distance", 16);
 		this.setWaterOption("water_detail", 2);
 		this.setWaterOption("water_enabled", true);
 		for (String id : new String[]{"water_wave_strength", "water_refraction_strength",

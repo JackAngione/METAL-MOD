@@ -23,6 +23,7 @@ final class WaterOptionsPersistenceSmoke {
 		Map<String, Object> expected = new LinkedHashMap<>();
 		expected.put("water_enabled", false);
 		expected.put("water_detail", 3);
+		expected.put("water_detail_distance", 24);
 		expected.put("water_wave_strength", 0.2);
 		expected.put("water_refraction_strength", 0.3);
 		expected.put("water_absorption", 0.4);
@@ -32,6 +33,9 @@ final class WaterOptionsPersistenceSmoke {
 		try (var device = MetalNative.openDefaultDevice().orElseThrow()) {
 			try (var runtime = new ShaderPackRuntime(device, root.resolve("packs"), settings)) {
 				runtime.selectPack(ShaderPackRuntime.BUILTIN_ID);
+				if (((Number)runtime.optionValue("water_detail_distance")).intValue() != 16) {
+					throw new AssertionError("Water detail distance must default to 16 chunks");
+				}
 				expected.forEach(runtime::setOption);
 			}
 			try (var restarted = new ShaderPackRuntime(device, root.resolve("packs"), settings)) {
