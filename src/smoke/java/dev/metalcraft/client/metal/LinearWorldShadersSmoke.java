@@ -67,7 +67,7 @@ final class LinearWorldShadersSmoke {
 		}
 	}
 
-	private static String expanded(Identifier id, ShaderType type) {
+	static String expanded(Identifier id, ShaderType type) {
 		String path = "assets/" + id.getNamespace() + "/shaders/" + id.getPath() + (type == ShaderType.VERTEX ? ".vsh" : ".fsh");
 		Set<String> imported = new HashSet<>();
 		var preprocessor = new GlslPreprocessor() {

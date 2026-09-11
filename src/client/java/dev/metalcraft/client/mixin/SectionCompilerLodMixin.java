@@ -20,7 +20,7 @@ abstract class SectionCompilerLodMixin {
     private SectionCompiler.Results metalcraft$captureLod(SectionPos section, RenderSectionRegion region,
             VertexSorting sorting, SectionBufferBuilderPack builders, Operation<SectionCompiler.Results> original) {
         SectionCompiler.Results results = original.call(section, region, sorting, builders);
-        if (LodCompilerCapture.ENABLED) {
+        if (LodCompilerCapture.capturing()) {
             try {
                 var candidate = LodCompilerCapture.capture(section.asLong(), results.renderedLayers.get(ChunkSectionLayer.SOLID),
                         results.renderedLayers.keySet().stream().allMatch(layer -> layer == ChunkSectionLayer.SOLID),

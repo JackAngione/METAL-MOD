@@ -24,6 +24,6 @@ abstract class LevelExtractorLodMixin {
 
     @Inject(method = "setSectionDirty(IIIZ)V", at = @At("HEAD"))
     private void metalcraft$dirtyLod(int x, int y, int z, boolean playerChanged, CallbackInfo ci) {
-        if (LodCompilerCapture.ENABLED) LodCompilerCapture.REVISIONS.dirty(x, y, z);
+        if (LodCompilerCapture.capturing()) LodCompilerCapture.REVISIONS.dirty(x, y, z);
     }
 }

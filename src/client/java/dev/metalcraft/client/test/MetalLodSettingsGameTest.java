@@ -47,11 +47,12 @@ final class MetalLodSettingsGameTest {
             context.takeScreenshot("metalcraft-lod-settings-small");
             context.runOnClient(c -> {
                 var screen = c.gui.screen();
-                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 4,
+                boolean available = dev.metalcraft.client.lod.LodCapabilities.current(true).geometry();
+                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == (available ? 7 : 4),
                         "resize does not duplicate option widgets");
                 boolean disabled = widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).map(e -> (CycleButton<?>)e)
                         .anyMatch(b -> !b.active && b.getMessage().getString().contains("Enable terrain LOD"));
-                check(disabled, "unavailable rendering control disabled");
+                check(disabled != available, "rendering control matches current capability");
             });
             focusButton(context, "Reset to Defaults");
             context.takeScreenshot("metalcraft-lod-settings-keyboard-reset");

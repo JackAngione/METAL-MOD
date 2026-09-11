@@ -7,6 +7,9 @@ import com.mojang.blaze3d.PrimitiveTopology;
 import dev.metalcraft.client.metal.MetalGpuDevice;
 import dev.metalcraft.client.metal.MetalRenderPass;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
+import dev.metalcraft.client.lod.LodLoadedRenderer;
+import dev.metalcraft.client.lod.LodWorldMesh;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -79,6 +82,7 @@ public final class WorldTerrainShadows implements AutoCloseable {
 			return;
 		}
 		List<TerrainShadowRenderer.Draw> draws = new ArrayList<>();
+		List<LodWorldMesh> lodDraws = new ArrayList<>();
 		List<SectionRenderDispatcher.RenderSection> casters = new ArrayList<>();
 		var sequential = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
 		// Keep the uber-buffer slices stable through encoding, as vanilla does while preparing draws.
@@ -110,17 +114,21 @@ public final class WorldTerrainShadows implements AutoCloseable {
 					if (slice == null || draw.hasCustomIndexBuffer() && slice.indexBuffer() == null) continue;
 					var indices = draw.hasCustomIndexBuffer() ? slice.indexBuffer() : sharedIndices;
 					IndexType type = draw.hasCustomIndexBuffer() ? draw.indexType() : sequential.type();
-					draws.add(new TerrainShadowRenderer.Draw(layer, this.device.nativeBuffer(slice.vertexBuffer()),
-						slice.vertexBufferOffset(), this.device.nativeBuffer(indices),
+					LodWorldMesh lod = layer == ChunkSectionLayer.SOLID && !draw.hasCustomIndexBuffer()
+						? LodLoadedRenderer.borrowShadow(this.device, section, mesh) : null;
+					if (lod != null) lodDraws.add(lod);
+					draws.add(new TerrainShadowRenderer.Draw(layer, lod != null ? lod.vertices() : this.device.nativeBuffer(slice.vertexBuffer()),
+						lod != null ? 0 : slice.vertexBufferOffset(), this.device.nativeBuffer(indices),
 						draw.hasCustomIndexBuffer() ? slice.indexBufferOffset() : 0,
 						type == IndexType.SHORT ? MetalRenderPass.IndexType.UINT16 : MetalRenderPass.IndexType.UINT32,
-						draw.indexCount(), (float)(origin.getX() - camera.pos.x),
+						lod != null ? lod.indexCount() : draw.indexCount(), (float)(origin.getX() - camera.pos.x),
 						(float)(origin.getY() - camera.pos.y), (float)(origin.getZ() - camera.pos.z)));
 				}
 			}
 			var atlas = Minecraft.getInstance().getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
 			this.device.encodeNativePass(this.resources.depthPass(), "MetalCraft shader: shadow_terrain", pass ->
 				this.renderer.encode(pass, this.frame, draws, this.device.nativeTextureView(atlas), this.device.nativeSampler(sampler)));
+			for (var lod : lodDraws) LodLoadedRenderer.encodedShadow(this.device, lod);
 			this.lastDrawCount = draws.size();
 			this.renderedFrames++;
 		} finally {

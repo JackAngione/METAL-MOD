@@ -45,4 +45,19 @@ public record LodSettings(boolean enabled, Preset preset, int fullDetailChunks, 
         return new LodSettings(value, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
                 smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics);
     }
+
+    public LodSettings withRuntimeLimits(boolean smoothing, int memoryMiB, Work work) {
+        return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
+                smoothing, memoryMiB, work, diskCache, diskBudgetMiB, diagnostics);
+    }
+
+    /** Keep headroom for the rest of the renderer; retirement remains charged under pressure. */
+    public long meshBudgetBytes(long workingSet, long allocatedBytes, long currentLodBytes) {
+        long requested = meshBudgetMiB == 0
+                ? Math.clamp(workingSet / 32, 128L << 20, 512L << 20) : (long)meshBudgetMiB << 20;
+        if (workingSet <= 0) return requested;
+        long otherRendererBytes = Math.max(0, allocatedBytes - currentLodBytes);
+        long headroom = Math.max(1, workingSet - workingSet / 5 - otherRendererBytes);
+        return Math.min(requested, headroom);
+    }
 }

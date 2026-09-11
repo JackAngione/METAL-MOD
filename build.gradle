@@ -97,13 +97,24 @@ tasks.named('check') {
 	dependsOn tasks.named('lodMetalSmoke')
 }
 
+// Isolated P6 cost experiment; timings are evidence, never a machine-dependent build gate.
+tasks.register('lodShadingBenchmark', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.shader.LodShadingBenchmark'
+}
+
 // Benchmark knobs, forwarded from -P<gradle property> to -D<system property>.
 def benchmarkProperties = [
 	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
 	metalWaterDetailProbe: 'metalcraft.waterDetailProbe',
+	metalWaterW5Probe: 'metalcraft.waterW5Probe',
 	metalBenchmarkSeed: 'metalcraft.benchmarkSeed',
 	metalBenchmarkPitch: 'metalcraft.benchmarkPitch',
 	metalBenchmarkPack: 'metalcraft.benchmarkPack',
+	metalBenchmarkLod: 'metalcraft.benchmarkLod',
+	metalTestLod: 'metalcraft.testLod',
 	metalBenchmarkUnlocked: 'metalcraft.benchmarkUnlocked',
 	metalBenchmarkHalfResolution: 'metalcraft.benchmarkHalfResolution',
 	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
@@ -123,6 +134,8 @@ def benchmarkProperties = [
 ]
 
 tasks.named('runClient') {
+	def experimentalLod = providers.gradleProperty('metalLodExperimental')
+	if (experimentalLod.isPresent()) systemProperty 'metalcraft.lodExperimental', experimentalLod.get()
 	// Lets a benchmark vary the JVM it measures. Heap pressure shows up in the frame-time tail as
 	// collection pauses, so a run that cannot state its heap size cannot be compared with another.
 	def extraJvmArgs = providers.gradleProperty('metalJvmArgs')
@@ -136,6 +149,7 @@ tasks.named('runClient') {
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
 		systemProperty 'metalcraft.lodSettingsTest', providers.gradleProperty('metalLodSettingsTest').getOrElse('false')
 		systemProperty 'metalcraft.lodCompilerTest', providers.gradleProperty('metalLodCompilerTest').getOrElse('false')
+		systemProperty 'metalcraft.lodRenderTest', providers.gradleProperty('metalLodRenderTest').getOrElse('false')
 		systemProperty 'metalcraft.lodExpectedRadius', providers.gradleProperty('metalLodExpectedRadius').getOrElse('-1')
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')

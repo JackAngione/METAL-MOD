@@ -58,5 +58,18 @@
   "metalcraft.lod.chunks": "%s chunks",
   "metalcraft.lod.pixels": "%s px",
   "metalcraft.lod.pending_stages": "Distant shading, extended terrain, cache and diagnostics controls become available after their rendering stages pass validation. Minecraft render and simulation distances are unchanged.",
-  "metalcraft.lod.reset": "Reset to Defaults"
+  "metalcraft.lod.reset": "Reset to Defaults",
+  "metalcraft.lod.experimental_geometry": "Experimental loaded-terrain LOD. Performance targets are still under validation.",
+  "metalcraft.lod.unsupported_pack": "Terrain LOD currently supports the Standard pack and no shader pack.",
+  "metalcraft.lod.smoothing": "Transition smoothing",
+  "metalcraft.lod.smoothing.tooltip": "Limits coarsening to one tier per frame. Nearby detail and shared boundaries remain protected.",
+  "metalcraft.lod.memory": "Mesh memory budget",
+  "metalcraft.lod.memory.tooltip": "Limits LOD GPU allocations, including resources still in flight. Keeps headroom for the rest of the renderer.",
+  "metalcraft.lod.memory_mib": "%s MiB",
+  "metalcraft.lod.automatic": "Auto",
+  "metalcraft.lod.work": "Background work",
+  "metalcraft.lod.work.low": "Low",
+  "metalcraft.lod.work.balanced": "Balanced",
+  "metalcraft.lod.work.high": "High",
+  "metalcraft.lod.work.tooltip": "Bounds concurrent LOD builds and upload bytes per frame. Higher settings prepare detail sooner but add work."
 }

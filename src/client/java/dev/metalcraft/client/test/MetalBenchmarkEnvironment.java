@@ -4,6 +4,10 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
+import dev.metalcraft.client.lod.LodCapabilities;
+import dev.metalcraft.client.lod.LodCompilerCapture;
+import dev.metalcraft.client.lod.LodLoadedRenderer;
+import dev.metalcraft.client.lod.LodSettings;
 import dev.metalcraft.client.metal.MetalGpuDevice;
 import dev.metalcraft.client.mixin.GpuDeviceAccessor;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
@@ -15,6 +19,7 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
     private final ClientGameTestContext context;
     private final boolean half = MetalCraftConfig.halfResolution();
     private final boolean unlocked = MetalCraftConfig.unlockedFrameRate();
+    private final LodSettings lod = MetalCraftConfig.lod();
     private final String pack;
 
     MetalBenchmarkEnvironment(ClientGameTestContext context) {
@@ -25,12 +30,15 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         }
         boolean requestedHalf = booleanProperty("metalcraft.benchmarkHalfResolution", half);
         boolean requestedUnlocked = booleanProperty("metalcraft.benchmarkUnlocked", unlocked);
+        boolean requestedLod = booleanProperty("metalcraft.benchmarkLod", false);
+        if (requestedLod && !LodCapabilities.EXPERIMENTAL) throw new IllegalArgumentException("LOD benchmark requires -PmetalLodExperimental=true");
         pack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
         try {
             context.runOnClient(c -> {
                 if (requestedPack != null) ShaderPackRuntime.active().selectPack(requestedPack.equals("none") ? ShaderPackRuntime.NONE_ID : ShaderPackRuntime.BUILTIN_ID);
                 MetalCraftConfig.setHalfResolution(requestedHalf);
                 MetalCraftConfig.setUnlockedFrameRate(requestedUnlocked);
+                MetalCraftConfig.setLod(LodSettings.defaults().withEnabled(requestedLod));
                 c.invalidateSurfaceConfiguration();
             });
         } catch (RuntimeException | Error failure) {
@@ -52,6 +60,8 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         Runtime runtime = Runtime.getRuntime();
         value.addProperty("heapUsedBytes", runtime.totalMemory() - runtime.freeMemory());
         value.addProperty("heapCommittedBytes", runtime.totalMemory());
+        value.add("lodRenderer", new Gson().toJsonTree(LodLoadedRenderer.stats()));
+        value.add("lodCapture", new Gson().toJsonTree(LodCompilerCapture.stats()));
         var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).metalcraft$backend();
         if (backend instanceof MetalGpuDevice metal) {
             value.addProperty("metalAllocatedBytes", metal.metal().currentAllocatedBytes());
@@ -75,7 +85,8 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         value.addProperty("passMerging", Boolean.parseBoolean(System.getProperty("metalcraft.passMerging", "true")));
         value.addProperty("commandBatching", Boolean.parseBoolean(System.getProperty("metalcraft.commandBatching", "true")));
         value.add("lodRequested", new Gson().toJsonTree(MetalCraftConfig.lod()));
-        value.addProperty("lodGeometryAvailable", false);
+        value.addProperty("lodGeometryAvailable", LodCapabilities.EXPERIMENTAL);
+        value.addProperty("lodCounterMeaning", "Cumulative encoded main-world terrain, distant subset, replacements and shadows are separate; subtract phase endpoints. Memory samples are not peaks.");
         value.addProperty("memorySampling", "Point-in-time after each phase; not a peak or resident-set measurement");
         return value;
     }
@@ -95,6 +106,7 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         context.runOnClient(c -> {
             MetalCraftConfig.setHalfResolution(half);
             MetalCraftConfig.setUnlockedFrameRate(unlocked);
+            MetalCraftConfig.setLod(lod);
             if (!pack.equals(ShaderPackRuntime.active().selectedPackId())) ShaderPackRuntime.active().selectPack(pack);
             c.invalidateSurfaceConfiguration();
         });

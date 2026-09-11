@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 abstract class SectionUpdateRenderStateLodMixin {
     @Inject(method = "<init>", at = @At("RETURN"))
     private void metalcraft$stampLod(long section, boolean playerChanged, RenderSectionRegion region, CallbackInfo ci) {
-        if (LodCompilerCapture.ENABLED && region != null) {
+        if (LodCompilerCapture.capturing() && region != null) {
             ((LodRegionSource)region).metalcraft$lodTicket(LodCompilerCapture.REVISIONS.capture(
                     SectionPos.x(section), SectionPos.y(section), SectionPos.z(section)));
         }

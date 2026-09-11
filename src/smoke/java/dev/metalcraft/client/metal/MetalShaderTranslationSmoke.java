@@ -598,6 +598,10 @@ public final class MetalShaderTranslationSmoke {
 		try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
 				 BATCH_VERTEX_GLSL, "smoke/batch.vert", BATCH_FRAGMENT_GLSL, "smoke/batch.frag",
 				 MetalTexture.Format.RGBA8_UNORM, null));
+			 MetalRenderPipeline bluePipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
+				 BATCH_VERTEX_GLSL, "smoke/batch.vert", BATCH_FRAGMENT_GLSL.replace(
+				 "Tint * texture(BatchTexture, vec2(0.5))", "vec4(0.0, 0.0, 1.0, 1.0)"), "smoke/blue.frag",
+				 MetalTexture.Format.RGBA8_UNORM, null));
 			 MetalCommandQueue queue = device.createCommandQueue();
 			 MetalTexture color = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 8, 8, 1));
 			 MetalTexture source = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 2, 2, 1));
@@ -645,6 +649,34 @@ public final class MetalShaderTranslationSmoke {
 					if (red < 200 || green > 20 || blue > 20) {
 						throw new AssertionError("Metal command batch (checked=" + checked + ") did not bind its uniform, texture, and sampler: rgb="
 							+ red + "," + green + "," + blue);
+					}
+					// Alternating programs inside one submission must retain both draw order and
+					// resource bindings. Both orders catch an omitted or prematurely applied switch.
+					for (boolean blueLast : new boolean[]{false,true}) {
+						batch.reset();
+						try (MetalCommandBuffer commands = queue.createCommandBuffer();
+							 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+								 MetalRenderPass.ColorAttachment.clear(color, 0, 1, 0, 1)))) {
+							pass.setPipeline(pipeline);
+							batch.setUniformBuffer(0,tint,0,MetalRenderPass.STAGE_FRAGMENT);
+							batch.setTexture(1,sourceView,MetalRenderPass.STAGE_FRAGMENT);
+							batch.setSampler(1,sampler,MetalRenderPass.STAGE_FRAGMENT);
+							pass.recordPipeline(batch,blueLast?pipeline:bluePipeline);
+							batch.drawIndexed(MetalRenderPass.Primitive.TRIANGLE,indices,0,MetalRenderPass.IndexType.UINT16,3,1,0,0);
+							pass.recordPipeline(batch,blueLast?bluePipeline:pipeline);
+							batch.drawIndexed(MetalRenderPass.Primitive.TRIANGLE,indices,0,MetalRenderPass.IndexType.UINT16,3,1,0,0);
+							pass.submit(batch);
+							pass.close();
+							// Last case: Java release before completion must keep the batched
+							// pipeline alive through the command buffer's native resource pins.
+							if (checked && blueLast) bluePipeline.close();
+							commands.commitAndWait();
+						}
+						pixels = color.readback(queue,0);
+						red = Byte.toUnsignedInt(pixels.get((4*8+4)*4));
+						blue = Byte.toUnsignedInt(pixels.get((4*8+4)*4+2));
+						if (blueLast ? blue<200||red>20 : red<200||blue>20)
+							throw new AssertionError("Batched pipeline ordering changed: checked="+checked+" blueLast="+blueLast);
 					}
 				}
 			} finally {

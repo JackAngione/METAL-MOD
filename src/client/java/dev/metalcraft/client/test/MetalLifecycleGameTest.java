@@ -70,6 +70,12 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 
 	@Override
 	public void runTest(final ClientGameTestContext context) {
+		try (var lod = new MetalLodTestScope(context)) {
+			this.runConfiguredTest(context);
+		}
+	}
+
+	private void runConfiguredTest(final ClientGameTestContext context) {
 		context.runOnClient(client -> {
 			client.options.renderDistance().set(16);
 			client.options.simulationDistance().set(16);
@@ -81,6 +87,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			throw new AssertionError("Lifecycle test selected unexpected backend: " + backend + " (expected " + expectedBackend + ")");
 		}
 		LOGGER.info("Metal lifecycle validation: {} backend selected", backend);
+		if (Boolean.getBoolean("metalcraft.lodRenderTest")) {
+			MetalLodRenderGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.lodCompilerTest")) {
 			MetalLodCompilerGameTest.run(context);
 			return;
@@ -300,6 +310,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		/** The presented drawable size, recorded so the report states it rather than the request. */
 		private int drawableWidth;
 		private int drawableHeight;
+		private boolean chunkLoadAndRenderSettlePassed;
 
 		private MetalRealWorldBenchmark(final ClientGameTestContext context, final String backend) {
 			this.context = context;
@@ -328,6 +339,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				.setUseConsistentSettings(false)
 				.adjustSettings(settings -> {
 					settings.setSeed(this.seed);
+					var normal = settings.getSettings().worldgenLoadContext()
+						.lookupOrThrow(net.minecraft.core.registries.Registries.WORLD_PRESET)
+						.getOrThrow(net.minecraft.world.level.levelgen.presets.WorldPresets.NORMAL);
+					settings.setWorldType(new WorldCreationUiState.WorldTypeEntry(normal));
 					settings.setGenerateStructures(true);
 					settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
 					settings.setDifficulty(Difficulty.NORMAL);
@@ -599,9 +614,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				// waitFor signals a deadline with AssertionError, which is an Error rather than an
 				// exception, so this has to catch the error branch explicitly.
 				world.getConnection().waitForChunksRender(true, 2400);
+				this.chunkLoadAndRenderSettlePassed = true;
 			} catch (AssertionError error) {
-				LOGGER.warn("Metal benchmark: chunk meshing did not settle; "
-					+ "the capture starts with meshing still in flight");
+				LOGGER.warn("Metal benchmark: combined chunk-load/render settle timed out; "
+					+ "steady-state readiness is unverified and these results are diagnostic only");
 			}
 			this.context.waitTicks(100);
 
@@ -761,6 +777,8 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			var report = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
 			report.add("environment", this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.describe()));
 			report.addProperty("routeVersion", 2);
+			report.addProperty("worldPreset", "minecraft:normal");
+			report.addProperty("chunkLoadAndRenderSettlePassed", this.chunkLoadAndRenderSettlePassed);
 			report.addProperty("requestedPitchDegrees", this.pitch);
 			report.add("cameraSamples", this.cameraSamples);
 			report.add("memoryAfterPhase", this.memorySamples);

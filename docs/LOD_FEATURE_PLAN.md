@@ -1,8 +1,8 @@
 # LOD feature implementation plan
 
-Status: P1–P3 complete; P4 capture lifetime and Metal completion infrastructure
-validated; live geometry ownership and rendering remain in progress.
-P5–P8 have not started. Live terrain replacement remains disabled.
+Status: P1–P5 complete for conservative loaded geometry and composition compatibility.
+P6–P8 remain open. Geometry is available only with the experimental validation flag;
+release capability gates remain closed.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
 `e0c116931908dc6747117348bce88998971b8752`. Existing uncommitted water work was
@@ -173,8 +173,8 @@ resources. Changing horizon never changes Minecraft render/simulation settings.
 Progress protocol: claim a task with owner/status before implementation; record
 partial progress or blockers beneath it; check it off only with validation evidence
 (commands, machine, scenario, and artifacts). Update this plan in the same change.
-P1–P4 are claimed by Codex; later tasks remain unclaimed. P2/P3 foundations
-can proceed during P1 capture; integration acceptance still depends on P1.
+P1–P5 are complete; `/root` owns P6 and P8 evaluation. P7 has no implementation.
+Earlier partial-progress entries below are retained as dated evidence, not current blockers.
 
 - [x] P0 — Inspect terrain/render/settings seams, create branch from water effects,
   and document staged design. Evidence: branch base SHA above and inspected source
@@ -236,13 +236,14 @@ can proceed during P1 capture; integration acceptance still depends on P1.
     boundary vertices match. `./gradlew lodMetalSmoke` also verifies fine/coarse
     coverage and depth on M4 Max. Connecting Minecraft sources and live draw ownership
     belongs to P4 and remains pending.
-- [ ] P4 — Loaded-terrain Metal rendering. Implement selection, hysteresis, bounded
+- [x] P4 — Loaded-terrain Metal rendering. Implement selection, hysteresis, bounded
   upload/retirement, and ordinary-mesh fallback. Acceptance: no cracks, overlapping
   surfaces, near-detail loss, or stale edits along a repeatable movement/zoom route;
   no render-thread waits and memory stays within configured budgets.
-  - Owner: Codex. Status: in progress. Isolated Metal geometry, world-queue completion,
-    and compiled-candidate lifetime are validated. A production appearance resolver
-    and live draw adapter are still required before loaded-section replacement.
+  - Owner: Codex. Status: complete (2026-09-11), exact-surface loaded geometry.
+    Production atlas resolution, all four tiers, pack preflight and final compiled-mesh
+    identity checks now own successful replacement draws. Ordinary draws remain the
+    fallback for unsupported data, unavailable tiers and declined shaders.
   - Current work claimed by Codex (2026-09-11): connect the resource-completion
     timeline to the actual world command queue, resolve uploaded-tier availability
     before final neighbor balancing, and carry bounded captured output through the
@@ -275,49 +276,88 @@ can proceed during P1 capture; integration acceptance still depends on P1.
     [counters](evidence/lod/capture-lifetime/metrics.json), and ordinary-rendering
     [screenshot](evidence/lod/capture-lifetime/scene.png). These are lifecycle checks,
     not LOD-on screenshots or frame-time measurements.
-  - [ ] P4 remaining: production atlas/material resolution, live selection and
-    upload scheduling outside the dispatcher lock, pack-compatible draw preflight,
-    final compiled-mesh identity recheck and single-owner suppression, followed by
-    movement/zoom/edit/budget acceptance. P4 itself remains unchecked.
-  - Partial evidence: `./gradlew lodMetalSmoke` passed on M4 Max. Direct Metal
-    draws at 128²/32²/16²/127² preserve repeated atlas texture, exclude neighboring
-    tile colors, preserve reverse-Z depth, enforce upload allowance and survive
-    logical buffer retirement before GPU completion. This isolated prototype uses
-    a test appearance resolver; it is not a live terrain renderer or pack adapter.
-    P4 remains unchecked until capture/revision hooks, bounded mesh residency,
-    selection transitions and live ordinary-mesh replacement pass their route checks.
-  - Added `LodMeshResidency`: admission precedes allocation; LRU eviction removes
-    ownership, while in-flight resources remain charged until a completion timeline
-    advances. CPU fixtures cover invalidation, reduced budgets, deferred retirement
-    and exactly-once release. `./gradlew build` passed with CPU and Metal smoke checks.
-    The world queue now supplies a tested nonblocking completion timeline (above);
-    the live LOD renderer still needs to consume it.
-  - Candidate selection now has neighbor relaxation (at most one tier difference)
-    and bounded coarsening with immediate near-detail restoration. These are CPU
-    components awaiting the live selection/availability integration, not shipped LOD.
-  - Final-mesh capture is verified through a bounded opt-in diagnostic, including
-    Fabric's alternate renderer. It copies final packed color/light, positions and UVs
-    before upload/release. Nonuniform shading remains unmerged; custom geometry and
-    non-solid sections fall back. Capture still does not publish replacement draws.
-    `./gradlew runClient -PmetalLifecycleTest -PmetalLodCompilerTest=true
-    --args='--graphicsBackend default'` passed (38 s, M4 Max, generated normal world,
-    seed `metalcraft`, 16/16). The test watches the edited section specifically,
-    confirms recompilation after its block edit and resource reload, and verifies
-    zero reserved capture bytes after close. Evidence: `docs/evidence/lod/compiler-capture/`.
-  - Feasibility result: 145 of 1,805 observed compiles supported conservative
-    section replacement; their quads reduced 39,412 → 38,033. Across all 856,341
-    captured solid quads the reduction is only 0.16%. Counts include repeated builds,
-    not unique visible sections or final draw counts. No GPU speedup was measured.
-    This builder is insufficient for the performance target. Broader material/shading
-    simplification and live ownership integration remain necessary; P4–P8 stay open.
-- [ ] P5 — Composition and material compatibility. Validate standard/no-pack paths,
+  - Current continuation owner: `/root` (2026-09-11), in progress. Implement
+    generation-scoped atlas resolution and a bounded live Metal draw adapter,
+    then validate replacement ownership in generated terrain before promoting
+    capabilities. P5–P8 remain dependent on that evidence.
+  - [x] P4 initial live tier (2026-09-11): immutable atlas lookup, BLOCK-compatible
+    texture-repeat sidecar, bounded uploads before dispatcher locking, final mesh
+    identity check and actual world-queue retirement are integrated behind
+    `metalcraft.lodRenderTest`. Standard and source-verified no-pack variants retain
+    their original depth/target/fog/light/color contracts. `./gradlew build` passed;
+    `./gradlew runClient -PmetalLifecycleTest -PmetalLodRenderTest=true
+    --args='--graphicsBackend default'` passed in 42 s on M4 Max/64 GB, NORMAL
+    seed `metalcraft`, 16/16. Across both packs/reload/teleport: 272,200 replacement
+    draws, zero upload failures, and zero LOD GPU bytes after world close.
+    [Counters and initial screenshots](evidence/lod/live-tier1/metrics.json).
+    Replaced triangles fell 239,843,824 → 229,449,036 (4.33%, cumulative draws,
+    **not** all visible terrain). No timing benefit is claimed. This uses only tier 1;
+    broader movement/zoom, production shader readback and higher tiers remain open.
+  - [x] P4 live route and production shader acceptance (2026-09-11):
+    `./gradlew build` passes CPU fixtures and actual Standard legacy/HDR and no-pack
+    Metal shader readbacks at 128², 32², 16² and 127². Poison atlas neighbors never
+    leak; full coverage, reverse-Z depth, tint/light and mip behavior pass. At the
+    odd-size image, only exact block-edge sampling ties may differ between triangles.
+    Current-resource shader verification declines changed/missing sources after reload.
+    The NORMAL seed `metalcraft`, 16/16 Default/Metal live route passed in 1m4s on
+    M4 Max/64 GB: Standard/None, tiers 1–4, three verified camera endpoints, FOV 70/30,
+    radius 2/12, continuous flight/panning, 1279×719 resize, half resolution, two edits,
+    reload, teleport and world close. Runtime checks enforce available/error-safe tiers
+    and adjacent-tier differences ≤1. GPU allocations remained below 34 MiB in sampled
+    stages and were zero after close, with zero upload failures. Uploads are bounded
+    before dispatcher locking; shared-event completion is polled without waiting.
+    [Report](evidence/lod/live-route/metrics.json), screenshots and validation log are
+    retained in the same directory. Images were inspected for terrain holes and seams.
+    Across 759,847 replacement draws, triangles were 521,980,764 → 497,160,548 (4.76%).
+    This is **only the replaced draws**, not total terrain or a GPU timing benefit.
+    Conservative capture reduced all observed compile output by only about 0.25%;
+    the provisional performance targets are not met by these counts. P8 needs proper A/B.
+- [x] P5 — Composition and material compatibility. Validate standard/no-pack paths,
   cutouts, shadow LOD, weather, entities, transparency, and reload behavior; follow
   the water plan for relevant effects. Acceptance: visual evidence and GPU readback
   for depth/color contracts with merged and split passes where supported.
+  - Owner: `/root`. Status: complete (2026-09-11). Shadow residency reuse,
+    explicit opt-in compatibility/benchmark configuration, and generated-world water,
+    transparency and lifecycle validation have real LOD ownership counters. Water W8
+    remains open for its broader release matrix.
+  - Merged-pass NORMAL-world water matrix passed (3m38s, M4 Max, seed 12345,
+    16/16 Default/Metal) with 608,581 LOD world draws and 882,504 LOD shadow draws,
+    zero upload failures and zero charged GPU bytes after close. Whole-terrain
+    counters show only 0.096% triangle reduction over this water-focused matrix.
+    [Evidence](evidence/lod/water-merged/metrics.json). A pre-existing W5 comparison
+    failure also reproduced with LOD off: LocalPlayer underwater vision keeps changing
+    fog during server tick freeze. Waiting for vision=1 fixes the test without relaxing
+    its image threshold. The temporary animation-freeze experiment was removed.
+  - Current material-policy work: allow an independently validated SOLID layer in a
+    mixed-layer section; retain cutout/translucent layers verbatim. Invalid geometry
+    still declines the entire solid replacement. Discard no-reduction CPU candidates
+    before retention. Subsequent closure evidence follows.
+  - Final P5 evidence: the broader solid-layer route passed in 1m14s, including
+    Standard/None, disabled capture, tiers 1–4, fullscreen, Nether/Overworld and saved-world
+    reopen. It recorded 1,412,257 LOD world draws, 329,275 LOD shadow draws, 121 safe
+    stale-owner fallbacks, zero upload failures and zero CPU/GPU retention after closing.
+    [Route report](evidence/lod/live-lifecycle/metrics.json). Production shadow readback
+    compares every texel for 1–4 cascades against the ordinary BLOCK mesh.
+    Full NORMAL seed 12345 water matrices at 16/16 Default/Metal passed in 3m27s each:
+    [merged](evidence/lod/water-merged-final/metrics.json) and
+    [split](evidence/lod/water-split/metrics.json), with over 3.2 million LOD world draws
+    and 3.8 million LOD shadow draws each, zero upload failures and zero charged bytes
+    after close. Identity/depth, nearby transparent controls, above/below water,
+    ordinary/Fabulous, HDR/hand/HUD, weather/time, reflections and reload assertions pass.
+    Full-terrain triangle reductions were 0.508% merged and 0.511% split; these are
+    composition coverage runs, not controlled performance A/B measurements.
+    `./gradlew build` passed in 12s with CPU and production Metal GPU fixtures.
 - [ ] P6 — Distance-dependent shading resolution. Prototype and measure the bands,
   conservative depth, and reconstruction described above. Acceptance: clean moving
   silhouettes and transparent intersections, full-detail near terrain, and a measured
   net GPU improvement including every added pass; otherwise keep this task open.
+  - Owner: `/root`. Status: prototype evaluated; acceptance failed (2026-09-11).
+    `./gradlew lodShadingBenchmark` compares the actual Standard resolve with 1×/half/
+    quarter bands, full-resolution coverage/depth, stored G-buffer inputs and depth/
+    normal/material-aware reconstruction. At 3840×2160, all-pass GPU median increases
+    0.784 → 1.631 ms (+108%). Odd-size moving foreground/depth readback passes, but this
+    synthetic fixture does not establish world-image acceptance. No runtime capability
+    is enabled. [Full results and remaining requirements](LOD_PERFORMANCE_RESULTS.md).
 - [ ] P7 — Extended-horizon cache. Implement persistent parent nodes, cache versioning,
   eviction, and visible-region scheduling. Acceptance: explored standard terrain at
   32/64/128/256 LOD chunks while Minecraft remains 16/16; bounded memory/draw counts,
@@ -326,6 +366,42 @@ can proceed during P1 capture; integration acceptance still depends on P1.
   from evidence, document tradeoffs/limitations, and update README. Acceptance: all
   correctness gates pass and published targets are met or explicitly revised with
   measured results; do not market unmeasured extreme-distance performance.
+  - Owner: `/root`. Status: partially evaluated; release criteria unmet (2026-09-11). Added explicit
+    LOD-on/off benchmark configuration, whole-terrain/distant triangle counters and
+    per-frame LOD preparation percentiles. A three-repeat Standard near-4K A/B pair
+    uses NORMAL seed `metalcraft`, 16/16, Default/Metal, full scene resolution and
+    unlocked presentation. Actual drawable size is 3840×2104 (macOS window clamp).
+  - Follow-up claimed: preserve ordered native pipeline changes in the command stream.
+    The first A/B showed hundreds of batch flushes around LOD replacements versus two
+    ordinary batches. Validate checked/coarse ABI pixels and pipeline lifetimes, then
+    repeat the same LOD-on route before drawing a performance conclusion.
+  - Correctness follow-up passes: `./gradlew build` (11s) includes both native command
+    ABIs, alternating pipeline/draw pixel checks and pipeline release before GPU
+    completion. The full P4 NORMAL-world 16/16 Default/Metal route passes in 1m13s
+    after batching, including Standard/None, tiers 1–4, motion/zoom, radius, edits,
+    resize/fullscreen/half, reload, teleport, dimensions and world reopen. It records
+    2,535,368 replacement draws, zero upload failures and zero charged GPU bytes on
+    both closes. [Counters and images](evidence/lod/live-batched/metrics.json).
+    The separate general shader/creative-search lifecycle also passed in 41s before
+    this batching change; [evidence](evidence/lod/general-lifecycle/metrics.json).
+  - Measurement result: the follow-up near-4K run passes its diagnostic execution
+    checks but not release acceptance. Ordered batching reduces median native batches
+    per frame from 229/98/84 to 3/2.4/3 (stationary/pan/traversal). Median intervals
+    remain 8.0%/1.2%/5.1% above the earlier off run; distant triangle savings are only
+    0.08–0.29%. Both original A/B processes and this follow-up hit the combined Fabric
+    chunk-load/render settle timeout, so steady-state readiness is unverified.
+    Future reports now serialize that result and explicitly select NORMAL terrain.
+    [Measurements, commands, limitations and artifacts](LOD_PERFORMANCE_RESULTS.md).
+    P8 remains open; no preset or capability was promoted on these results.
+  - Final composition follow-up: the complete merged water matrix passes after
+    ordered batching (3m28s), NORMAL seed 12345, 16/16 Default/Metal, M4 Max.
+    It records 3,133,425 LOD world draws and 3,731,634 LOD shadow draws, zero upload
+    failures and zero charged bytes after close. [Evidence](evidence/lod/water-batched/metrics.json).
+    The water W8 tracker is updated in the same change and remains open for its own
+    broader release-performance matrix.
+  - Final verification: `./gradlew build` passes in 11s on M4 Max after all runtime,
+    native batching, smoke, and benchmark-report changes; `git diff --check` passes.
+    The development configuration is left with LOD disabled. P6–P8 remain unchecked.
 
 Dependencies: P1 → P2/P3 → P4 → P5 → P6; P7 builds on P4/P5 and does not require P6.
 P8 requires P2–P7. Ship geometry-only milestones explicitly if later stages remain open.

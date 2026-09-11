@@ -14,6 +14,7 @@ import org.joml.Matrix4f;
 public final class LodMetalSmoke {
     public static void main(String[] args) {
         dev.metalcraft.client.metal.MetalLodTimelineSmoke.run();
+        dev.metalcraft.client.metal.MetalLodWorldSmoke.run();
         var empty = new TerrainSnapshot.Material(0,TerrainSnapshot.Policy.EMPTY,-1,0);
         var solid = new TerrainSnapshot.Material(1,TerrainSnapshot.Policy.OPAQUE_CUBE,-1,0);
         var key = new TerrainSnapshot.Key(1,"fixture",0,0,0,1,1);

@@ -282,8 +282,54 @@ last pass ends. Completion polling never flushes, submits or waits; a declined d
 otherwise empty reservation still completes. The live renderer must adopt this
 timeline when it begins borrowing GPU meshes.
 
-Remaining P4 work is the production appearance resolver and the live draw adapter:
-availability must describe uploaded, current, preflighted resources, and ordinary
-draws must only be suppressed after the final compiled-mesh identity check. P5–P8
-remain unimplemented and unvalidated. None of the new lifecycle evidence promotes
-geometry, multiresolution or extended-horizon capabilities.
+## Loaded geometry integration (2026-09-11)
+
+P4 is now implemented behind `metalcraft.lodExperimental` (also enabled by the
+`metalcraft.lodRenderTest` route). A generation-scoped index resolves actual atlas
+sprite bounds. Compiler workers simplify final BLOCK output at four exact-surface
+tiers; matching packed tint, AO, light and UV orientation are required for merging.
+Valid solid layers can participate in mixed sections; cutout and translucent layers
+keep ordinary draws. Unsupported solid geometry declines the whole solid replacement.
+No-reduction candidates are discarded. Capture work stops when disabled and invalidates
+retained candidates; enabling in a loaded world requests a fresh extraction.
+
+`LodLoadedRenderer.prepare` runs before dispatcher locking, selects against scene
+height/FOV and conservative bounds, considers neighbor constraints before upload,
+and resolves actual uploaded availability before final balancing. CPU build admission
+is bounded to 1/2/4 workers by the work setting, with separate 64 MiB retained data.
+GPU admission is bounded by configured memory, renderer working-set headroom and
+per-frame upload limits. In-flight allocations remain charged until the tested world
+queue completion timeline advances. Reads of immutable CPU candidates do not acquire
+worker monitors.
+
+The LevelRenderer draw-construction hook retains exact section/compiled-mesh ownership.
+The Metal backend preflights a source-compatible opaque shader and resources before
+borrowing an uploaded mesh, rechecks owner/revision/atlas/origin, and suppresses the
+ordinary draw only after encoding a replacement. Standard legacy/HDR and verified
+no-pack variants retain projection, packed light/tint, G-buffer targets and depth.
+Water's forward bindings are unchanged. Shadow collection independently culls light
+volumes and may reuse any resident exact-position solid tier, with no new upload under
+the dispatcher lock; cutout casters retain original UVs and geometry.
+
+Production Metal readback tests compare original and coarse BLOCK meshes, poison atlas
+neighbors, mip levels, reverse-Z depth, odd extents and shader reload rejection. Shadow
+fixtures compare every texel of one through four cascade maps. Generated terrain route
+checks include Standard/None, movement/zoom, disabled capture, edits, resource reload,
+teleport, half resolution, odd resize, fullscreen, Nether/Overworld and saved-world reopen.
+See `evidence/lod/live-route/` and `evidence/lod/live-lifecycle/`.
+
+P5's full water matrix passes both merged and split paths; final updated evidence is
+tracked in `LOD_FEATURE_PLAN.md` and the water W8 tracker. Whole-terrain counters now
+separate ordinary/distant/replaced/shadow draws. Benchmark reports retain counter
+endpoints and per-frame median/p95/p99 LOD selection, retirement and upload time.
+The earlier few-percent replacement-only reductions must not be presented as whole-
+terrain savings: the full water matrix measured well below 1% total triangle reduction.
+
+Runtime multiresolution shading and persistent 32–256 chunk parent nodes are not
+implemented. Their controls remain gated, as does ordinary release activation of
+loaded geometry. The isolated shading-band prototype increases all-pass GPU cost
+by about 108% at 4K. The first geometry A/B reduces distant triangles by only
+0.06–0.24% and misses the frame-time gates. These failures, measurement limitations,
+and subsequent ordered-pipeline batching work are recorded in
+[LOD performance results](LOD_PERFORMANCE_RESULTS.md). No extended-distance result
+or release readiness is claimed.

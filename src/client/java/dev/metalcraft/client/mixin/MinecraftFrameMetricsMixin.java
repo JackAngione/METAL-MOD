@@ -20,9 +20,13 @@ abstract class MinecraftFrameMetricsMixin {
 	 */
 	@Inject(method = "runTick", at = @At("HEAD"))
 	private void metalcraft$beginFrameMetrics(final boolean advanceGameTime, final CallbackInfo callback) {
-		dev.metalcraft.client.MetalCraftConfig.beginLodFrame(
-			((GpuDeviceAccessor)(Object)com.mojang.blaze3d.systems.RenderSystem.getDevice()).metalcraft$backend()
-				instanceof dev.metalcraft.client.metal.MetalGpuDevice);
+		var metal = dev.metalcraft.client.metal.MetalGpuDevices.current();
+		var settings = dev.metalcraft.client.MetalCraftConfig.beginLodFrame(metal != null);
+		if (dev.metalcraft.client.lod.LodCompilerCapture.configure(settings) && settings.enabled()) {
+			Minecraft client = (Minecraft)(Object)this;
+			if (client.level != null) client.levelExtractor.allChanged();
+		}
+		dev.metalcraft.client.lod.LodLoadedRenderer.beginFrame(metal, settings);
 		MetalFrameMetrics.recordFrameStart(System.nanoTime());
 	}
 

@@ -1,0 +1,446 @@
+
+> Configure project :
+Fabric Loom: 1.17.20
+
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses
+> Task :generateLog4jConfig UP-TO-DATE
+> Task :generateDLIConfig UP-TO-DATE
+> Task :configureLaunch UP-TO-DATE
+> Task :downloadAssets UP-TO-DATE
+> Task :configureClientLaunch UP-TO-DATE
+
+> Task :runClient
+[13:59:09] [main/WARN] (FabricLoader/Knot) Class path entries reference missing files: /Users/jackangione/Desktop/VULKAN SHADERS/build/classes/java/main - the game may not load properly!
+[13:59:09] [main/INFO] (FabricLoader/GameProvider) Loading Minecraft 26.2 with Fabric Loader 0.19.3
+[13:59:09] [main/INFO] (FabricLoader/Mappings) Mappings not present!
+[13:59:09] [main/INFO] (FabricLoader) Loading 51 mods:
+	- fabric-api 0.157.0+26.2
+	- fabric-api-base 2.0.4+ece063239e
+	- fabric-api-lookup-api-v1 2.0.17+11e1c9a39e
+	- fabric-biome-api-v1 18.0.6+c7bd5b8e9e
+	- fabric-block-api-v1 3.0.3+ec56b6019e
+	- fabric-block-getter-api-v2 2.0.7+ec56b6019e
+	- fabric-client-gametest-api-v1 6.0.0+515ac5339e
+	- fabric-command-api-v2 3.1.0+00cb03469e
+	- fabric-content-registries-v0 11.3.1+37b1aa249e
+	- fabric-convention-tags-v2 4.7.0+1f023a9e9e
+	- fabric-crash-report-info-v1 1.0.5+086d547a9e
+	- fabric-creative-tab-api-v1 5.0.14+d871b99e9e
+	- fabric-data-attachment-api-v1 2.2.18+515ac5339e
+	- fabric-data-generation-api-v1 25.5.0+aed122aa9e
+	- fabric-debug-api-v1 1.0.2+c792624d9e
+	- fabric-dimensions-v1 5.1.11+515ac5339e
+	- fabric-entity-events-v1 5.0.5+06488ac19e
+	- fabric-events-interaction-v0 5.2.7+515ac5339e
+	- fabric-game-rule-api-v1 4.0.8+46a6d00c9e
+	- fabric-gametest-api-v1 4.0.21+4a7fa0819e
+	- fabric-item-api-v1 14.4.0+49a69a7b9e
+	- fabric-key-mapping-api-v1 2.0.5+e2bdee789e
+	- fabric-lifecycle-events-v1 4.1.3+4575b05f9e
+	- fabric-loot-api-v3 3.0.17+06488ac19e
+	- fabric-menu-api-v1 2.0.16+086d547a9e
+	- fabric-message-api-v1 7.0.8+bb2ed3f79e
+	- fabric-model-loading-api-v1 8.0.16+c80601bb9e
+	- fabric-networking-api-v1 6.3.3+72073ef09e
+	- fabric-object-builder-api-v1 24.1.0+6fcd5f039e
+	- fabric-particles-v1 5.0.18+d1756aa99e
+	- fabric-permission-api-v1 1.0.5+e442d8d09e
+	- fabric-recipe-api-v1 9.0.20+11e1c9a39e
+	- fabric-registry-sync-v0 7.1.0+c7bd5b8e9e
+	- fabric-renderer-api-v1 14.1.3+2b0d8a229e
+	- fabric-renderer-indigo 9.1.3+2b0d8a229e
+	- fabric-rendering-fluids-v1 6.0.4+06488ac19e
+	- fabric-rendering-v1 25.3.2+515ac5339e
+	- fabric-resource-conditions-api-v1 6.1.0+10e9a28b9e
+	- fabric-resource-loader-v0 3.3.20+4fc5413f9e
+	- fabric-resource-loader-v1 2.0.13+9edec1269e
+	- fabric-screen-api-v1 5.2.0+58e078ad9e
+	- fabric-serialization-api-v1 2.0.4+11a26f319e
+	- fabric-sound-api-v1 2.0.5+11a26f319e
+	- fabric-tag-api-v1 2.1.4+515ac5339e
+	- fabric-transfer-api-v1 8.0.12+11dbb7d79e
+	- fabric-transitive-access-wideners-v1 8.1.4+67c847259e
+	- fabricloader 0.19.3
+	- java 25
+	- metalcraft 0.2.0-dev.1
+	- minecraft 26.2
+	- mixinextras 0.5.4
+[13:59:09] [main/INFO] (FabricLoader/Mixin) SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/Users/jackangione/.gradle/caches/modules-2/files-2.1/net.fabricmc/sponge-mixin/0.17.3+mixin.0.8.7/41c4a3984a80f4679e759fb9f495587acc5cdac7/sponge-mixin-0.17.3+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
+[13:59:09] [main/INFO] (FabricLoader/Mixin) Compatibility level set to JAVA_25
+[13:59:09] [main/INFO] (MetalCraftPreLaunch) MetalCraft direct Metal bridge opened an owned device and command queue: Apple M4 Max (recommended working set: 53084 MiB)
+[13:59:09] [main/WARN] (MetalCraftPreLaunch) Direct Metal backend selection is active and experimental; Minecraft's OpenGL crash recovery remains available
+[13:59:09] [main/INFO] (FabricLoader/MixinExtras|Service) Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.4).
+[13:59:10] [Datafixer Bootstrap #0/INFO] (Minecraft) 295 Datafixer optimizations took 126 milliseconds
+[13:59:10] [main/WARN] (MacOperatingSystem) Unable to parse version 27.0 to a codename.
+[13:59:12] [Render thread/INFO] (Minecraft) Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[13:59:12] [Render thread/INFO] (Minecraft) Setting user: Player709
+[13:59:12] [Render thread/INFO] (Indigo) [Indigo] Registering Indigo renderer!
+[13:59:12] [Render thread/ERROR] (Minecraft) Illegal option value 0 for Anisotropic Filtering
+[13:59:12] [Render thread/INFO] (Minecraft) Backend library: LWJGL version 3.4.1-snapshot
+[13:59:12] [Render thread/WARN] (Minecraft) Graphics backend forced to default by launch argument, in-game preferred graphics backend setting is ignored
+[13:59:12] [Render thread/INFO] (Minecraft) Using graphics backend Metal, using drivers: Mac OS X 27.0
+[13:59:12] [Render thread/INFO] (Minecraft) Using graphics device: Apple M4 Max (Apple)
+[13:59:12] [Render thread/INFO] (Minecraft) Using graphics device extensions: Metal
+[13:59:12] [Download-2/INFO] (Minecraft) Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: FabricMC
+[13:59:12] [Render thread/INFO] (Minecraft) Reloading ResourceManager: vanilla, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-getter-api-v2, fabric-client-gametest-api-v1, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-creative-tab-api-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-debug-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-gametest-api-v1, fabric-item-api-v1, fabric-key-mapping-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v3, fabric-menu-api-v1, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-permission-api-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, metalcraft
+[13:59:12] [Render thread/INFO] (MetalCraftClient) MetalCraft direct renderer active: Apple / Apple M4 Max using Metal
+[13:59:13] [Render thread/WARN] (Minecraft) Failed to find suitable monitor for fullscreen mode
+[13:59:13] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 1708x960 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[13:59:13] [Worker-Main-3/INFO] (Minecraft) Found unifont_all_no_pua-17.0.01.hex, loading
+[13:59:13] [Worker-Main-4/INFO] (Minecraft) Found unifont_pua-17.0.01.hex, loading
+[13:59:13] [Worker-Main-12/INFO] (Minecraft) Found unifont_jp_patch-17.0.01.hex, loading
+[13:59:13] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 1708x960 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[13:59:15] [Render thread/INFO] (Minecraft) OpenAL initialized on device DENON-AVR
+[13:59:15] [Render thread/INFO] (Minecraft) Sound engine started
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[13:59:15] [Render thread/INFO] (Minecraft) Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[13:59:15] [Download-2/INFO] (Minecraft) Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: FabricMC
+[13:59:17] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: Metal backend selected
+[13:59:18] [Render thread/INFO] (Minecraft) Loaded 1585 recipes
+[13:59:18] [Render thread/INFO] (Minecraft) Loaded 1688 advancements
+[13:59:18] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.GenericMessageScreen@7ad25099
+[13:59:18] [Render thread/INFO] (BiomeModificationImpl) Applied 0 biome modifications to 0 of 66 new biomes in 649.3 μs
+[13:59:18] [Server thread/INFO] (Minecraft) Starting integrated minecraft server version 26.2
+[13:59:18] [Server thread/INFO] (Minecraft) Generating keypair
+[13:59:18] [Server thread/INFO] (Minecraft) Selecting global world spawn...
+[13:59:19] [Server thread/INFO] (Minecraft) Loading 0 persistent chunks...
+[13:59:19] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[13:59:19] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[13:59:19] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[13:59:19] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[13:59:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[13:59:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[13:59:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[13:59:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[13:59:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:19] [Server thread/INFO] (Minecraft) Loading 48 chunks for player spawn...
+[13:59:19] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[13:59:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:19] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Server thread/INFO] (Minecraft) Preparing spawn area: 58%
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Server thread/INFO] (Minecraft) Time elapsed: 2135 ms
+[13:59:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:20] [Server thread/INFO] (Minecraft) Player709[local:E:a533ac9a] logged in with entity id 1 at (0.5, 79.0, 0.5)
+[13:59:20] [Server thread/INFO] (Minecraft) Player709 joined the game
+[13:59:20] [Server thread/INFO] (Minecraft) Changing view distance to 16, from 10
+[13:59:20] [Server thread/INFO] (Minecraft) Changing simulation distance to 16, from 0
+[13:59:21] [Download-2/ERROR] (Minecraft) Failed to retrieve profile key pair
+
+MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/certificates, error=null, errorMessage=null, details=null]]
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.readServiceResponse(MinecraftClient.java:147)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.post(MinecraftClient.java:89)
+	at knot//com.mojang.authlib.yggdrasil.YggdrasilUserApiService.getKeyPair(YggdrasilUserApiService.java:62)
+	at knot//net.minecraft.client.multiplayer.AccountProfileKeyPairManager.fetchProfileKeyPair(AccountProfileKeyPairManager.java:119)
+	at knot//net.minecraft.client.multiplayer.AccountProfileKeyPairManager.lambda$readOrFetchProfileKeyPair$0(AccountProfileKeyPairManager.java:72)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[13:59:23] [Render thread/INFO] (Minecraft) Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
+[13:59:23] [Render thread/INFO] (Minecraft) Loaded 2 advancements
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (Minecraft) Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (Minecraft) Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 2 reached during a single frame. New capacity will be 8.
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 16 reached during a single frame. New capacity will be 32.
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5366fcd
+[13:59:23] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: null
+[13:59:23] [Server thread/INFO] (Minecraft) Set Player709's game mode to Spectator Mode
+[13:59:23] [Server thread/INFO] (Minecraft) Teleported Player709 to -1535.500000, 236.000000, -127.500000
+[13:59:23] [Server thread/INFO] (Minecraft) Set minecraft:overworld to time marker minecraft:noon
+[13:59:23] [Server thread/INFO] (Minecraft) Set the weather to clear
+[13:59:23] [Render thread/INFO] (ShaderPackRuntime) Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 6558720 bytes
+[13:59:23] [Render thread/INFO] (Minecraft) [System] [CHAT] Your game mode has been updated to Spectator Mode
+[13:59:23] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Set Player709's game mode to Spectator Mode]
+[13:59:23] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1535.500000, 236.000000, -127.500000]
+[13:59:23] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Set minecraft:overworld to time marker minecraft:noon]
+[13:59:23] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Set the weather to clear]
+[13:59:25] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 32 reached during a single frame. New capacity will be 64.
+[13:59:26] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 64 reached during a single frame. New capacity will be 128.
+[13:59:27] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 128 reached during a single frame. New capacity will be 256.
+[13:59:30] [Server thread/WARN] (Minecraft) Can't keep up! Is the server overloaded? Running 2799ms or 55 ticks behind
+[13:59:30] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 256 reached during a single frame. New capacity will be 512.
+[13:59:30] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 512 reached during a single frame. New capacity will be 1024.
+[13:59:32] [Server thread/INFO] (Minecraft) Teleported Player709 to -1535.500000, 236.000000, -127.500000
+[13:59:32] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1535.500000, 236.000000, -127.500000]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-107, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:33] [Worker-Main-13/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-106, -14] while generating chunk [-107, -16] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-109, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Worker-Main-10/ERROR] (Minecraft) Detected unsafe terrain read during worldgen: reading from chunk [-108, -9] while generating chunk [-108, -11] (distance: 2, write radius: 1), step: minecraft:features, currently generating: ResourceKey[minecraft:worldgen/placed_feature / minecraft:sculk_patch_deep_dark]
+[13:59:34] [Server thread/INFO] (Minecraft) Teleported Player709 to -1511.500000, 236.000000, -115.500000
+[13:59:34] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1511.500000, 236.000000, -115.500000]
+[13:59:36] [Server thread/INFO] (Minecraft) Teleported Player709 to -1487.500000, 236.000000, -103.500000
+[13:59:36] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1487.500000, 236.000000, -103.500000]
+[13:59:38] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 1024 reached during a single frame. New capacity will be 2048.
+[13:59:40] [Server thread/INFO] (Minecraft) Teleported Player709 to -1535.500000, 236.000000, -127.500000
+[13:59:40] [Render thread/INFO] (WorldGeometryAdapter) Shader pack 'metalcraft-standard' leaves 1 pipeline(s) outside the G-buffer: [minecraft:pipeline/translucent_terrain]
+[13:59:40] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1535.500000, 236.000000, -127.500000]
+[13:59:47] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 2048 reached during a single frame. New capacity will be 4096.
+[13:59:47] [Server thread/INFO] (Minecraft) Teleported Player709 to -1535.500000, 236.000000, -127.500000
+[13:59:47] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1535.500000, 236.000000, -127.500000]
+[13:59:49] [Server thread/INFO] (Minecraft) Teleported Player709 to -1511.500000, 236.000000, -115.500000
+[13:59:49] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1511.500000, 236.000000, -115.500000]
+[13:59:51] [Server thread/INFO] (Minecraft) Teleported Player709 to -1487.500000, 236.000000, -103.500000
+[13:59:51] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1487.500000, 236.000000, -103.500000]
+[13:59:54] [Server thread/INFO] (Minecraft) Teleported Player709 to -1535.500000, 236.000000, -127.500000
+[13:59:54] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1535.500000, 236.000000, -127.500000]
+[14:00:01] [Render thread/WARN] (Minecraft) Failed to find suitable monitor for fullscreen mode
+[14:00:01] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 2558x1438 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[14:00:02] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 2558x1438 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[14:00:02] [Render thread/WARN] (Minecraft) Failed to find suitable monitor for fullscreen mode
+[14:00:02] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 2558x1438 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[14:00:02] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 2558x1438 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[14:00:03] [Server thread/INFO] (Minecraft) Teleported Player709 to -1535.500000, 236.000000, -127.500000
+[14:00:03] [Server thread/INFO] (Minecraft) Changed the block at -1540, 175, -128
+[14:00:03] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to -1535.500000, 236.000000, -127.500000]
+[14:00:03] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Changed the block at -1540, 175, -128]
+[14:00:03] [Server thread/INFO] (Minecraft) Changed the block at -1540, 175, -128
+[14:00:03] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Changed the block at -1540, 175, -128]
+[14:00:03] [Render thread/INFO] (Minecraft) Reloading ResourceManager: vanilla, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-getter-api-v2, fabric-client-gametest-api-v1, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-creative-tab-api-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-debug-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-gametest-api-v1, fabric-item-api-v1, fabric-key-mapping-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v3, fabric-menu-api-v1, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-permission-api-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, metalcraft
+[14:00:03] [Worker-Main-8/INFO] (Minecraft) Found unifont_all_no_pua-17.0.01.hex, loading
+[14:00:03] [Worker-Main-12/INFO] (Minecraft) Found unifont_pua-17.0.01.hex, loading
+[14:00:03] [Worker-Main-3/INFO] (Minecraft) Found unifont_jp_patch-17.0.01.hex, loading
+[14:00:03] [Server thread/INFO] (Minecraft) Saving and pausing game...
+[14:00:03] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[14:00:03] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[14:00:03] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[14:00:06] [Render thread/INFO] (Minecraft) OpenAL initialized on device DENON-AVR
+[14:00:06] [Render thread/INFO] (Minecraft) Sound engine started
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[14:00:06] [Render thread/INFO] (Minecraft) Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[14:00:08] [Server thread/WARN] (Minecraft) Can't keep up! Is the server overloaded? Running 5574ms or 111 ticks behind
+[14:00:08] [Server thread/INFO] (Minecraft) Teleported Player709 to 4096.500000, 173.000000, 4096.500000
+[14:00:08] [Render thread/INFO] (Minecraft) [System] [CHAT] [Server: Teleported Player709 to 4096.500000, 173.000000, 4096.500000]
+[14:00:13] [Render thread/INFO] (ShaderPackRuntime) Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 14713616 bytes
+[14:00:13] [Server thread/INFO] (Minecraft) Player709 has made the advancement [We Need to Go Deeper]
+[14:00:13] [Server thread/INFO] (Minecraft) Teleported Player709 to 0.500000, 80.000000, 0.500000
+[14:00:13] [Render thread/INFO] (Minecraft) [System] [CHAT] Player709 has made the advancement [We Need to Go Deeper]
+[14:00:13] [Render thread/INFO] (Minecraft) [System] [CHAT] [Player709: Teleported Player709 to 0.500000, 80.000000, 0.500000]
+[14:00:13] [Render thread/INFO] (Minecraft) Loaded 29 advancements
+[14:00:14] [Render thread/INFO] (Minecraft) Loaded 29 advancements
+[14:00:18] [Server thread/INFO] (Minecraft) Player709 has completed the challenge [Subspace Bubble]
+[14:00:18] [Server thread/INFO] (Minecraft) Teleported Player709 to -1535.500000, 236.000000, -127.500000
+[14:00:18] [Render thread/INFO] (Minecraft) [System] [CHAT] Player709 has completed the challenge [Subspace Bubble]
+[14:00:18] [Render thread/INFO] (Minecraft) [System] [CHAT] [Player709: Teleported Player709 to -1535.500000, 236.000000, -127.500000]
+[14:00:18] [Render thread/INFO] (Minecraft) Loaded 29 advancements
+[14:00:18] [Server thread/INFO] (Minecraft) Player709 lost connection: Disconnected
+[14:00:18] [Server thread/INFO] (Minecraft) Player709 left the game
+[14:00:18] [Server thread/INFO] (Minecraft) Stopping singleplayer server as player logged out
+[14:00:18] [Server thread/INFO] (Minecraft) Stopping server
+[14:00:18] [Server thread/INFO] (Minecraft) Saving players
+[14:00:18] [Server thread/INFO] (Minecraft) Saving worlds
+[14:00:18] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[14:00:18] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[14:00:19] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[14:00:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[14:00:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[14:00:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[14:00:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.GenericMessageScreen@4c95d555
+[14:00:19] [Render thread/INFO] (Minecraft) Loaded 1585 recipes
+[14:00:19] [Render thread/INFO] (Minecraft) Loaded 1688 advancements
+[14:00:19] [Render thread/INFO] (BiomeModificationImpl) Applied 0 biome modifications to 0 of 66 new biomes in 92.38 μs
+[14:00:19] [Server thread/INFO] (Minecraft) Starting integrated minecraft server version 26.2
+[14:00:19] [Server thread/INFO] (Minecraft) Generating keypair
+[14:00:19] [Server thread/INFO] (Minecraft) Loading 0 persistent chunks...
+[14:00:19] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[14:00:19] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[14:00:19] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[14:00:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[14:00:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[14:00:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[14:00:19] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Server thread/INFO] (Minecraft) Loading 49 chunks for player spawn...
+[14:00:19] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Server thread/INFO] (Minecraft) Time elapsed: 384 ms
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Server thread/INFO] (Minecraft) Player709[local:E:bba8b2e1] logged in with entity id 411 at (-1535.5, 236.0, -127.5)
+[14:00:19] [Server thread/INFO] (Minecraft) Player709 joined the game
+[14:00:19] [Server thread/INFO] (Minecraft) Changing view distance to 16, from 10
+[14:00:19] [Server thread/INFO] (Minecraft) Changing simulation distance to 16, from 0
+[14:00:19] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:19] [Render thread/INFO] (Minecraft) Loaded 29 advancements
+[14:00:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@54beb4f5
+[14:00:20] [Download-2/ERROR] (Minecraft) Failed to retrieve profile key pair
+
+MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/certificates, error=null, errorMessage=null, details=null]]
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.readServiceResponse(MinecraftClient.java:147)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.post(MinecraftClient.java:89)
+	at knot//com.mojang.authlib.yggdrasil.YggdrasilUserApiService.getKeyPair(YggdrasilUserApiService.java:62)
+	at knot//net.minecraft.client.multiplayer.AccountProfileKeyPairManager.fetchProfileKeyPair(AccountProfileKeyPairManager.java:119)
+	at knot//net.minecraft.client.multiplayer.AccountProfileKeyPairManager.lambda$readOrFetchProfileKeyPair$0(AccountProfileKeyPairManager.java:72)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[14:00:20] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: null
+[14:00:21] [Server thread/INFO] (Minecraft) Player709 lost connection: Disconnected
+[14:00:21] [Server thread/INFO] (Minecraft) Player709 left the game
+[14:00:21] [Server thread/INFO] (Minecraft) Stopping singleplayer server as player logged out
+[14:00:21] [Server thread/INFO] (Minecraft) Stopping server
+[14:00:21] [Server thread/INFO] (Minecraft) Saving players
+[14:00:21] [Server thread/INFO] (Minecraft) Saving worlds
+[14:00:21] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[14:00:21] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[14:00:21] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[14:00:21] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[14:00:21] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[14:00:21] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[14:00:21] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[14:00:22] [Test thread/INFO] (Minecraft) [STDOUT]: LOD live render passed: {metalcraft-standard=Stats[uploads=424, uploadedBytes=70372352, draws=145178, originalTriangles=165704070, replacementTriangles=160708532, staleFallbacks=4, uploadFailures=0, chargedBytes=37907280, residentMeshes=252, retiredMeshes=0, frameUploadBytes=0, prepareNanos=37167, frameSelected=63, tier1Draws=89404, tier2Draws=45700, tier3Draws=10074, tier4Draws=0, shadowDraws=145076, shadowOriginalTriangles=165622776, shadowReplacementTriangles=160121650, terrainDraws=765557, terrainInputTriangles=505240142, terrainRenderedTriangles=500244604, distantDraws=752373, distantInputTriangles=492417198, distantRenderedTriangles=487421660], metalcraft-standard-route-0=Stats[uploads=752, uploadedBytes=114774592, draws=193996, originalTriangles=209301786, replacementTriangles=203414304, staleFallbacks=4, uploadFailures=0, chargedBytes=38547808, residentMeshes=296, retiredMeshes=0, frameUploadBytes=0, prepareNanos=53292, frameSelected=74, tier1Draws=129465, tier2Draws=54424, tier3Draws=10107, tier4Draws=0, shadowDraws=193894, shadowOriginalTriangles=209220492, shadowReplacementTriangles=202643022, terrainDraws=1860775, terrainInputTriangles=1216053736, terrainRenderedTriangles=1210166254, distantDraws=1842306, distantInputTriangles=1201381662, distantRenderedTriangles=1195494180], metalcraft-standard-camera-0={"x":-1535.5,"y":236.0,"z":-127.5,"yaw":22.5,"pitch":35.0}, metalcraft-standard-route-1=Stats[uploads=832, uploadedBytes=127244976, draws=222765, originalTriangles=232583574, replacementTriangles=226268976, staleFallbacks=4, uploadFailures=0, chargedBytes=38106096, residentMeshes=304, retiredMeshes=0, frameUploadBytes=0, prepareNanos=37709, frameSelected=32, tier1Draws=156194, tier2Draws=56464, tier3Draws=10107, tier4Draws=0, shadowDraws=261438, shadowOriginalTriangles=271174564, shadowReplacementTriangles=263155422, terrainDraws=2313894, terrainInputTriangles=1532068488, terrainRenderedTriangles=1525753890, distantDraws=2295422, distantInputTriangles=1517395364, distantRenderedTriangles=1511080766], metalcraft-standard-camera-1={"x":-1511.5,"y":236.0,"z":-115.5,"yaw":67.5,"pitch":35.0}, metalcraft-standard-route-2=Stats[uploads=912, uploadedBytes=137444784, draws=252690, originalTriangles=258360378, replacementTriangles=251450428, staleFallbacks=4, uploadFailures=0, chargedBytes=38539296, residentMeshes=312, retiredMeshes=0, frameUploadBytes=0, prepareNanos=118542, frameSelected=52, tier1Draws=184387, tier2Draws=58196, tier3Draws=10107, tier4Draws=0, shadowDraws=306415, shadowOriginalTriangles=308749696, shadowReplacementTriangles=299650716, terrainDraws=2999134, terrainInputTriangles=1995683422, terrainRenderedTriangles=1988773472, distantDraws=2980662, distantInputTriangles=1981010298, distantRenderedTriangles=1974100348], metalcraft-standard-camera-2={"x":-1487.5,"y":236.0,"z":-103.5,"yaw":112.5,"pitch":35.0}, metalcraft-standard-radius12=Stats[uploads=912, uploadedBytes=137444784, draws=254476, originalTriangles=259445552, replacementTriangles=252477940, staleFallbacks=4, uploadFailures=0, chargedBytes=37811824, residentMeshes=308, retiredMeshes=0, frameUploadBytes=0, prepareNanos=47333, frameSelected=6, tier1Draws=186170, tier2Draws=58199, tier3Draws=10107, tier4Draws=0, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=3353208, terrainInputTriangles=2237663426, terrainRenderedTriangles=2230695814, distantDraws=3129546, distantInputTriangles=2098055164, distantRenderedTriangles=2091087552], none=Stats[uploads=932, uploadedBytes=139580080, draws=622474, originalTriangles=567039678, replacementTriangles=552687386, staleFallbacks=4, uploadFailures=0, chargedBytes=38554800, residentMeshes=320, retiredMeshes=0, frameUploadBytes=0, prepareNanos=73125, frameSelected=77, tier1Draws=515560, tier2Draws=96807, tier3Draws=10107, tier4Draws=0, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=10694634, terrainInputTriangles=7441205938, terrainRenderedTriangles=7426853646, distantDraws=10456066, distantInputTriangles=7296262192, distantRenderedTriangles=7281909900], none-route-0=Stats[uploads=1304, uploadedBytes=183342704, draws=747976, originalTriangles=666706402, replacementTriangles=649986180, staleFallbacks=4, uploadFailures=0, chargedBytes=38349600, residentMeshes=332, retiredMeshes=0, frameUploadBytes=0, prepareNanos=91916, frameSelected=83, tier1Draws=630115, tier2Draws=107754, tier3Draws=10107, tier4Draws=0, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=17932992, terrainInputTriangles=12736335680, terrainRenderedTriangles=12719615458, distantDraws=17683367, distantInputTriangles=12587522604, distantRenderedTriangles=12570802382], none-camera-0={"x":-1535.5,"y":236.0,"z":-127.5,"yaw":22.5,"pitch":35.0}, none-route-1=Stats[uploads=1352, uploadedBytes=187636096, draws=821162, originalTriangles=719383372, replacementTriangles=701485222, staleFallbacks=4, uploadFailures=0, chargedBytes=37978112, residentMeshes=332, retiredMeshes=0, frameUploadBytes=0, prepareNanos=48375, frameSelected=30, tier1Draws=700783, tier2Draws=110272, tier3Draws=10107, tier4Draws=0, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=20903360, terrainInputTriangles=15318759046, terrainRenderedTriangles=15300860896, distantDraws=20653732, distantInputTriangles=15169944920, distantRenderedTriangles=15152046770], none-camera-1={"x":-1511.5,"y":236.0,"z":-115.5,"yaw":67.5,"pitch":35.0}, none-route-2=Stats[uploads=1420, uploadedBytes=191705744, draws=905131, originalTriangles=777202370, replacementTriangles=757815904, staleFallbacks=4, uploadFailures=0, chargedBytes=38430464, residentMeshes=356, retiredMeshes=0, frameUploadBytes=0, prepareNanos=76041, frameSelected=55, tier1Draws=783223, tier2Draws=111801, tier3Draws=10107, tier4Draws=0, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=24286339, terrainInputTriangles=17909384446, terrainRenderedTriangles=17889997980, distantDraws=24036711, distantInputTriangles=17760570320, distantRenderedTriangles=17741183854], none-camera-2={"x":-1487.5,"y":236.0,"z":-103.5,"yaw":112.5,"pitch":35.0}, none-radius12=Stats[uploads=1424, uploadedBytes=192138032, draws=916674, originalTriangles=781230326, replacementTriangles=761644014, staleFallbacks=4, uploadFailures=0, chargedBytes=37836448, residentMeshes=348, retiredMeshes=0, frameUploadBytes=0, prepareNanos=79375, frameSelected=14, tier1Draws=794765, tier2Draws=111802, tier3Draws=10107, tier4Draws=0, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=26132431, terrainInputTriangles=19321515058, terrainRenderedTriangles=19301928746, distantDraws=25290671, distantInputTriangles=18813680348, distantRenderedTriangles=18794094036], tiers=Stats[uploads=1424, uploadedBytes=192138032, draws=916674, originalTriangles=781230326, replacementTriangles=761644014, staleFallbacks=4, uploadFailures=0, chargedBytes=37836448, residentMeshes=348, retiredMeshes=0, frameUploadBytes=0, prepareNanos=79375, frameSelected=14, tier1Draws=794765, tier2Draws=111802, tier3Draws=10107, tier4Draws=0, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=26132431, terrainInputTriangles=19321515058, terrainRenderedTriangles=19301928746, distantDraws=25290671, distantInputTriangles=18813680348, distantRenderedTriangles=18794094036], afterFlight=Stats[uploads=1488, uploadedBytes=196220144, draws=1042064, originalTriangles=860349880, replacementTriangles=838783708, staleFallbacks=4, uploadFailures=0, chargedBytes=38305216, residentMeshes=376, retiredMeshes=0, frameUploadBytes=0, prepareNanos=72084, frameSelected=20, tier1Draws=913397, tier2Draws=118202, tier3Draws=10329, tier4Draws=136, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=32542278, terrainInputTriangles=24876567008, terrainRenderedTriangles=24855000836, distantDraws=31678357, distantInputTriangles=24357752208, distantRenderedTriangles=24336186036], afterReloadTeleport=Stats[uploads=1664, uploadedBytes=213742400, draws=1241900, originalTriangles=954356618, replacementTriangles=928067778, staleFallbacks=121, uploadFailures=0, chargedBytes=5871456, residentMeshes=88, retiredMeshes=0, frameUploadBytes=0, prepareNanos=30042, frameSelected=22, tier1Draws=1111872, tier2Draws=119563, tier3Draws=10329, tier4Draws=136, shadowDraws=328793, shadowOriginalTriangles=327347864, shadowReplacementTriangles=317715384, terrainDraws=43738998, terrainInputTriangles=33311915948, terrainRenderedTriangles=33285627108, distantDraws=42816899, distantInputTriangles=32758790184, distantRenderedTriangles=32732501344], capture=Stats[sections=6903, supportedSections=4992, rejectedSections=1390, originalQuads=2232148, simplifiedQuads=2160033, budgetMisses=515, reservedBytes=0, allSolidQuads=3067192, materialRejects=240, geometryRejects=1150, retainedBytes=67088384, retainedCandidates=96, transferredCandidates=535, closedCandidates=439, staleCandidates=56, retentionMisses=3343, trackedSections=688, mixedSupportedSections=4251], afterDimensionReturn=Stats[uploads=1960, uploadedBytes=277405168, draws=1412121, originalTriangles=1185881632, replacementTriangles=1153475016, staleFallbacks=121, uploadFailures=0, chargedBytes=12926688, residentMeshes=64, retiredMeshes=0, frameUploadBytes=0, prepareNanos=8500, frameSelected=16, tier1Draws=1282023, tier2Draws=119619, tier3Draws=10343, tier4Draws=136, shadowDraws=329139, shadowOriginalTriangles=327791170, shadowReplacementTriangles=318145290, terrainDraws=45632561, terrainInputTriangles=35117636150, terrainRenderedTriangles=35085229534, distantDraws=44194010, distantInputTriangles=34201949170, distantRenderedTriangles=34169542554], afterClose=Stats[uploads=1960, uploadedBytes=277405168, draws=1412121, originalTriangles=1185881632, replacementTriangles=1153475016, staleFallbacks=121, uploadFailures=0, chargedBytes=0, residentMeshes=0, retiredMeshes=0, frameUploadBytes=0, prepareNanos=0, frameSelected=0, tier1Draws=1282023, tier2Draws=119619, tier3Draws=10343, tier4Draws=136, shadowDraws=329139, shadowOriginalTriangles=327791170, shadowReplacementTriangles=318145290, terrainDraws=45632561, terrainInputTriangles=35117636150, terrainRenderedTriangles=35085229534, distantDraws=44194010, distantInputTriangles=34201949170, distantRenderedTriangles=34169542554], afterReopen=Stats[uploads=2024, uploadedBytes=285563920, draws=1412257, originalTriangles=1185999414, replacementTriangles=1153590588, staleFallbacks=121, uploadFailures=0, chargedBytes=8158752, residentMeshes=64, retiredMeshes=0, frameUploadBytes=600704, prepareNanos=280542, frameSelected=16, tier1Draws=1282151, tier2Draws=119627, tier3Draws=10343, tier4Draws=136, shadowDraws=329275, shadowOriginalTriangles=327908952, shadowReplacementTriangles=318260068, terrainDraws=45644452, terrainInputTriangles=35126376768, terrainRenderedTriangles=35093967942, distantDraws=44205851, distantInputTriangles=34210672908, distantRenderedTriangles=34178264082], afterReopenClose=Stats[uploads=2024, uploadedBytes=285563920, draws=1412257, originalTriangles=1185999414, replacementTriangles=1153590588, staleFallbacks=121, uploadFailures=0, chargedBytes=0, residentMeshes=0, retiredMeshes=0, frameUploadBytes=0, prepareNanos=0, frameSelected=0, tier1Draws=1282151, tier2Draws=119627, tier3Draws=10343, tier4Draws=136, shadowDraws=329275, shadowOriginalTriangles=327908952, shadowReplacementTriangles=318260068, terrainDraws=45644452, terrainInputTriangles=35126376768, terrainRenderedTriangles=35093967942, distantDraws=44205851, distantInputTriangles=34210672908, distantRenderedTriangles=34178264082]}
+[14:00:22] [Render thread/INFO] (WorldGeometryAdapter) Shader pack 'metalcraft-standard' leaves 1 pipeline(s) outside the G-buffer: [minecraft:pipeline/translucent_terrain]
+[14:00:22] [Render thread/INFO] (Minecraft) Stopping!
+
+BUILD SUCCESSFUL in 1m 14s
+8 actionable tasks: 2 executed, 6 up-to-date

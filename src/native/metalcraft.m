@@ -63,7 +63,8 @@ enum {
 	MCCommandSetUniformBuffer = 2,
 	MCCommandSetTexture = 3,
 	MCCommandSetSampler = 4,
-	MCCommandDrawIndexed = 5
+	MCCommandDrawIndexed = 5,
+	MCCommandSetPipeline = 6
 };
 
 /** 'MCMD'. */
@@ -3762,6 +3763,8 @@ static MCObjectType mc_command_operand_type(int32_t opcode) {
 			return MCObjectTypeTextureView;
 		case MCCommandSetSampler:
 			return MCObjectTypeSampler;
+		case MCCommandSetPipeline:
+			return MCObjectTypeRenderPipeline;
 		default:
 			return (MCObjectType)0;
 	}
@@ -3786,6 +3789,12 @@ static BOOL mc_validate_command(JNIEnv *env, const MCCommand *command, int32_t i
 		problem = @"resource handle or reserved field";
 	} else {
 		switch (command->opcode) {
+			case MCCommandSetPipeline:
+				if (command->slot != 0 || command->stages != 0 || command->offset != 0
+					|| command->count != 0 || command->instanceCount != 0 || command->baseVertex != 0 || command->baseInstance != 0) {
+					problem = @"pipeline command fields";
+				}
+				break;
 			case MCCommandSetVertexBuffer:
 				if (command->slot < 0 || command->slot >= 31 || command->offset < 0) {
 					problem = @"vertex-buffer binding index or offset";
@@ -3949,6 +3958,16 @@ static void mc_encode_commands(
 		}
 		NSUInteger slot = (NSUInteger)command->slot;
 		switch (command->opcode) {
+			case MCCommandSetPipeline: {
+				MCMetalRenderPipeline *pipeline = object;
+				[encoder setRenderPipelineState:pipeline.pipelineState];
+				[encoder setDepthStencilState:pipeline.depthStencilState];
+				[encoder setFrontFacingWinding:MTLWindingClockwise];
+				[encoder setCullMode:pipeline.cullMode];
+				[encoder setTriangleFillMode:pipeline.fillMode];
+				[encoder setDepthBias:pipeline.depthBiasConstant slopeScale:pipeline.depthBiasSlopeScale clamp:0.0F];
+				break;
+			}
 			case MCCommandSetVertexBuffer:
 				[encoder setVertexBuffer:object offset:(NSUInteger)command->offset atIndex:slot];
 				break;

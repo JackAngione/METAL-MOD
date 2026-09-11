@@ -23,7 +23,32 @@ public final class LodSmoke {
         residency();
         bakedFaces();
         captureLifecycle();
+        atlas();
+        check(LodSettings.defaults().meshBudgetBytes(64L << 30, 1L << 30, 0) == (512L << 20), "automatic working-set budget is capped");
+        check(LodSettings.defaults().meshBudgetBytes(1L << 30, 1L << 30, 0) == 1, "other renderer pressure removes admission headroom");
+        check(LodSettings.defaults().meshBudgetBytes(0, 1L << 30, 0) == (128L << 20), "unknown working set retains a bounded fallback");
         System.out.println("LOD smoke passed: settings recovery/round trip/gates, exact surface coverage, caves/overhangs/materials/seams, selection and stale/bounded jobs");
+    }
+
+    private static void atlas() {
+        var left = new LodBakedMesh.Sprite("left", 0, 0, .5f, 1);
+        var right = new LodBakedMesh.Sprite("right", .5f, 0, 1, 1);
+        var atlas = new LodAtlas(List.of(left, right));
+        check(atlas.resolve(.01f, .01f, .49f, .99f) == left, "shrunken emitted UVs resolve to real atlas bounds");
+        check(atlas.resolve(.51f, .01f, .99f, .99f) == right, "neighbor sprite identity remains distinct");
+        check(atlas.resolve(.49f, .1f, .51f, .9f) == null, "footprint crossing atlas sprites declines");
+        check(atlas.resolve(Float.NaN, 0, .5f, 1) == null, "nonfinite footprint declines");
+        check(new LodAtlas(List.of(left, left)).resolve(.1f, .1f, .4f, .9f) == null, "ambiguous overlapping atlas sprites decline");
+        var tracker = new LodRevisionTracker(1);
+        var ticket = tracker.capture(0, 0, 0);
+        var releases = new java.util.concurrent.atomic.AtomicInteger();
+        var payload = new LodBakedMesh.Simplified(true, List.of(), List.of(), 0);
+        LodAtlas.publish(atlas);
+        var capture = new LodCapturedMesh(ticket, payload, atlas, releases::incrementAndGet);
+        LodAtlas.clear();
+        check(ticket.current() && capture.currentMesh() == null, "atlas replacement independently invalidates UV ownership");
+        capture.close();
+        check(releases.get() == 1, "atlas-stale source charge releases exactly once");
     }
 
     private static void captureLifecycle() {
@@ -76,6 +101,23 @@ public final class LodSmoke {
         var snapshot = new LodBakedMesh(quads);
         var merged = snapshot.simplify(4);
         check(merged.supported() && merged.quads() == 61, "actual baked faces merge with unit boundary strips");
+        var vertexBytes = java.nio.ByteBuffer.allocate(merged.quads() * 4 * LodWorldMesh.VERTEX_BYTES).order(java.nio.ByteOrder.nativeOrder());
+        var metadata = java.nio.ByteBuffer.allocate(merged.quads() * 4 * LodWorldMesh.METADATA_BYTES).order(java.nio.ByteOrder.nativeOrder());
+        LodWorldMesh.write(merged, vertexBytes, metadata);
+        check(vertexBytes.position() == vertexBytes.capacity() && metadata.position() == metadata.capacity(), "world BLOCK and sidecar byte counts agree");
+        int repeated = 0;
+        for (int i = 0; i < merged.quads() * 4; i++) {
+            int vertex = i * LodWorldMesh.VERTEX_BYTES, meta = i * LodWorldMesh.METADATA_BYTES;
+            check(vertexBytes.getFloat(vertex + 4) == 8 && vertexBytes.getInt(vertex + 12) == -1
+                    && vertexBytes.getInt(vertex + 24) == 240, "world upload preserves surface plane/tint/light ABI");
+            if (metadata.getFloat(meta + 24) == 1) {
+                repeated++;
+                float u = vertexBytes.getFloat(vertex + 16), v = vertexBytes.getFloat(vertex + 20);
+                check(u >= 0 && u <= 14 && v >= 0 && v <= 14, "unwrapped block coordinates bounded by merged face");
+                check(metadata.getFloat(meta + 40) == .5f && metadata.getFloat(meta + 44) == .5f, "real atlas rectangle survives upload");
+            }
+        }
+        check(repeated == 4, "one 14x14 inner face repeats; boundary faces retain original samples");
         for (int tier = 1; tier <= 4; tier++) {
             Set<String> coverage = new HashSet<>();
             for (var rect : snapshot.simplify(tier).rectangles()) {

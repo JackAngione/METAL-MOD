@@ -192,7 +192,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		if (this.pipeline != compiled) {
 			this.pipeline = compiled;
 			this.clearBoundSlots();
-			this.pass().setPipeline(compiled.metal(this.hasDepth, this.colorFormat));
+			this.encodePipeline(compiled.metal(this.hasDepth, this.colorFormat));
 		}
 	}
 
@@ -306,6 +306,10 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			for (RenderPass.Draw<T> draw : draws) {
 				BiConsumer<T, RenderPass.UniformUploader> uploader = draw.uniformUploaderConsumer();
 				if (uploader != null) uploader.accept(uniformArgument, this::setUniform);
+				if (dev.metalcraft.client.lod.LodLoadedRenderer.AVAILABLE
+					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source
+					&& source.metalcraft$lodDraw() != null
+					&& this.tryLodDraw(source.metalcraft$lodDraw(), baseline, defaultIndexBuffer, defaultIndexType)) continue;
 				this.setIndexBuffer(draw.indexBuffer() == null ? defaultIndexBuffer : draw.indexBuffer(), draw.indexType() == null ? defaultIndexType : draw.indexType());
 				this.setVertexBuffer(draw.slot(), draw.vertexBuffer().slice());
 				WaterMeshBinding water = waterEligible && ((Object)draw) instanceof WaterDrawSource source ? source.metalcraft$waterMesh() : null;
@@ -331,6 +335,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 				} else {
 					this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
 				}
+				if (dev.metalcraft.client.lod.LodLoadedRenderer.AVAILABLE
+					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source && source.metalcraft$isTerrain())
+					dev.metalcraft.client.lod.LodLoadedRenderer.encodedTerrain(draw.indexCount(), draw.indexCount(), source.metalcraft$isDistant());
 			}
 		} finally {
 			// Cleared before the batch is submitted, so a draw that threw part-way discards what it
@@ -339,6 +346,37 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		}
 		if (batch != null) this.submitBatch(batch);
 		if (this.originalPipeline != baseline) this.setPipeline(baseline);
+	}
+
+	/** Decline before changing the ordinary draw's ownership if any required resource is unavailable. */
+	private boolean tryLodDraw(dev.metalcraft.client.lod.LodLoadedRenderer.Draw draw, RenderPipeline baseline,
+		@Nullable GpuBuffer indices, @Nullable IndexType indexType) {
+		if (!this.hasDepth || !(indices instanceof MetalGpuBuffer) || indices.isClosed() || indexType == null
+			|| !this.uniforms.containsKey("ChunkSection") || !this.uniforms.containsKey("Projection")
+			|| !this.uniforms.containsKey("Globals") || !this.uniforms.containsKey("Fog")
+			|| !this.textures.containsKey("Sampler0") || !this.textures.containsKey("Sampler2")) return false;
+		MetalCompiledRenderPipeline alternate = this.device.lodPipeline(baseline, this.hdrOwned);
+		if (alternate == null) return false;
+		MetalRenderPipeline nativePipeline = alternate.metal(this.hasDepth, this.colorFormat);
+		var mesh = draw.borrow(this.device);
+		if (mesh == null) return false;
+		// Pipeline changes stay in draw order inside the same native command stream.
+		this.encodePipeline(nativePipeline);
+		this.pipeline = alternate;
+		this.clearBoundSlots();
+		this.encodeVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, mesh.vertices(), 0);
+		this.encodeUniformBuffer(14, mesh.metadata(), 0, MetalRenderPass.STAGE_VERTEX);
+		this.setIndexBuffer(indices, indexType);
+		this.drawIndexed(mesh.indexCount(), 1, 0, 0, 0);
+		draw.encoded(mesh);
+		// Restores both the native program and its stage-specific binding cache.
+		this.setPipeline(baseline);
+		return true;
+	}
+
+	private void encodePipeline(final MetalRenderPipeline pipeline) {
+		if (this.recording != null) this.metal().recordPipeline(this.recording, pipeline);
+		else this.pass().setPipeline(pipeline);
 	}
 
 	@Override

@@ -112,6 +112,10 @@ final class MetalWaterIdentityGameTest {
 				this.captureW6Comparisons(world);
 				return;
 			}
+			if (Boolean.getBoolean("metalcraft.waterW5Probe")) {
+				this.captureW5Comparisons(world);
+				return;
+			}
 			if (Boolean.getBoolean("metalcraft.waterDetailProbe")) {
 				this.context.getInput().resizeWindow(RESIZED_WIDTH, RESIZED_HEIGHT);
 				this.context.waitFor(client -> client.getWindow().getWidth() == RESIZED_WIDTH
@@ -650,12 +654,14 @@ final class MetalWaterIdentityGameTest {
 		world.getServer().runCommand("tp @a -10 180 68 180 -30");
 		this.context.getInput().lookAt(180, -30);
 		this.context.waitTicks(20);
+		this.assertCameraFog(true, "W5 submerged refraction fallback");
+		// LocalPlayer's underwater vision still adapts on client ticks while server ticks
+		// are frozen. Wait for its final fog distance before comparing shader modes.
+		this.context.waitFor(client -> client.player.getWaterVision() == 1.0F, 1200);
 		Path underwaterOff = this.capture(WaterRoutingDebug.Mode.REFRACTION_OFF,
 			"metalcraft-water-w5-underwater-refraction-off", false);
 		Path underwater = this.capture(WaterRoutingDebug.Mode.OFF,
 			"metalcraft-water-w5-underwater-fallback", false);
-		// Vanilla's underwater overlay can vary a few encoded values between adjacent captures.
-		// A 40/765 RGB-distance threshold is just above 5%; larger changes indicate shading.
 		if (differentSamples(underwaterOff, underwater, 0.0, 1.0, 40) > 20) {
 			throw new AssertionError("W5 underwater view did not use the explicit W4 fallback");
 		}

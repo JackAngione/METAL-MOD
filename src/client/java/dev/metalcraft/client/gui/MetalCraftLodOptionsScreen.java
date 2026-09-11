@@ -38,7 +38,8 @@ public final class MetalCraftLodOptionsScreen extends Screen {
         rows.defaultCellSetting().alignHorizontallyCenter();
         LodSettings settings = MetalCraftConfig.lod();
         LodCapabilities capabilities = LodCapabilities.current("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()));
-        String reason = capabilities.metal() ? "pending_geometry" : "requires_metal";
+        String reason = !capabilities.metal() ? "requires_metal" : capabilities.geometry() ? "experimental_geometry"
+                : LodCapabilities.EXPERIMENTAL ? "unsupported_pack" : "pending_geometry";
         rows.addChild(new MultiLineTextWidget(text(reason), font).setMaxWidth(width).setCentered(true));
         var enabled = CycleButton.onOffBuilder(capabilities.effective(settings).enabled())
                 .withTooltip(v -> Tooltip.create(text(reason)))
@@ -68,6 +69,28 @@ public final class MetalCraftLodOptionsScreen extends Screen {
                     MetalCraftConfig.setLod(MetalCraftConfig.lod().withGeometry(MetalCraftConfig.lod().fullDetailChunks(), v));
                     minecraft.gui.setScreen(new MetalCraftLodOptionsScreen(parent));
                 }));
+        if (capabilities.geometry()) {
+            rows.addChild(CycleButton.onOffBuilder(settings.smoothTransitions())
+                    .withTooltip(v -> Tooltip.create(text("smoothing.tooltip")))
+                    .create(0, 0, width, 20, text("smoothing"), (b, v) -> {
+                        var current = MetalCraftConfig.lod();
+                        MetalCraftConfig.setLod(current.withRuntimeLimits(v, current.meshBudgetMiB(), current.backgroundWork()));
+                    }));
+            rows.addChild(CycleButton.<Integer>builder(v -> v == 0 ? text("automatic") : Component.translatable("metalcraft.lod.memory_mib", v), settings.meshBudgetMiB())
+                    .withValues(0, 128, 256, 512, 1024, 2048)
+                    .withTooltip(v -> Tooltip.create(text("memory.tooltip")))
+                    .create(0, 0, width, 20, text("memory"), (b, v) -> {
+                        var current = MetalCraftConfig.lod();
+                        MetalCraftConfig.setLod(current.withRuntimeLimits(current.smoothTransitions(), v, current.backgroundWork()));
+                    }));
+            rows.addChild(CycleButton.<LodSettings.Work>builder(v -> text("work." + v.name().toLowerCase(Locale.ROOT)), settings.backgroundWork())
+                    .withValues(LodSettings.Work.values())
+                    .withTooltip(v -> Tooltip.create(text("work.tooltip")))
+                    .create(0, 0, width, 20, text("work"), (b, v) -> {
+                        var current = MetalCraftConfig.lod();
+                        MetalCraftConfig.setLod(current.withRuntimeLimits(current.smoothTransitions(), current.meshBudgetMiB(), v));
+                    }));
+        }
         rows.addChild(new MultiLineTextWidget(text("pending_stages"), font).setMaxWidth(width).setCentered(true));
         rows.addChild(Button.builder(text("reset"), b -> {
             MetalCraftConfig.setLod(LodSettings.defaults());
