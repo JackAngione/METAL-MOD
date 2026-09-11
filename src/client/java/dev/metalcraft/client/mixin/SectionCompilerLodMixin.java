@@ -1,0 +1,32 @@
+package dev.metalcraft.client.mixin;
+
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.mojang.blaze3d.vertex.VertexSorting;
+import dev.metalcraft.client.lod.LodCompilerCapture;
+import net.minecraft.client.renderer.SectionBufferBuilderPack;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import net.minecraft.client.renderer.chunk.RenderSectionRegion;
+import net.minecraft.client.renderer.chunk.SectionCompiler;
+import net.minecraft.core.SectionPos;
+import org.spongepowered.asm.mixin.Mixin;
+
+/** Reads final output on its compiler worker before upload/release; ordinary draws stay untouched. */
+@Mixin(SectionCompiler.class)
+abstract class SectionCompilerLodMixin {
+    @WrapMethod(method = "compile")
+    private SectionCompiler.Results metalcraft$captureLod(SectionPos section, RenderSectionRegion region,
+            VertexSorting sorting, SectionBufferBuilderPack builders, Operation<SectionCompiler.Results> original) {
+        SectionCompiler.Results results = original.call(section, region, sorting, builders);
+        if (LodCompilerCapture.ENABLED) {
+            try {
+                LodCompilerCapture.capture(section.asLong(), results.renderedLayers.get(ChunkSectionLayer.SOLID),
+                        results.renderedLayers.keySet().stream().allMatch(layer -> layer == ChunkSectionLayer.SOLID));
+            } catch (RuntimeException | Error error) {
+                results.release();
+                throw error;
+            }
+        }
+        return results;
+    }
+}

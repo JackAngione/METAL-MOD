@@ -21,7 +21,42 @@ public final class LodSmoke {
         selection();
         scheduling();
         residency();
+        bakedFaces();
         System.out.println("LOD smoke passed: settings recovery/round trip/gates, exact surface coverage, caves/overhangs/materials/seams, selection and stale/bounded jobs");
+    }
+
+    private static void bakedFaces() {
+        var sprite = new LodBakedMesh.Sprite("minecraft:stone", 0, 0, .5f, .5f);
+        var quads = new java.util.ArrayList<LodBakedMesh.Quad>();
+        for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
+            quads.add(new LodBakedMesh.Quad(sprite, List.of(
+                    new LodBakedMesh.Vertex(x, 8, z, 0, 0, -1, 240),
+                    new LodBakedMesh.Vertex(x, 8, z + 1, .5f, 0, -1, 240),
+                    new LodBakedMesh.Vertex(x + 1, 8, z + 1, .5f, .5f, -1, 240),
+                    new LodBakedMesh.Vertex(x + 1, 8, z, 0, .5f, -1, 240))));
+        }
+        var snapshot = new LodBakedMesh(quads);
+        var merged = snapshot.simplify(4);
+        check(merged.supported() && merged.quads() == 61, "actual baked faces merge with unit boundary strips");
+        for (int tier = 1; tier <= 4; tier++) {
+            Set<String> coverage = new HashSet<>();
+            for (var rect : snapshot.simplify(tier).rectangles()) {
+                for (int v = 0; v < rect.height(); v++) for (int u = 0; u < rect.width(); u++)
+                    check(coverage.add((rect.u() + u) + ":" + (rect.v() + v)), "baked face owned once");
+            }
+            check(coverage.size() == 256, "all emitted baked surfaces preserved");
+        }
+        var vertices = new java.util.ArrayList<>(quads.getFirst().vertices());
+        var first = vertices.getFirst();
+        vertices.set(0, new LodBakedMesh.Vertex(first.x(), first.y(), first.z(), first.u(), first.v(), 0xff112233, 16));
+        var shaded = new LodBakedMesh.Quad(sprite, vertices);
+        var exact = new LodBakedMesh(List.of(shaded)).simplify(4);
+        check(exact.supported() && exact.unmerged().equals(List.of(shaded)), "AO and light gradients retained verbatim");
+        vertices.set(0, new LodBakedMesh.Vertex(.25f, first.y(), first.z(), first.u(), first.v(), -1, 240));
+        check(!new LodBakedMesh(List.of(new LodBakedMesh.Quad(sprite, vertices))).simplify(4).supported(), "custom/thin models reject section");
+        check(!new LodBakedMesh(List.of(quads.getFirst(), quads.getFirst())).simplify(4).supported(), "overlapping model faces reject section");
+        quads.clear();
+        check(snapshot.quads().size() == 256 && shaded.vertices().getFirst().color() == 0xff112233, "copied baked snapshot owns data");
     }
 
     private static void settings() {

@@ -173,10 +173,11 @@ The tested `LodMetalGeometry` prototype draws a custom vertex ABI into an isolat
 color/depth pass. Its appearance resolver is synthetic. It must not replace a vanilla
 draw until the following contracts are implemented and verified:
 
-- Capture actual model/atlas appearance, tint and per-vertex light/AO. Vanilla's
-  `BlockQuadOutput` receives `BakedQuad` and `QuadInstance` values after lighting;
-  copy those values before reuse if this seam is selected. Irregular models, cutouts,
-  fluids, rotated/noncanonical UVs and nonconstant shading need explicit policies.
+- Capture actual model/atlas appearance, tint and per-vertex light/AO. The final
+  `MeshData` capture below is verified across Fabric's alternate block renderer.
+  Irregular models, cutouts, fluids and nonconstant shading need explicit policies.
+  Emitted UV bounds alone do not identify a sprite or its atlas gutter; production
+  mip/animation/reload handling still needs a generation-scoped material resolver.
 - Carry session/resource/revision IDs from extraction through build and upload.
   Recheck compiled-mesh identity before suppressing an ordinary draw, since an
   upload may replace it between preparation and submission.
@@ -192,3 +193,47 @@ draw until the following contracts are implemented and verified:
 
 No-pack and Standard both remain gated for live LOD. Multiresolution composition,
 shadow LOD and extended-horizon rendering have no advertised capability yet.
+
+## Final-mesh capture and feasibility evidence
+
+The initial `BlockQuadOutput` hook failed coverage validation: populated final meshes
+contained vertices that never passed through that callback. Inspection of the installed
+Fabric renderer API 14.1.3+2b0d8a229e's `SectionCompilerMixin` bytecode confirms that
+`tesselateBlockProxy` calls `AltModelBlockRenderer` with its own `QuadEmitter`, whose
+output writes to the same layer builders. A vanilla-only model callback is therefore
+not an authoritative snapshot seam in this mod configuration.
+
+`SectionCompilerLodMixin` instead reads completed `MeshData` while its compiler worker
+still owns it, after all emitters finish and before upload/release. It validates the
+BLOCK vertex ABI and copies packed color/light, positions and UVs. No mutable world,
+model, atlas object or buffer escapes the diagnostic. Admission reserves a conservative
+16 MiB per compile, with a 64 MiB aggregate cap and 8,192-quad section limit. All
+reservations are released in `finally`; disabled normal gameplay performs no capture.
+
+`LodBakedMesh` merges exact unit faces only when shading, UV orientation and material
+footprint match. It preserves nonuniform vertex shading verbatim, rejects custom or
+overlapping geometry, and retains unit section-edge tessellation. CPU coverage
+fixtures test every tier, preserved light/AO gradients, copy isolation and fallback.
+
+Live command (38 s, Apple M4 Max/64 GB, Default confirmed Metal):
+
+```bash
+./gradlew runClient -PmetalLifecycleTest -PmetalLodCompilerTest=true \
+  --args='--graphicsBackend default'
+```
+
+This creates a normal generated world with seed `metalcraft`, render/simulation 16,
+and visits the snowy mountain baseline area. It watches section (-97, 10, -8), edits
+block (-1540, 175, -128), requires that section to recompile, reloads resources,
+requires it to recompile again, closes the world, then requires zero reserved bytes.
+The [capture report](evidence/lod/compiler-capture/metrics.json) and
+[ordinary-rendering screenshot](evidence/lod/compiler-capture/scene.png) are retained.
+
+After close: 1,805 observed compiles; 145 supported, 1,619 material/layer rejections,
+41 geometry rejections, zero admission misses and zero reserved bytes. Supported
+quads reduced 39,412 → 38,033 (3.50%). Relative to 856,341 total captured solid quads,
+that is 0.16%. These are compile observations including rebuilds, not unique visible
+terrain or an LOD-on draw census. The screenshot shows ordinary rendering, and no
+frame-time gain is claimed. This result rules out treating the conservative fixture's
+76.2% reduction as representative of the live world. The performance target needs a
+broader simplification/material design before live ownership can be promoted.

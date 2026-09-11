@@ -191,8 +191,8 @@ can proceed during P1 capture; integration acceptance still depends on P1.
     `./gradlew build` passed including shader smoke checks on M4 Max/64 GB.
     The 4K/16/16 Default benchmark confirmed Metal at startup but was stopped
     because another task launched a client in the same checkout. Shared launch
-    artifacts/logs and GPU contention invalidate the attempt. P1 remains unchecked;
-    repeat with isolated launch files and exclusive GPU use before accepting timings.
+    artifacts/logs and GPU contention invalidated that attempt. P1 was left unchecked
+    until the isolated captures below completed with exclusive GPU use.
   - Subsequent isolated runs completed: [source audit and measurements](LOD_INTEGRATION_AUDIT.md).
     Route version 2 verifies actual pitch and identical repeat endpoints, includes
     CPU percentiles, command-buffer GPU means and sampled heap/Metal allocations.
@@ -257,6 +257,21 @@ can proceed during P1 capture; integration acceptance still depends on P1.
   - Candidate selection now has neighbor relaxation (at most one tier difference)
     and bounded coarsening with immediate near-detail restoration. These are CPU
     components awaiting the live selection/availability integration, not shipped LOD.
+  - Final-mesh capture is verified through a bounded opt-in diagnostic, including
+    Fabric's alternate renderer. It copies final packed color/light, positions and UVs
+    before upload/release. Nonuniform shading remains unmerged; custom geometry and
+    non-solid sections fall back. Capture still does not publish replacement draws.
+    `./gradlew runClient -PmetalLifecycleTest -PmetalLodCompilerTest=true
+    --args='--graphicsBackend default'` passed (38 s, M4 Max, generated normal world,
+    seed `metalcraft`, 16/16). The test watches the edited section specifically,
+    confirms recompilation after its block edit and resource reload, and verifies
+    zero reserved capture bytes after close. Evidence: `docs/evidence/lod/compiler-capture/`.
+  - Feasibility result: 145 of 1,805 observed compiles supported conservative
+    section replacement; their quads reduced 39,412 → 38,033. Across all 856,341
+    captured solid quads the reduction is only 0.16%. Counts include repeated builds,
+    not unique visible sections or final draw counts. No GPU speedup was measured.
+    This builder is insufficient for the performance target. Broader material/shading
+    simplification and live ownership integration remain necessary; P4–P8 stay open.
 - [ ] P5 — Composition and material compatibility. Validate standard/no-pack paths,
   cutouts, shadow LOD, weather, entities, transparency, and reload behavior; follow
   the water plan for relevant effects. Acceptance: visual evidence and GPU readback

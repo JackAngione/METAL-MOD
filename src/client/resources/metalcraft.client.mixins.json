@@ -24,6 +24,7 @@
     "PreparedRenderTypeMixin",
     "ShaderManagerMixin",
     "SectionCompilerWaterMixin",
+    "SectionCompilerLodMixin",
     "VideoSettingsScreenMixin",
     "WindowFramebufferAccessor",
     "WindowRenderResolutionMixin",
