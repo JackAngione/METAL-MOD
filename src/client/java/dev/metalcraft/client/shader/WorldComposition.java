@@ -9,15 +9,19 @@ import org.jspecify.annotations.Nullable;
 /**
  * World-only pack insertion relative to Minecraft 26.2's frame graph.
  *
- * <p>Live identity/grade still encodes at {@link Stage#PRESENT} from
- * {@code MetalGpuSurface.blitFromTexture} so {@code blitToDrawable(post_color)} and the vanilla
- * fallback stay intact. Effects that must exclude HUD/hand consume {@link #PACK_POST} bindings,
- * whose world depth is a snapshot taken before later depth writes.
+ * <p>Live grading runs before the hand-depth clear in {@code GameRenderer.renderLevel}.
+ * A linear world session wraps {@code LevelRenderer.render} and grades with
+ * {@code gradeLinearWorld} into the encoded main color at that same seam; otherwise the
+ * encoded {@code gradeWorld} path remains. Presentation copies the completed scene without
+ * running the pack again. World consumers receive a stored depth snapshot taken before hand
+ * and HUD can overwrite main depth.
  */
 public final class WorldComposition {
 	/**
 	 * After the world graph (opaque exports, forward/translucent composition, Fabulous, particles,
-	 * clouds, weather, outlines) and before hand, underwater overlay, spectator chains, and HUD.
+	 * clouds, weather, outline generation/filtering) and before hand, underwater overlay,
+	 * final outline composition, spectator chains, and HUD. The final outline blit remains
+	 * an encoded overlay after grading; its intermediate is not a linear world producer.
 	 */
 	public static final Stage PACK_POST = Stage.WORLD_GRADE_AA;
 
@@ -34,7 +38,7 @@ public final class WorldComposition {
 		"LevelRenderer.addCloudsPass",
 		"LevelRenderer.addWeatherPass",
 		"LevelRenderer.addAlwaysOnTopPass",
-		"LevelRenderer.doEntityOutline / ENTITY_OUTLINE_POST_CHAIN_ID"
+		"LevelRenderer.render / ENTITY_OUTLINE_POST_CHAIN_ID (outline generation/filtering only)"
 	);
 
 	/**
@@ -44,6 +48,7 @@ public final class WorldComposition {
 	public static final List<String> AFTER_WORLD_SITES = List.of(
 		"GameRenderer.renderItemInHand",
 		"ScreenEffectRenderer.submitWater / submitFire (underwater and fire overlays)",
+		"GameRenderer.render → LevelRenderer.doEntityOutline (encoded final outline blit)",
 		"GameRenderer.checkEntityPostEffect / postEffectId (spectator)",
 		"GuiRenderer (HUD / 2D GUI)"
 	);
@@ -81,6 +86,13 @@ public final class WorldComposition {
 		final MetalTextureView worldDepthView,
 		final @Nullable Matrix4fc worldProjection
 	) {
+		return world(scene, sceneView, width, height, worldDepth, worldDepthView, worldProjection,
+			FrameBindings.ColorEncoding.LEGACY_ENCODED);
+	}
+
+	public static FrameBindings world(final MetalTexture scene, final MetalTextureView sceneView,
+		final int width, final int height, final MetalTexture worldDepth, final MetalTextureView worldDepthView,
+		final @Nullable Matrix4fc worldProjection, final FrameBindings.ColorEncoding colorEncoding) {
 		return new FrameBindings(
 			scene,
 			sceneView,
@@ -91,7 +103,8 @@ public final class WorldComposition {
 			worldProjection,
 			worldDepth.descriptor().width(),
 			worldDepth.descriptor().height(),
-			PACK_POST
+			PACK_POST,
+			colorEncoding
 		);
 	}
 }

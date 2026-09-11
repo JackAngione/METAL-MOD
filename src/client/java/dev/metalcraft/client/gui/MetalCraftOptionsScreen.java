@@ -117,9 +117,10 @@ public final class MetalCraftOptionsScreen extends Screen {
 					runtime.setOption(option.id(), nextValue(runtime.optionValue(option.id()), option));
 					button.setMessage(optionMessage(runtime, option));
 				}).width(310).build();
-			optionWidget.setTooltip(Tooltip.create(Component.translatable(
-				"metalcraft.options.shader_option.tooltip", option.category(), option.apply().name().toLowerCase()
-			)));
+			optionWidget.setTooltip(Tooltip.create(isStandardWaterOption(runtime, option)
+				? Component.translatable("metalcraft.water." + option.id() + ".tooltip")
+				: Component.translatable("metalcraft.options.shader_option.tooltip",
+					option.category(), option.apply().name().toLowerCase())));
 			contents.addChild(optionWidget);
 		}
 	}
@@ -163,8 +164,23 @@ public final class MetalCraftOptionsScreen extends Screen {
 	}
 
 	private static Component optionMessage(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		if (isStandardWaterOption(runtime, option)) {
+			Object value = runtime.optionValue(option.id());
+			Component label = option.id().equals("water_detail")
+				? Component.translatable("metalcraft.water.detail." + ((Number)value).intValue())
+				: option.id().equals("water_detail_distance")
+				? Component.literal(Integer.toString(((Number)value).intValue()))
+				: value instanceof Number number
+				? Component.literal(Math.round(number.doubleValue() * 100) + "%")
+				: Component.translatable("metalcraft.water.value." + value);
+			return Component.translatable("metalcraft.water." + option.id(), label);
+		}
 		String name = option.id().replace('_', ' ');
 		return Component.literal(name + ": " + runtime.optionValue(option.id()));
+	}
+
+	private static boolean isStandardWaterOption(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		return ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId()) && option.id().startsWith("water_");
 	}
 
 	private static Object nextValue(final Object current, final ShaderPack.Option option) {

@@ -56,34 +56,34 @@ fragment ResolveTargets resolve_fragment(
         : 1.0;
     visibility = mix(1.0, visibility, mc_shadow_distance_fade(viewDepth, shadowFrame));
     if (options.debugView == 2) {
-        out.scene = float4(previous.albedo.rgb, 1.0);
+        out.scene = mc_scene_seed(float4(previous.albedo.rgb, 1.0));
         out.albedo.a = 0.0;
         return out;
     }
     if (options.debugView == 3) {
-        out.scene = float4(previous.normal.rg, 0.5, 1.0);
+        out.scene = mc_scene_seed(float4(previous.normal.rg, 0.5, 1.0));
         out.albedo.a = 0.0;
         return out;
     }
     if (options.debugView == 4) {
-        out.scene = float4(previous.light.rg, 0.0, 1.0);
+        out.scene = mc_scene_seed(float4(previous.light.rg, 0.0, 1.0));
         out.albedo.a = 0.0;
         return out;
     }
     if (options.debugView == 5) {
         // Camera-relative receiver, mapped from [-32, 32] so a known fixture is a solid colour.
-        out.scene = float4(validDepth ? cameraRelative / 64.0 + 0.5 : float3(0.0), 1.0);
+        out.scene = mc_scene_seed(float4(validDepth ? cameraRelative / 64.0 + 0.5 : float3(0.0), 1.0));
         out.albedo.a = 0.0;
         return out;
     }
     if (options.debugView == 6) {
         float covered = cascade < min(shadowFrame.cascadeCount, 4u) ? 1.0 : 0.0;
-        out.scene = float4(covered * float(cascade + 1u) / 4.0, covered, validDepth ? 1.0 : 0.0, 1.0);
+        out.scene = mc_scene_seed(float4(covered * float(cascade + 1u) / 4.0, covered, validDepth ? 1.0 : 0.0, 1.0));
         out.albedo.a = 0.0;
         return out;
     }
     if (options.debugView == 7) {
-        out.scene = float4(float3(visibility), 1.0);
+        out.scene = mc_scene_seed(float4(float3(visibility), 1.0));
         out.albedo.a = 0.0;
         return out;
     }

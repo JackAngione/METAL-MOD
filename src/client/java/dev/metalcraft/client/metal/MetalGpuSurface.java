@@ -8,9 +8,7 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.shader.WorldGeometryAdapter;
-import dev.metalcraft.client.shader.FrameBindings;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
-import dev.metalcraft.client.shader.WorldComposition;
 import java.util.Collection;
 import java.util.List;
 import org.slf4j.Logger;
@@ -99,26 +97,6 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 			throw new IllegalStateException("Metal surface has no acquired drawable");
 		}
 		MetalTexture scene = metalView.texture().metal();
-		ShaderPackRuntime runtime = this.device.shaderPackRuntime();
-		if (runtime != null && runtime.isActive()) {
-			try {
-				MetalCommandBuffer commands = metalEncoder.commands();
-				runtime.resizeToScene(metalView.getWidth(0), metalView.getHeight(0));
-				FrameBindings bindings = WorldComposition.present(
-					scene, metalView.metal(), runtime.frameWidth(), runtime.frameHeight()
-				);
-				if (runtime.executor().orElseThrow().encode(commands, bindings)) {
-					MetalTexture post = runtime.target("post_color");
-					if (post != null) {
-						metalEncoder.blitToDrawable(post, this.drawable);
-						return;
-					}
-				}
-			} catch (RuntimeException error) {
-				LOGGER.error("MetalCraft shader pack failed to encode; presenting vanilla scene", error);
-				runtime.markFailed(error.getMessage() == null ? error.toString() : error.getMessage(), error);
-			}
-		}
 		metalEncoder.blitToDrawable(scene, this.drawable);
 	}
 

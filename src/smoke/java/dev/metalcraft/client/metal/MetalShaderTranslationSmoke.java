@@ -326,6 +326,25 @@ public final class MetalShaderTranslationSmoke {
 			dev.metalcraft.client.shader.world.WorldShadowModuleSmoke.run(device);
 			dev.metalcraft.client.shader.world.WorldLightingModuleSmoke.run(device);
 			assertMemorylessPassMerge();
+			WorldHdrTargetsSmoke.run();
+			OpaqueSnapshotSmoke.run();
+			WaterForwardPipelineSmoke.run();
+			WaterDepthDebugSmoke.run();
+			WaterSurfaceSmoke.run();
+			WaterReflectionSmoke.run();
+			WaterOptionsPersistenceSmoke.run();
+			UnderwaterSurfaceSmoke.run();
+			dev.metalcraft.client.shader.water.UnderwaterFrameInputsSmoke.run();
+			dev.metalcraft.client.shader.water.WaterVertexMetadataSmoke.run();
+			dev.metalcraft.client.shader.water.WaterFrameInputsSmoke.run();
+			LinearWorldSessionSmoke.run();
+			LinearWorldActivationSmoke.run();
+			LinearWorldReloadSourceSmoke.run();
+			LinearWorldShadersSmoke.run();
+			LinearWorldPostShadersSmoke.run();
+			LinearWorldTransparencyConfigSmoke.run();
+			LinearWorldFabulousPromotionSmoke.run();
+			NativeColorContractSmoke.run();
 			assertIdentityGradePack(device);
 			MetalRenderPipeline.Descriptor drawableMappedDescriptor = new MetalRenderPipeline.Descriptor(
 				mappedDescriptor.vertexSource(), mappedDescriptor.vertexFunction(), mappedDescriptor.fragmentSource(), mappedDescriptor.fragmentFunction(),
@@ -1404,9 +1423,169 @@ public final class MetalShaderTranslationSmoke {
 					assertBgraDelta(scene.readback(queue, 0), (byte)51, (byte)102, (byte)153, 2, "world tile resolve");
 				}
 			}
+			assertWorldResolveColorEncoding(gpu, runtime, encoder, scene, sceneView, depthView, queue, seed);
 			assertWorldShadowDebugViews(gpu, runtime, encoder, scene, sceneView, depthView, queue);
 		} finally {
 			gpu.forgetNativePipeline(seed);
+		}
+	}
+
+	private static void assertWorldResolveColorEncoding(
+		final MetalGpuDevice gpu,
+		final ShaderPackRuntime runtime,
+		final CommandEncoder encoder,
+		final MetalTexture legacyScene,
+		final MetalGpuTextureView legacySceneView,
+		final MetalGpuTextureView depthView,
+		final MetalCommandQueue queue,
+		final RenderPipeline legacySeed
+	) {
+		String source = """
+			#include <metal_stdlib>
+			using namespace metal;
+			vertex float4 seed_vertex(uint id [[vertex_id]]) {
+			    const float2 p[3] = {float2(-1,-1), float2(3,-1), float2(-1,3)};
+			    return float4(p[id], 0, 1);
+			}
+			struct Targets {
+			    float4 scene [[color(0)]];
+			    float4 albedo [[color(1)]];
+			    float4 normal [[color(2)]];
+			    float4 light [[color(3)]];
+			};
+			fragment Targets seed_fragment() {
+			    return {float4(2.0,0.5,0.03125,1), float4(0.2,0.4,0.6,1),
+			            float4(0.5,0.5,0.8,1.0/255), float4(0,0,0,0)};
+			}
+			""";
+		RenderPipeline.Builder builder = RenderPipeline.builder()
+			.withLocation(Identifier.parse("metalcraft:smoke/resolve_hdr_seed"))
+			.withVertexShader(Identifier.parse("metalcraft:seed"))
+			.withFragmentShader(Identifier.parse("metalcraft:seed"))
+			.withCull(false).withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+			.withColorTargetState(0, new ColorTargetState(Optional.empty(), GpuFormat.RGBA16_FLOAT,
+				ColorTargetState.WRITE_ALL));
+		for (int index = 1; index < 4; index++) {
+			builder.withColorTargetState(index, new ColorTargetState(Optional.empty(),
+				GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL));
+		}
+		RenderPipeline seed = builder.build();
+		gpu.registerNativePipeline(seed, new MetalGpuDevice.NativeProgram(source, "seed_vertex", "seed_fragment"));
+		try (MetalTexture hdr = gpu.metal().createTexture(new MetalTexture.Descriptor(
+			MetalTexture.Format.RGBA16_FLOAT, 32, 32, 1,
+			MetalTexture.USAGE_RENDER_TARGET | MetalTexture.USAGE_SHADER_READ));
+			 MetalGpuTextureView hdrView = gpu.wrapAttachment(hdr, "resolve-hdr-scene")) {
+			runtime.setOption("debug_view", "albedo");
+			runtime.worldGeometry().beginFrame();
+			try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-mode-flush-smoke",
+				legacySceneView, Optional.of(new Vector4f(0, 0, 0, 1)), depthView, OptionalDouble.of(1),
+				List.of(RenderPipelines.SOLID_TERRAIN))) {
+				WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+				pass.setPipeline(legacySeed);
+				pass.draw(3, 1, 0, 0);
+			}
+			// Switching modes must encode the pending legacy resolve before retiring its pipeline.
+			runtime.worldGeometry().beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
+			submitWorldFixture(encoder, "World mode-switch flush GPU submission timed out");
+			assertBgraDelta(legacyScene.readback(queue, 0), (byte)51, (byte)102, (byte)153, 2,
+				"pending legacy resolve before linear switch");
+			runtime.setOption("debug_view", "vanilla");
+			RenderPipeline linearStand;
+			try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-linear-resolve-smoke",
+				hdrView, Optional.of(new Vector4f(0, 0, 0, 1)), depthView, OptionalDouble.of(1),
+				List.of(RenderPipelines.SOLID_TERRAIN))) {
+				linearStand = WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+				if (linearStand == RenderPipelines.SOLID_TERRAIN
+					|| !gpu.precompileLinearWorldPipeline(linearStand, null).isValid()) {
+					throw new AssertionError("Linear Standard stand-in must carry a valid native linear contract");
+				}
+				pass.setPipeline(seed);
+				pass.draw(3, 1, 0, 0);
+			}
+			WorldGeometryAdapter.resolveOpaque();
+			submitWorldFixture(encoder, "Linear world resolve GPU submission timed out");
+			assertHalfPixel(hdr.readback(queue, 0).order(ByteOrder.nativeOrder()),
+				2.0F, 0.5F, 0.03125F, "linear world resolve preserves HDR seed");
+
+			runtime.setOption("debug_view", "albedo");
+			try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-linear-debug-smoke",
+				hdrView, Optional.of(new Vector4f(0, 0, 0, 1)), depthView, OptionalDouble.of(1),
+				List.of(RenderPipelines.SOLID_TERRAIN))) {
+				WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+				pass.setPipeline(seed);
+				pass.draw(3, 1, 0, 0);
+			}
+			WorldGeometryAdapter.resolveOpaque();
+			submitWorldFixture(encoder, "Linear debug resolve timed out");
+			assertHalfPixel(hdr.readback(queue, 0).order(ByteOrder.nativeOrder()),
+				(float)Math.pow((0.2 + 0.055) / 1.055, 2.4),
+				(float)Math.pow((0.4 + 0.055) / 1.055, 2.4),
+				(float)Math.pow((0.6 + 0.055) / 1.055, 2.4), "linear debug output");
+			runtime.setOption("debug_view", "vanilla");
+
+			runtime.worldGeometry().beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
+			try {
+				try (RenderPass ignored = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-linear-format-mismatch",
+					legacySceneView, Optional.of(new Vector4f()), depthView, OptionalDouble.of(1),
+					List.of(RenderPipelines.SOLID_TERRAIN))) {
+					throw new AssertionError("Linear world resolve accepted RGBA8 scene storage");
+				}
+			} catch (IllegalArgumentException expected) {
+				if (!expected.getMessage().contains("RGBA16_FLOAT")) throw expected;
+			}
+
+			runtime.worldGeometry().beginFrame();
+			try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-legacy-float-resolve-smoke",
+				hdrView, Optional.of(new Vector4f(0, 0, 0, 1)), depthView, OptionalDouble.of(1),
+				List.of(RenderPipelines.SOLID_TERRAIN))) {
+				RenderPipeline legacyStand = WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+				if (legacyStand == linearStand || legacyStand == RenderPipelines.SOLID_TERRAIN
+					|| !gpu.precompilePipeline(legacyStand, null).isValid()) {
+					throw new AssertionError("Switching back must build a fresh valid legacy stand-in");
+				}
+				pass.setPipeline(seed);
+				pass.draw(3, 1, 0, 0);
+			}
+			WorldGeometryAdapter.resolveOpaque();
+			submitWorldFixture(encoder, "Legacy float world resolve GPU submission timed out");
+			assertHalfPixel(hdr.readback(queue, 0).order(ByteOrder.nativeOrder()),
+				2.0F, 0.5F, 0.03125F, "legacy world resolve on float storage");
+			runtime.setOption("debug_view", "albedo");
+			try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-legacy-debug-restore",
+				hdrView, Optional.of(new Vector4f()), depthView, OptionalDouble.of(1),
+				List.of(RenderPipelines.SOLID_TERRAIN))) {
+				WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+				pass.setPipeline(seed);
+				pass.draw(3, 1, 0, 0);
+			}
+			WorldGeometryAdapter.resolveOpaque();
+			submitWorldFixture(encoder, "Legacy debug restoration timed out");
+			assertHalfPixel(hdr.readback(queue, 0).order(ByteOrder.nativeOrder()),
+				0.2F, 0.4F, 0.6F, "legacy debug restoration");
+			System.out.println("World adapter encoding: pending resolve flush, explicit native contract, HDR seed, linear debug, format rejection and legacy restoration passed");
+		} finally {
+			gpu.forgetNativePipeline(seed);
+			runtime.worldGeometry().beginFrame();
+			runtime.setOption("debug_view", "off");
+		}
+	}
+
+	private static void submitWorldFixture(final CommandEncoder encoder, final String timeout) {
+		try (var fence = encoder.createFence()) {
+			encoder.submit();
+			if (!fence.awaitCompletion(5_000_000_000L)) throw new AssertionError(timeout);
+		}
+	}
+
+	private static void assertHalfPixel(final ByteBuffer pixels, final float red, final float green,
+		final float blue, final String label) {
+		float[] expected = {red, green, blue};
+		for (int channel = 0; channel < expected.length; channel++) {
+			float actual = Float.float16ToFloat(pixels.getShort(channel * Short.BYTES));
+			if (!Float.isFinite(actual) || Math.abs(actual - expected[channel]) > 0.008F) {
+				throw new AssertionError(label + " channel " + channel + " expected=" + expected[channel]
+					+ " actual=" + actual);
+			}
 		}
 	}
 

@@ -70,6 +70,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 
 	@Override
 	public void runTest(final ClientGameTestContext context) {
+		context.runOnClient(client -> {
+			client.options.renderDistance().set(16);
+			client.options.simulationDistance().set(16);
+		});
 		String expectedBackend = System.getProperty("metalcraft.lifecycleExpectedBackend", "Metal");
 		boolean benchmark = Boolean.getBoolean("metalcraft.lifecycleBenchmark");
 		String backend = context.computeOnClient(ignored -> RenderSystem.getDevice().getDeviceInfo().backendName());
@@ -77,6 +81,11 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			throw new AssertionError("Lifecycle test selected unexpected backend: " + backend + " (expected " + expectedBackend + ")");
 		}
 		LOGGER.info("Metal lifecycle validation: {} backend selected", backend);
+
+		if (Boolean.getBoolean("metalcraft.waterIdentityTest")) {
+			new MetalWaterIdentityGameTest(context).run();
+			return;
+		}
 
 		if (Boolean.getBoolean("metalcraft.shadowVisibilityTest")) {
 			new MetalShadowVisibilityGameTest(context).run();
@@ -96,7 +105,12 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		}
 
 		try (ShaderLifecycleSelection selection = new ShaderLifecycleSelection(context);
-			TestSingleplayerContext world = context.worldBuilder().create()) {
+			TestSingleplayerContext world = context.worldBuilder().adjustSettings(settings -> {
+				var normal = settings.getSettings().worldgenLoadContext()
+					.lookupOrThrow(net.minecraft.core.registries.Registries.WORLD_PRESET)
+					.getOrThrow(net.minecraft.world.level.levelgen.presets.WorldPresets.NORMAL);
+				settings.setWorldType(new WorldCreationUiState.WorldTypeEntry(normal));
+			}).create()) {
 			context.waitFor(client -> client.level != null && client.player != null);
 			context.waitTicks(10);
 			context.getInput().lookAt(0.0F, 30.0F);

@@ -18,7 +18,7 @@ public record ShaderPack(String id, Manifest manifest, Map<String, String> metal
 	/** Host-sampled textures that are not render-target producers. */
 	public static final Set<String> EXTERNAL_TEXTURES = Set.of("shadow_map");
 	/** Host uniform buffers that are not render-target producers. */
-	public static final Set<String> EXTERNAL_BUFFERS = Set.of("shadow_frame");
+	public static final Set<String> EXTERNAL_BUFFERS = Set.of("shadow_frame", "underwater_frame");
 
 	public ShaderPack {
 		if (id == null || id.isBlank()) {

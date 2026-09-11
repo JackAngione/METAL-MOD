@@ -418,6 +418,11 @@ public final class ShaderPackRuntime implements AutoCloseable {
 		return this.worldShadows;
 	}
 
+	public void gradeWorld(final com.mojang.blaze3d.textures.GpuTextureView color,
+		final com.mojang.blaze3d.textures.GpuTextureView depth) {
+		if (this.gpuDevice != null) this.gpuDevice.gradeWorld(color, depth);
+	}
+
 	public @Nullable WorldGeometryAdapter worldGeometry() {
 		return this.worldGeometry;
 	}

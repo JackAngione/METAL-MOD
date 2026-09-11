@@ -1,5 +1,9 @@
 #ifndef MC_LIGHTING_METAL
 #define MC_LIGHTING_METAL
+
+#if MC_SCENE_LINEAR_HDR
+#include "shared/color.metal"
+#endif
 // G-buffer and deferred lighting contract (PR 7a). No occupancy, point lights, or GGX.
 //
 // Attachments:
@@ -40,6 +44,25 @@ struct McFog {
     float FogCloudsEnd;
 };
 
+// Compatibility boundary: decode the completed, unfogged vanilla lightmap seed.
+// Lightmap/brightness and cardinal light remain artistic multipliers, not radiance.
+// Alpha and G-buffer metadata never pass through the RGB transfer.
+static inline float4 mc_scene_seed(float4 encoded) {
+#if MC_SCENE_LINEAR_HDR
+    return float4(mc_srgb_to_linear(encoded.rgb), encoded.a);
+#else
+    return encoded;
+#endif
+}
+
+static inline float3 mc_scene_fog_color(constant McFog &fog) {
+    return mc_scene_seed(fog.FogColor).rgb;
+}
+
+static inline float4 mc_chunk_fade(float4 scene, float visibility, constant McFog &fog) {
+    return mix(float4(mc_scene_fog_color(fog), fog.FogColor.a * scene.a), scene, visibility);
+}
+
 static inline float mc_fog_spherical_distance(float3 pos) {
     return length(pos);
 }
@@ -67,15 +90,15 @@ static inline float mc_fog_amount(float spherical, float cylindrical, constant M
 }
 
 static inline float4 mc_apply_fog(float4 color, float spherical, float cylindrical, constant McFog &fog) {
-    return float4(mix(color.rgb, fog.FogColor.rgb, mc_fog_amount(spherical, cylindrical, fog)), color.a);
+    return float4(mix(color.rgb, mc_scene_fog_color(fog), mc_fog_amount(spherical, cylindrical, fog)), color.a);
 }
 
 static inline float3 mc_unfog(float3 fogged, constant McFog &fog, float amount) {
     float remain = 1.0 - amount;
     if (remain <= 1e-3) {
-        return fog.FogColor.rgb;
+        return mc_scene_fog_color(fog);
     }
-    return (fogged - fog.FogColor.rgb * amount) / remain;
+    return (fogged - mc_scene_fog_color(fog) * amount) / remain;
 }
 
 static inline int mc_gbuffer_material(float albedoAlpha) {
@@ -144,6 +167,6 @@ static inline float4 mc_compose_lighting(
     float3 unfogged = mc_unfog(scene.rgb, fog, amount);
     float sunWeight = mc_direct_sun_weight(lightLevels, frame, shadowStrength);
     float3 lit = mc_light_unfogged(unfogged, sunWeight, visibility);
-    return float4(mix(lit, fog.FogColor.rgb, amount), scene.a);
+    return float4(mix(lit, mc_scene_fog_color(fog), amount), scene.a);
 }
 #endif

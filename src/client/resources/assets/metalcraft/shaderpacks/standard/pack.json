@@ -1,7 +1,7 @@
 {
   "format": 2,
   "name": "MetalCraft Standard",
-  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal"],
+  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/water.metal", "shared/underwater.metal"],
   "targets": {
     "gbuffer_albedo": {
       "format": "rgba8_unorm",
@@ -47,6 +47,7 @@
       "kind": "fullscreen",
       "source": "grade.metal",
       "reads": ["scene"],
+      "buffers": ["underwater_frame"],
       "writes": ["post_color"]
     }
   ],
@@ -132,6 +133,96 @@
       "max": 256,
       "step": 16,
       "default": 96,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_enabled",
+      "category": "water",
+      "type": "bool",
+      "default": true,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_detail",
+      "category": "water",
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "default": 2,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_detail_distance",
+      "category": "water",
+      "type": "int",
+      "min": 2,
+      "max": 32,
+      "step": 1,
+      "default": 16,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_wave_strength",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_refraction_strength",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_absorption",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_foam",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_underwater_distortion",
+      "category": "water",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1,
+      "default": 1.0,
+      "apply": "recompile"
+    },
+    {
+      "id": "water_reflection_quality",
+      "category": "water",
+      "type": "enum",
+      "values": [
+        "off",
+        "baseline",
+        "ssr_low",
+        "ssr_high"
+      ],
+      "default": "baseline",
       "apply": "recompile"
     }
   ]

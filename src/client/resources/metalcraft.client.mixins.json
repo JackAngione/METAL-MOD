@@ -9,6 +9,12 @@
     "CreativeModeInventoryScreenInvoker",
     "FramerateLimitBypassMixin",
     "GametestHandoffMixin",
+    "GameRendererWorldGradeMixin",
+    "GpuDeviceAccessor",
+    "LevelRendererAccessor",
+    "LevelRendererFabulousPromotionMixin",
+    "PostChainLinearWorldMixin",
+    "RenderPassColorFormatMixin",
     "MinecraftBackendAvailabilityMixin",
     "MinecraftFrameMetricsMixin",
     "MinecraftTickPhaseMixin",
@@ -17,11 +23,19 @@
     "PreparedFeatureFrameMixin",
     "PreparedRenderTypeMixin",
     "ShaderManagerMixin",
+    "SectionCompilerWaterMixin",
     "VideoSettingsScreenMixin",
     "WindowFramebufferAccessor",
     "WindowRenderResolutionMixin",
     "LevelRendererShadowMixin",
-    "ViewAreaAccessor"
+    "ViewAreaAccessor",
+    "BufferBuilderAccessor",
+    "SectionCompilerResultsWaterMixin",
+    "CompiledSectionMeshWaterMixin",
+    "RenderPassWaterDrawMixin",
+    "LevelRendererWaterDrawMixin",
+    "WaterFogEnvironmentMixin",
+    "ScreenEffectRendererWaterMixin"
   ],
   "injectors": {
     "defaultRequire": 1

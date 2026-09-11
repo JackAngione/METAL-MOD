@@ -77,6 +77,8 @@ tasks.named('check') {
 
 // Benchmark knobs, forwarded from -P<gradle property> to -D<system property>.
 def benchmarkProperties = [
+	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
+	metalWaterDetailProbe: 'metalcraft.waterDetailProbe',
 	metalBenchmarkSeed: 'metalcraft.benchmarkSeed',
 	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
 	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',
@@ -103,6 +105,7 @@ tasks.named('runClient') {
 	}
 	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
 		systemProperty 'fabric.client.gametest', 'true'
+		systemProperty 'metalcraft.waterIdentityTest', providers.gradleProperty('metalWaterIdentityTest').getOrElse('false')
 		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')

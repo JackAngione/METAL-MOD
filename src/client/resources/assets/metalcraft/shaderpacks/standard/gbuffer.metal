@@ -59,6 +59,41 @@ struct McLighting {
 
 // ---- The attachments a world draw writes -------------------------------------------------------
 
+#ifdef MC_WATER_FORWARD
+// Typed sidecar binding: 32 bytes per original vertex, independent of sorted indices.
+struct WaterVertexMetadata { float4 normalMaterial; float4 flow; };
+struct WaterDraw { uint baseVertex; uint vertexCount; uint debugMode; uint reserved; };
+// Matches WaterFrameInputs.UNIFORM_BYTES: projection, inverse, split camera, time and flags.
+struct WaterFrameUniform {
+    float4x4 projection;
+    float4x4 inverseProjection;
+    float4 cameraWorldHigh;
+    float4 cameraWorldResidual;
+    float animationSeconds;
+    uint cameraSubmerged;
+    uint refractionEnabled;
+    uint pad;
+    float4 sunDirectionEnergy;
+    float4 environment;
+};
+// Linear view-depth debug encoding. Reverse-Z device 0 (clear/sky) reconstructs to the far plane.
+constant float MC_WATER_DEBUG_DEPTH_RANGE = 32.0;
+
+// Geometry already negated clip Y for Metal. Undo that pair before applying the captured inverse.
+static inline float3 mc_water_view_from_device_depth(
+    float2 pixel, float deviceDepth, float2 extent, float4x4 inverseProjection
+) {
+    float2 uv = pixel / max(extent, float2(1.0));
+    float2 metalNdc = uv * 2.0 - 1.0;
+    float4 viewH = inverseProjection * float4(metalNdc.x, -metalNdc.y, deviceDepth, 1.0);
+    return viewH.xyz / max(abs(viewH.w), 1.0e-7);
+}
+
+static inline float mc_water_debug_depth_encode(float3 viewPos) {
+    return saturate(max(0.0, -viewPos.z) / MC_WATER_DEBUG_DEPTH_RANGE);
+}
+#endif
+
 struct GBufferTargets {
     float4 scene  [[color(MC_TARGET_SCENE)]];
     float4 albedo [[color(MC_TARGET_GBUFFER_ALBEDO)]];
@@ -79,6 +114,12 @@ struct GBufferVaryings {
     float2 lightLevels;
     float sphericalDistance;
     float cylindricalDistance;
+#ifdef MC_WATER_FORWARD
+    float waterMaterial [[flat]];
+    float3 waterFlow;
+    float3 waterNormalWorld;
+    float3 waterPeriodicWorldPosition;
+#endif
 };
 
 // Fog, octahedral encode/decode, material IDs and the sun-term split live in shared/lighting.metal.
@@ -177,6 +218,11 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     constant McGlobals &globals [[buffer(MC_SLOT_GLOBALS)]],
     texture2d<float> lightMap [[texture(MC_SLOT_SAMPLER2)]],
     sampler lightSampler [[sampler(MC_SLOT_SAMPLER2)]]
+#ifdef MC_WATER_FORWARD
+    , uint vertexId [[vertex_id]]
+    , device const WaterVertexMetadata *waterMetadata [[buffer(14)]]
+    , constant WaterDraw &waterDraw [[buffer(15)]]
+#endif
 ) {
     float3 relative = in.Position + float3(section.ChunkPosition - globals.CameraBlockPos) + globals.CameraOffset;
     float3 viewPos = (section.ModelViewMat * float4(relative, 1.0)).xyz;
@@ -187,6 +233,16 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     out.worldPos = viewPos;
     out.normal = float3(0.0);
     out.tint = in.Color;
+#ifdef MC_WATER_FORWARD
+    uint localVertex = vertexId - waterDraw.baseVertex;
+    WaterVertexMetadata metadata = localVertex < waterDraw.vertexCount
+        ? waterMetadata[localVertex] : WaterVertexMetadata{float4(0.0), float4(0.0)};
+    out.waterMaterial = metadata.normalMaterial.w;
+    out.waterNormalWorld = metadata.normalMaterial.xyz;
+    out.waterFlow = metadata.flow.xyz;
+    out.waterPeriodicWorldPosition = mc_water_periodic_world_position(section.ChunkPosition, in.Position);
+    if (waterDraw.debugMode == 1u && out.waterMaterial == 1.0) out.tint.rgb = float3(1.0, 0.0, 1.0);
+#endif
     out.lightMapColor = mc_sample_lightmap(lightMap, lightSampler, uv2);
     out.uv = in.UV0;
     out.lightLevels = saturate(uv2 / 240.0);
@@ -237,14 +293,42 @@ static inline float4 mc_sample_rgss(texture2d<float> atlas, sampler atlasSampler
     return mix(mc_sample_nearest(atlas, atlasSampler, uv, pixelSize, du, dv, texelScreenSize), rgss, blendFactor);
 }
 
+#ifdef MC_WATER_FORWARD
+fragment float4 gbuffer_terrain_fragment(
+#else
 fragment GBufferTargets gbuffer_terrain_fragment(
+#endif
     GBufferVaryings in [[stage_in]],
     constant McFog &fog [[buffer(MC_SLOT_FOG)]],
     constant McChunkSection &section [[buffer(MC_SLOT_TRANSFORMS)]],
     constant McGlobals &globals [[buffer(MC_SLOT_GLOBALS)]],
     texture2d<float> atlas [[texture(MC_SLOT_SAMPLER0)]],
     sampler atlasSampler [[sampler(MC_SLOT_SAMPLER0)]]
+#ifdef MC_WATER_FORWARD
+    , constant WaterFrameUniform &waterFrame [[buffer(13)]]
+    , texture2d<float> opaqueColor [[texture(12)]]
+    , depth2d<float> opaqueDepth [[texture(13)]]
+    , constant WaterDraw &waterDraw [[buffer(15)]]
+#endif
 ) {
+#ifdef MC_WATER_FORWARD
+    if (in.waterMaterial == 1.0 && waterDraw.debugMode >= 2u && waterDraw.debugMode <= 3u) {
+        float2 extent = float2(float(opaqueDepth.get_width()), float(opaqueDepth.get_height()));
+        float2 pixel = clamp(in.position.xy, float2(0.0), max(extent - 1.0, float2(0.0)));
+        uint2 coord = uint2(pixel);
+        float3 opaqueView = mc_water_view_from_device_depth(
+            in.position.xy, opaqueDepth.read(coord), extent, waterFrame.inverseProjection
+        );
+        float encoded = waterDraw.debugMode == 2u
+            ? mc_water_debug_depth_encode(in.worldPos)
+            : mc_water_debug_depth_encode(opaqueView);
+        float keepColor = opaqueColor.read(coord).x * 0.0;
+        if (waterDraw.debugMode == 2u) {
+            return float4(1.0, encoded + keepColor, 0.0, 1.0);
+        }
+        return float4(encoded + keepColor, 1.0, 0.0, 1.0);
+    }
+#endif
     float2 pixelSize = 1.0 / float2(section.TextureSize);
     float4 texel = globals.UseRgss == 1
         ? mc_sample_rgss(atlas, atlasSampler, in.uv, pixelSize)
@@ -254,13 +338,127 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     // The order below is vanilla's: the visibility fade changes alpha, so the cutout test has to
     // see the faded value or a chunk fading in would cut out differently than it does today.
     float4 shaded = texel * in.tint * in.lightMapColor;
-    shaded = mix(fog.FogColor * float4(1.0, 1.0, 1.0, shaded.a), shaded, section.ChunkVisibility);
+    shaded = mc_chunk_fade(mc_scene_seed(shaded), section.ChunkVisibility, fog);
 #if MC_HAS_ALPHA_CUTOUT
     if (shaded.a < MC_ALPHA_CUTOUT) {
         discard_fragment();
     }
 #endif
 
+#ifdef MC_WATER_FORWARD
+    float3 waterPixelDx = dfdx(in.waterPeriodicWorldPosition);
+    float3 waterPixelDy = dfdy(in.waterPeriodicWorldPosition);
+    if (MC_OPTION_WATER_ENABLED && in.waterMaterial == 1.0
+        && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u
+            || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)) {
+        if (waterFrame.cameraSubmerged != 0u) {
+            // Viewed from below, the atlas/biome tint otherwise looks like a blue sheet.
+            // Keep a faint surface texture; distance fog owns the submerged water color.
+            float surfaceLuminance = dot(shaded.rgb, float3(0.2126, 0.7152, 0.0722));
+            shaded.rgb = mix(float3(surfaceLuminance), shaded.rgb, 0.2);
+            shaded.a *= 0.45;
+        }
+        float3 normalWorld = mc_water_detailed_normal(
+            in.waterNormalWorld, in.waterFlow, in.waterPeriodicWorldPosition,
+            waterFrame.animationSeconds, MC_OPTION_WATER_WAVE_STRENGTH,
+            MC_OPTION_WATER_DETAIL, waterPixelDx, waterPixelDy,
+            length(in.worldPos), MC_OPTION_WATER_DETAIL_DISTANCE
+        );
+        if (waterDraw.debugMode == 5u) {
+            return float4(normalWorld * 0.5 + 0.5, 1.0);
+        }
+        float3x3 viewRotation = float3x3(
+            section.ModelViewMat[0].xyz,
+            section.ModelViewMat[1].xyz,
+            section.ModelViewMat[2].xyz
+        );
+        float3 viewToCameraWorld = transpose(viewRotation) * -in.worldPos;
+        float3 normalView = mc_water_safe_normalize(
+            viewRotation * normalWorld, float3(0.0, 1.0, 0.0));
+        McWaterSsrHit ssr = {float3(0.0), 0.0, float3(0.0), 0.0};
+        // The captured opaque color is a valid reflection source only in the ordinary above-water
+        // composition path. Fabulous and submerged rendering retain the baseline environment.
+        if (waterFrame.cameraSubmerged == 0u && waterFrame.refractionEnabled != 0u) {
+            ssr = mc_water_screen_space_reflection(
+                in.worldPos, normalView, waterFrame.projection, waterFrame.inverseProjection,
+                opaqueColor, opaqueDepth);
+            if (ssr.confidence > 0.0) {
+                float hitFog = mc_fog_amount(length(ssr.viewPosition),
+                    max(length(ssr.viewPosition.xz), abs(ssr.viewPosition.y)), fog);
+                ssr.color = mc_unfog(ssr.color, fog, hitFog);
+            }
+        }
+        if ((waterDraw.debugMode == 0u || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)
+            && waterFrame.refractionEnabled != 0u
+            && waterFrame.cameraSubmerged == 0u) {
+            float2 extent = float2(float(opaqueDepth.get_width()), float(opaqueDepth.get_height()));
+            float2 surfacePixel = in.position.xy;
+            if (mc_water_sample_in_bounds(surfacePixel, extent)) {
+                uint2 undistortedCoord = uint2(surfacePixel);
+                float undistortedDeviceDepth = opaqueDepth.read(undistortedCoord);
+                float3 undistortedView = mc_water_view_from_device_depth(
+                    surfacePixel, undistortedDeviceDepth, extent, waterFrame.inverseProjection);
+                float thickness = mc_water_thickness(in.worldPos, undistortedView, undistortedDeviceDepth);
+                if (thickness >= 0.0) {
+                    // Contact foam is derived only from the undistorted hit. A refracted candidate
+                    // can change transmission, but cannot manufacture an outline around an object.
+                    float contactFoam = mc_water_contact_foam(
+                        thickness, in.waterNormalWorld, in.waterPeriodicWorldPosition,
+                        waterFrame.animationSeconds, waterDraw.debugMode == 7u ? 0.0 : MC_OPTION_WATER_FOAM);
+                    float2 refractedPixel = surfacePixel
+                        + mc_water_refraction_offset_pixels(normalView, thickness, MC_OPTION_WATER_REFRACTION_STRENGTH);
+                    uint2 sampleCoord = undistortedCoord;
+                    float3 backgroundView = undistortedView;
+                    if (mc_water_sample_in_bounds(refractedPixel, extent)) {
+                        uint2 candidateCoord = uint2(refractedPixel);
+                        float candidateDeviceDepth = opaqueDepth.read(candidateCoord);
+                        float2 candidateCenter = float2(candidateCoord) + 0.5;
+                        float3 candidateView = mc_water_view_from_device_depth(
+                            candidateCenter, candidateDeviceDepth, extent, waterFrame.inverseProjection);
+                        float candidateThickness = mc_water_thickness(
+                            in.worldPos, candidateView, candidateDeviceDepth);
+                        // A candidate in front of the water is a foreground silhouette, not a
+                        // refracted background. Reject it and retain the valid undistorted sample.
+                        if (candidateThickness >= 0.0) {
+                            sampleCoord = candidateCoord;
+                            backgroundView = candidateView;
+                            thickness = candidateThickness;
+                        }
+                    }
+                    float3 background = opaqueColor.read(sampleCoord).rgb;
+                    float backgroundFog = mc_fog_amount(length(backgroundView),
+                        max(length(backgroundView.xz), abs(backgroundView.y)), fog);
+                    background = mc_unfog(background, fog, backgroundFog);
+                    float3 transmitted = mc_water_absorb(background, shaded.rgb, thickness * MC_OPTION_WATER_ABSORPTION);
+                    float3 surface = mc_water_configured_reflection_with_ssr(
+                        transmitted, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+                        waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
+                    );
+                    // Keep the approximation restrained and in the same linear/fog ownership as
+                    // the water surface. Biome tint remains visible beneath the warm foam crest.
+                    surface = mix(surface, float3(0.82, 0.86, 0.84), contactFoam * 0.34);
+                    shaded = float4(surface, 1.0);
+                } else {
+                    shaded = float4(mc_water_configured_reflection_with_ssr(
+                        shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+                        waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
+                    ), shaded.a);
+                }
+            } else {
+                shaded = float4(mc_water_configured_reflection_with_ssr(
+                    shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+                    waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
+                ), shaded.a);
+            }
+        } else {
+            shaded = float4(mc_water_configured_reflection_with_ssr(
+                shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
+                waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
+            ), shaded.a);
+        }
+    }
+    return mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
+#else
     GBufferTargets out;
     out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
     // Albedo is the surface before the light hits it, so the lightmap and the fog stay out of it.
@@ -268,6 +466,7 @@ fragment GBufferTargets gbuffer_terrain_fragment(
         out, (texel * in.tint).rgb, mc_reconstruct_normal(in.worldPos), in.lightLevels, max(0.0, -in.worldPos.z)
     );
     return out;
+#endif
 }
 
 #endif // MC_PROGRAM_TERRAIN
@@ -325,7 +524,7 @@ fragment GBufferTargets gbuffer_block_fragment(
 #endif
 
     GBufferTargets out;
-    out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
+    out.scene = mc_apply_fog(mc_scene_seed(shaded), in.sphericalDistance, in.cylindricalDistance, fog);
     mc_write_gbuffer(
         out, (texel * in.tint * transforms.ColorModulator).rgb,
         mc_reconstruct_normal(in.worldPos), in.lightLevels, max(0.0, -in.worldPos.z)
@@ -486,7 +685,7 @@ fragment GBufferTargets gbuffer_entity_fragment(
 #endif
 
     GBufferTargets out;
-    out.scene = mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
+    out.scene = mc_apply_fog(mc_scene_seed(shaded), in.sphericalDistance, in.cylindricalDistance, fog);
     float3 normal = length(in.normal) < 1e-8 ? mc_reconstruct_normal(in.worldPos) : normalize(in.normal);
     mc_write_gbuffer(out, albedo.rgb, normal, in.lightLevels, max(0.0, -in.worldPos.z));
     return out;

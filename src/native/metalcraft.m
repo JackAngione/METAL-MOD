@@ -180,6 +180,12 @@ static const void *MCTexelViewCacheKey = &MCTexelViewCacheKey;
 		_layer = [CAMetalLayer layer];
 		_layer.device = device;
 		_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+		// Presentation copies already encoded RGB (including the hand and HUD).
+		// Tag those bytes for the compositor; an sRGB attachment would encode twice
+		// once the world grade supplies its explicit linear-to-sRGB transfer.
+		CGColorSpaceRef presentationColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+		_layer.colorspace = presentationColorSpace;
+		CGColorSpaceRelease(presentationColorSpace);
 		_layer.framebufferOnly = YES;
 		_layer.opaque = YES;
 		_layer.presentsWithTransaction = NO;
