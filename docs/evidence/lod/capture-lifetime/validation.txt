@@ -1,0 +1,13 @@
+Command: ./gradlew runClient -PmetalLifecycleTest -PmetalLodCompilerTest=true --args='--graphicsBackend default'
+Scenario: NORMAL world preset, seed metalcraft; Standard pack; two block edits, resource reload, distant teleport, world close.
+The screenshot is ordinary rendering; this is capture-lifetime evidence, not LOD-on quality/performance evidence.
+
+[10:03:31] [main/INFO] (MetalCraftPreLaunch) MetalCraft direct Metal bridge opened an owned device and command queue: Apple M4 Max (recommended working set: 53084 MiB)
+[10:03:34] [Render thread/INFO] (Minecraft) Using graphics device: Apple M4 Max (Apple)
+[10:03:35] [Render thread/INFO] (MetalCraftClient) MetalCraft direct renderer active: Apple / Apple M4 Max using Metal
+[10:03:39] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: Metal backend selected
+[10:03:42] [Server thread/INFO] (Minecraft) Changing view distance to 16, from 10
+[10:03:42] [Server thread/INFO] (Minecraft) Changing simulation distance to 16, from 0
+[10:04:13] [Test thread/INFO] (Minecraft) [STDOUT]: LOD emitted terrain capture (compiles, not unique sections): Stats[sections=2250, supportedSections=178, rejectedSections=2072, originalQuads=45380, simplifiedQuads=43699, budgetMisses=0, reservedBytes=0, allSolidQuads=1053677, materialRejects=2018, geometryRejects=54, retainedBytes=8912896, retainedCandidates=26, transferredCandidates=178, closedCandidates=152, staleCandidates=0, retentionMisses=0, trackedSections=597]
+[10:04:14] [Test thread/INFO] (Minecraft) [STDOUT]: LOD capture immediately after world close: Stats[sections=2250, supportedSections=178, rejectedSections=2072, originalQuads=45380, simplifiedQuads=43699, budgetMisses=0, reservedBytes=0, allSolidQuads=1053677, materialRejects=2018, geometryRejects=54, retainedBytes=0, retainedCandidates=0, transferredCandidates=178, closedCandidates=178, staleCandidates=0, retentionMisses=0, trackedSections=0]
+BUILD SUCCESSFUL in 43s

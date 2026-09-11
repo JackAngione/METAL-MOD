@@ -22,7 +22,45 @@ public final class LodSmoke {
         scheduling();
         residency();
         bakedFaces();
+        captureLifecycle();
         System.out.println("LOD smoke passed: settings recovery/round trip/gates, exact surface coverage, caves/overhangs/materials/seams, selection and stale/bounded jobs");
+    }
+
+    private static void captureLifecycle() {
+        var tracker = new LodRevisionTracker(2);
+        tracker.world("overworld");
+        var first = tracker.capture(1, 2, 3);
+        var mesh = new LodBakedMesh.Simplified(true, List.of(), List.of(), 0);
+        var releases = new java.util.concurrent.atomic.AtomicInteger();
+        var candidate = new LodCapturedMesh(first, mesh, releases::incrementAndGet);
+        check(candidate.currentMesh() == mesh, "current captured payload available");
+        tracker.dirty(1, 2, 3);
+        check(!first.current() && candidate.currentMesh() == null, "dirty section revokes captured payload before replacement upload");
+        check(releases.get() == 1, "revocation releases CPU bytes without waiting for vanilla mesh retirement");
+        candidate.close(); candidate.close();
+        check(releases.get() == 1, "captured payload charge released exactly once");
+        var second = tracker.capture(1, 2, 3);
+        check(second.key().revision() > first.key().revision(), "edits cannot reuse work identity");
+        var replacement = tracker.capture(1, 2, 3);
+        check(!second.current() && replacement.current(), "new extraction revokes older worker even without dirty callback");
+        tracker.capture(4, 2, 3);
+        tracker.capture(5, 2, 3);
+        check(!replacement.current() && tracker.trackedSections() == 2, "bounded identity eviction revokes outstanding work");
+        var unload = tracker.capture(9, -4, 10);
+        tracker.unload(9, 10);
+        check(!unload.current(), "column unload revokes section work");
+        var resource = tracker.capture(9, -4, 10);
+        tracker.resources();
+        var reloaded = tracker.capture(9, -4, 10);
+        check(!resource.current() && reloaded.key().resources() > resource.key().resources(), "resource generation invalidates material coordinates");
+        tracker.world("nether");
+        var dimension = tracker.capture(9, -4, 10);
+        check(!reloaded.current() && dimension.key().session() > reloaded.key().session()
+                && dimension.key().dimension().equals("nether"), "world/dimension isolation");
+        tracker.world("disconnected");
+        check(!dimension.current() && tracker.trackedSections() == 0, "disconnect clears bounded identity table");
+        var staleCandidate = new LodCapturedMesh(dimension, mesh, releases::incrementAndGet);
+        check(staleCandidate.currentMesh() == null && releases.get() == 2, "revocation racing candidate publication releases immediately");
     }
 
     private static void bakedFaces() {
@@ -172,6 +210,36 @@ public final class LodSmoke {
         check(java.util.Arrays.equals(LodSelector.balance(new int[]{4,0},new int[][]{{1},{}}),new int[]{1,0}),"an adjacency pair constrains both endpoints");
         check(LodSelector.transition(0,4,true)==1 && LodSelector.transition(4,0,true)==0,"bounded coarsening and immediate near-detail restoration");
         check(LodSelector.transition(0,4,false)==4,"smoothing toggle independent of seam enforcement");
+        check(java.util.Arrays.equals(LodSelector.balance(new int[]{4,4,0},new int[][]{{1},{},{1}}),
+                new int[]{2,1,0}), "one-way adjacency propagates later refinements to earlier dependents");
+        int[] masks = {31, 1 | (1 << 4), 31, 31};
+        int[][] neighbors = {{1}, {2}, {3}, {}};
+        check(java.util.Arrays.equals(LodSelector.resolveLoaded(new int[]{4,4,4,0}, new int[]{4,4,4,0},
+                masks, neighbors, false), new int[]{1,0,1,0}), "missing intermediate upload triggers another neighbor refinement");
+        check(LodSelector.resolveLoaded(new int[]{4}, new int[]{0}, new int[]{17}, new int[][]{{}}, true)[0] == 0,
+                "smoothing cannot jump over a missing uploaded tier");
+        check(LodSelector.resolveLoaded(new int[]{2}, new int[]{4}, new int[]{17}, new int[][]{{}}, false)[0] == 0,
+                "availability fallback never exceeds screen-error tier");
+        // Random sparse availability and one-way boundary graphs catch cascade/order failures.
+        var random = new java.util.Random(431);
+        for (int fixture = 0; fixture < 1000; fixture++) {
+            int[] candidate = new int[20], previous = new int[20], available = new int[20];
+            int[][] edges = new int[20][];
+            for (int i = 0; i < 20; i++) {
+                candidate[i] = random.nextInt(6) - 1;
+                previous[i] = random.nextInt(6) - 1;
+                available[i] = random.nextInt(16) * 2 + 1;
+                edges[i] = new int[]{random.nextInt(20), random.nextInt(20)};
+            }
+            int[] result = LodSelector.resolveLoaded(candidate, previous, available, edges, true);
+            for (int i = 0; i < 20; i++) {
+                check(result[i] <= candidate[i], "resolved tier never coarser than error decision");
+                check(result[i] < 0 || (available[i] & (1 << result[i])) != 0, "every selected mesh is available");
+                check(result[i] <= LodSelector.transition(previous[i], candidate[i], true), "transition bound survives availability");
+                for (int neighbor : edges[i]) check(result[i] < 0 || result[neighbor] < 0
+                        || Math.abs(result[i] - result[neighbor]) <= 1, "every visible boundary balanced after fallback");
+            }
+        }
     }
 
     private static void scheduling() {

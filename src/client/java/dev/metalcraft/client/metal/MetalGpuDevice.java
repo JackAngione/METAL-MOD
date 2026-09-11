@@ -126,6 +126,18 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		return this.metal;
 	}
 
+	/** Reserve before encoding a borrowed mesh on this device's world queue. Render-owner only. */
+	public long reserveResourceSubmission() {
+		this.requireOpen();
+		return this.commandEncoder.reserveResourceSubmission();
+	}
+
+	/** Nonblocking completion poll for mesh residency; never submits, flushes, or waits. */
+	public long completedResourceSubmission() {
+		this.requireOpen();
+		return this.commandEncoder.completedResourceSubmission();
+	}
+
 	/** Encodes a scoped native pass on the world's queue, after any deferred Blaze3D pass. */
 	public void encodeNativePass(final MetalRenderPass.Descriptor descriptor, final String label,
 		final java.util.function.Consumer<MetalRenderPass> encode) {

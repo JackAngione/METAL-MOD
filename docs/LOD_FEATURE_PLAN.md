@@ -1,6 +1,7 @@
 # LOD feature implementation plan
 
-Status: P1–P3 complete; P4 Metal prototype and resource ownership in progress.
+Status: P1–P3 complete; P4 capture lifetime and Metal completion infrastructure
+validated; live geometry ownership and rendering remain in progress.
 P5–P8 have not started. Live terrain replacement remains disabled.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
@@ -239,9 +240,45 @@ can proceed during P1 capture; integration acceptance still depends on P1.
   upload/retirement, and ordinary-mesh fallback. Acceptance: no cracks, overlapping
   surfaces, near-detail loss, or stale edits along a repeatable movement/zoom route;
   no render-thread waits and memory stays within configured budgets.
-  - Owner: Codex. Status: in progress, isolated Metal geometry prototype only.
-    Establishing atlas-safe repeated texture sampling and buffer lifetime on synthetic
-    fixtures before any loaded-section replacement is enabled.
+  - Owner: Codex. Status: in progress. Isolated Metal geometry, world-queue completion,
+    and compiled-candidate lifetime are validated. A production appearance resolver
+    and live draw adapter are still required before loaded-section replacement.
+  - Current work claimed by Codex (2026-09-11): connect the resource-completion
+    timeline to the actual world command queue, resolve uploaded-tier availability
+    before final neighbor balancing, and carry bounded captured output through the
+    compiled-mesh lifetime. Each subtask will retain its own validation evidence;
+    live draw replacement remains gated until the complete P4 route passes.
+  - [x] P4 completion timeline (2026-09-11): `MetalGpuDevice` exposes submission
+    reservation and nonblocking completion polling on the actual world queue.
+    Reservations preserve active/merged passes; abandoned draws still receive a
+    completion signal. `./gradlew build` passed on Apple M4 Max, including a
+    20-submission Metal/residency fixture with immediate invalidation, retained
+    in-flight charges, completion release and otherwise empty submissions.
+  - [x] P4 available-tier resolution (2026-09-11): final loaded selection applies
+    smoothing and uploaded availability before balancing, then reapplies availability
+    on each refinement. One-way adjacency propagates in both directions. `lodSmoke`
+    passes missing-tier cascade fixtures and 1,000 seeded sparse graphs; every chosen
+    tier exists, respects the error/transition limit and differs by at most one from
+    visible neighbors. This pure resolver still awaits live draw integration.
+  - [x] P4 captured-candidate lifetime (2026-09-11): bounded extraction tickets carry
+    session, dimension, section, revision and resource generation into final-mesh
+    capture. Compiler results transfer ownership to their exact compiled mesh;
+    cancellation/close and ticket revocation release copied CPU data. Build and
+    retained snapshots have separate 64 MiB caps; the identity table holds at most
+    32,768 sections. Edits, unloads, replacement captures and generation changes
+    revoke work immediately. The first live run exposed retained bytes at world close;
+    immediate CPU release on revocation fixed it, including the publication race.
+    `./gradlew build` passed (11 s). The standard-world 16/16 Default/Metal compiler
+    lifecycle test then passed (43 s) on M4 Max with Standard: 178 candidate transfers,
+    two block edits, resource reload, teleport, and zero build/retained bytes or
+    tracked sections at close. [Evidence](evidence/lod/capture-lifetime/validation.txt),
+    [counters](evidence/lod/capture-lifetime/metrics.json), and ordinary-rendering
+    [screenshot](evidence/lod/capture-lifetime/scene.png). These are lifecycle checks,
+    not LOD-on screenshots or frame-time measurements.
+  - [ ] P4 remaining: production atlas/material resolution, live selection and
+    upload scheduling outside the dispatcher lock, pack-compatible draw preflight,
+    final compiled-mesh identity recheck and single-owner suppression, followed by
+    movement/zoom/edit/budget acceptance. P4 itself remains unchecked.
   - Partial evidence: `./gradlew lodMetalSmoke` passed on M4 Max. Direct Metal
     draws at 128²/32²/16²/127² preserve repeated atlas texture, exclude neighboring
     tile colors, preserve reverse-Z depth, enforce upload allowance and survive
@@ -253,7 +290,8 @@ can proceed during P1 capture; integration acceptance still depends on P1.
     ownership, while in-flight resources remain charged until a completion timeline
     advances. CPU fixtures cover invalidation, reduced budgets, deferred retirement
     and exactly-once release. `./gradlew build` passed with CPU and Metal smoke checks.
-    The live renderer still needs to supply a nonblocking GPU completion timeline.
+    The world queue now supplies a tested nonblocking completion timeline (above);
+    the live LOD renderer still needs to consume it.
   - Candidate selection now has neighbor relaxation (at most one tier difference)
     and bounded coarsening with immediate near-detail restoration. These are CPU
     components awaiting the live selection/availability integration, not shipped LOD.

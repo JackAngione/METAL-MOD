@@ -1,0 +1,19 @@
+{
+  "sections": 2250,
+  "supportedSections": 178,
+  "rejectedSections": 2072,
+  "originalQuads": 45380,
+  "simplifiedQuads": 43699,
+  "budgetMisses": 0,
+  "reservedBytes": 0,
+  "allSolidQuads": 1053677,
+  "materialRejects": 2018,
+  "geometryRejects": 54,
+  "retainedBytes": 0,
+  "retainedCandidates": 0,
+  "transferredCandidates": 178,
+  "closedCandidates": 178,
+  "staleCandidates": 0,
+  "retentionMisses": 0,
+  "trackedSections": 0
+}

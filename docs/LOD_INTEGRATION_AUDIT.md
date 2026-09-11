@@ -179,15 +179,18 @@ draw until the following contracts are implemented and verified:
   Emitted UV bounds alone do not identify a sprite or its atlas gutter; production
   mip/animation/reload handling still needs a generation-scoped material resolver.
 - Carry session/resource/revision IDs from extraction through build and upload.
+  Extraction-to-compiled-candidate identity is now verified (2026-09-11, below);
+  production LOD upload and draw ownership remain pending.
   Recheck compiled-mesh identity before suppressing an ordinary draw, since an
   upload may replace it between preparation and submission.
 - Keep custom buffers out of the ordinary BLOCK vertex pipeline. Preflight all
   bindings and resources before transferring surface ownership; failure must retain
   the ordinary mesh. The prototype does not yet implement world fog/lightmap or
   Standard's linear HDR G-buffer contract.
-- Feed `LodMeshResidency` a monotonic GPU completion timeline. The existing Metal
-  shared events can be polled without waiting; do not use a fixed frame-delay guess
-  or charge only currently visible meshes. Retired in-flight buffers remain charged.
+- Feed `LodMeshResidency` the world queue's `reserveResourceSubmission()` and
+  `completedResourceSubmission()` timeline. Its real Metal shared-event integration
+  now passes residency tests. Live LOD submission has not yet adopted it. Retired
+  in-flight buffers remain charged; a fixed frame-delay guess is not sufficient.
 - Apply availability fallbacks and transition limits before final neighbor balancing.
   Candidate selection alone is not proof that an uploaded tier exists.
 
@@ -237,3 +240,50 @@ terrain or an LOD-on draw census. The screenshot shows ordinary rendering, and n
 frame-time gain is claimed. This result rules out treating the conservative fixture's
 76.2% reduction as representative of the live world. The performance target needs a
 broader simplification/material design before live ownership can be promoted.
+
+## Capture lifetime and queue completion — 2026-09-11
+
+The earlier diagnostic released all copied output before returning from the compiler.
+It now optionally retains bounded immutable candidates, still only under
+`metalcraft.lodCompilerTest`. `SectionUpdateRenderState` stamps each region during
+extraction. Its ticket includes world session, dimension, coordinates, revision and
+material generation. Dirty-section hooks revoke edits and expanded neighboring seams;
+chunk storage removal revokes unloaded columns. `setLevel`, `allChanged` and
+`invalidateCompiledGeometry` revoke the relevant generations. The identity table is
+bounded at 32,768 sections, and evicting an identity revokes outstanding work.
+
+`SectionCompiler.Results` owns the copied candidate until construction of its
+`CompiledSectionMesh`, which takes ownership exactly once. Cancellation, mesh close
+or ticket revocation releases the CPU snapshot. Revocation also handles a candidate
+being published concurrently. Separate 64 MiB build and 64 MiB retained-data budgets
+remain charged while their corresponding objects are owned. Unsupported sections
+still use ordinary rendering; no world state, sprite object or native source buffer
+is retained by a candidate.
+
+The first live run reached successful edits/reload/teleport but timed out waiting for
+retained CPU bytes to clear after world close. Waiting for vanilla mesh disposal was
+insufficient. Immediate disposal on ticket revocation fixed the lifecycle failure.
+The final run passed in 43 seconds on Apple M4 Max, using a NORMAL generated world,
+seed `metalcraft`, 16 render/simulation distance, Default/Metal, and Standard pack.
+It transferred 178 candidates and closed all 178, ending with zero build bytes,
+retained bytes, candidate owners and tracked section identities.
+
+Artifacts: [validation](evidence/lod/capture-lifetime/validation.txt),
+[counters](evidence/lod/capture-lifetime/metrics.json), and
+[ordinary terrain screenshot](evidence/lod/capture-lifetime/scene.png).
+The screenshot was inspected and shows generated snowy mountains and distant hills.
+No terrain draws were replaced and no performance improvement is claimed.
+
+`./gradlew build` passed in 11 seconds, including existing shader checks, CPU identity
+and revocation fixtures, 1,000 seeded availability/adjacency graphs, and a real Metal
+world-queue completion test over 20 submissions. The queue allocates its shared event
+only on first use, reserves one value per borrowed submission, and signals after the
+last pass ends. Completion polling never flushes, submits or waits; a declined draw's
+otherwise empty reservation still completes. The live renderer must adopt this
+timeline when it begins borrowing GPU meshes.
+
+Remaining P4 work is the production appearance resolver and the live draw adapter:
+availability must describe uploaded, current, preflighted resources, and ordinary
+draws must only be suppressed after the final compiled-mesh identity check. P5–P8
+remain unimplemented and unvalidated. None of the new lifecycle evidence promotes
+geometry, multiresolution or extended-horizon capabilities.
