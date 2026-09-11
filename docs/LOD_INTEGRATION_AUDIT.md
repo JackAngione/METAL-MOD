@@ -5,8 +5,8 @@ P1 work in progress, 2026-09-10. No LOD rendering is enabled by this audit.
 ## Verified mapped interfaces
 
 Inspected the local Minecraft 26.2 client-only deobfuscated jar with `javap -private`.
-These are verified signatures; lifecycle ordering still needs bytecode/source tracing
-and runtime validation before installing hooks.
+The initial signatures were subsequently traced in Loom's generated Minecraft 26.2
+sources (`./gradlew genSources`, passed). Runtime hooks still require live validation.
 
 | Concern | Mapped seam and proposed contract |
 | --- | --- |
@@ -59,3 +59,56 @@ and GPU resources. A build/smoke run also overlapped this exploratory attempt.
 Discard all timings from this attempt; rerun in an isolated run directory with
 exclusive GPU use. Do not treat the shared latest.log as baseline evidence.
 `./gradlew build` passed, including `shaderTranslationSmoke` (37 seconds).
+
+## Source-traced hook contracts
+
+- `LevelExtractor.extract` creates one `RenderRegionCache` per extraction. For each
+  dirty visible section with eligible neighbors it creates a region, adds a
+  `SectionUpdateRenderState`, and then clears the dirty bit. Capture immutable LOD
+  values at this owning-thread seam, before the region is sent to worker compilation.
+  Do not use the dirty-bit clear as proof that an LOD upload completed.
+- `RenderRegionCache.createRegion` copies 27 surrounding sections; the LOD snapshot
+  only needs the 16³ section plus its one-block halo. `RenderSectionRegion.getBlockTint`
+  delegates to live `ClientLevel`, and its light engine is a live reference.
+- Block changes expand a one-block neighborhood before converging on
+  `LevelExtractor.setSectionDirty(int,int,int,boolean)`. This delegates to
+  `SectionUpdateTracker.setDirty`, which only marks tracked storage. Coalesce repeated
+  marks, and retain separate LOD revisions for cached terrain outside that storage.
+- `ClientChunkCache.onLightUpdate` marks a section through the same extractor path.
+  `ClientPacketListener.handleChunksBiomes` replaces biome data, calls `onChunkLoaded`,
+  then marks a 3×3 column neighborhood across the vertical section range. A hook on
+  `replaceBiomes` alone would run before that full invalidation sequence.
+- `LevelExtractor.setLevel` recreates the tracker via `allChanged` or clears it on
+  disconnect. `onResourceManagerReload` only resets the sky renderer: it must **not**
+  be treated as the whole mesh/material reset. Track material generation alongside
+  `LevelRenderer.invalidateCompiledGeometry`, plus explicit session changes.
+- `prepareChunkRenders` iterates `visibleSections` under the dispatcher lock, reads
+  `SectionMesh.SectionDraw` and its uber-buffer slice, then allocates a section UBO
+  entry and constructs grouped `RenderPass.Draw` objects. Select before this loop
+  commits ordinary draws; never queue builds, allocate GPU buffers or wait for them
+  while holding that lock. A separate LOD draw needs its own vertex ABI/pipeline;
+  inserting a custom vertex buffer into the existing layer grouping is invalid.
+
+## Initial isolated capture (retained, not a release-performance baseline)
+
+Artifacts: `docs/evidence/lod/baseline-initial/metrics.json` and `scene.png`.
+Command: original plan baseline command, isolated worktree, three repeats, 16/16,
+Default/Metal. This clean run selected **no pack**, unlike the earlier shared-checkout
+startup. Requested 3840×2160; actual drawable/scene 3840×2104 due to window limits.
+Seed `metalcraft`, site (-1536,173,-128), 726 visible sections, loaded fraction 1.0.
+Screenshot inspection confirms generated mountainous terrain but excessive sky/cloud
+coverage (featureless fraction 0.8741); use the revised pitch control for the next run.
+
+| Phase | Median of CPU medians (ms) | Median 1% low (FPS) |
+| --- | ---: | ---: |
+| Stationary | 0.735 | 88.01 |
+| Pan | 0.795 | 88.62 |
+| Traversal | 0.872 | 56.58 |
+
+Frame intervals sit near 8.33 ms / 120 Hz and acquisition consumes about 7.4 ms.
+The harness explicitly flagged display pacing. GPU pass spans identify sky and
+immediate entity/item draws as significant in this view; they are overlapping spans,
+not additive frame costs. These numbers do not establish a terrain LOD speedup.
+The revised harness now records explicit pack/half-resolution/unlocked settings,
+camera pitch, requested LOD preferences, and heap/Metal allocation samples after
+each phase. Memory samples are point-in-time values, not peak or resident-set usage.

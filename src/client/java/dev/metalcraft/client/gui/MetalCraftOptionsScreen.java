@@ -68,6 +68,8 @@ public final class MetalCraftOptionsScreen extends Screen {
 		contents.addChild(unlockedFrameRate);
 
 		this.addShaderPackControls(contents, appleSilicon);
+		contents.addChild(Button.builder(Component.translatable("metalcraft.lod.title"), button ->
+			this.minecraft.gui.setScreen(new MetalCraftLodOptionsScreen(this))).width(310).build());
 
 		this.resolutionStatus = new StringWidget(Component.empty(), this.font);
 		contents.addChild(this.resolutionStatus);

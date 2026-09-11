@@ -1,6 +1,7 @@
 # LOD feature implementation plan
 
-Status: P1 baseline and integration audit in progress.
+Status: P2/P3 foundations complete; P1 capture refinement and P4 Metal prototype
+in progress. Live terrain replacement remains disabled.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
 `e0c116931908dc6747117348bce88998971b8752`. Existing uncommitted water work was
@@ -171,7 +172,8 @@ resources. Changing horizon never changes Minecraft render/simulation settings.
 Progress protocol: claim a task with owner/status before implementation; record
 partial progress or blockers beneath it; check it off only with validation evidence
 (commands, machine, scenario, and artifacts). Update this plan in the same change.
-P1 is claimed by Codex; later tasks remain unclaimed.
+P1–P4 are claimed by Codex; later tasks remain unclaimed. P2/P3 foundations
+can proceed during P1 capture; integration acceptance still depends on P1.
 
 - [x] P0 — Inspect terrain/render/settings seams, create branch from water effects,
   and document staged design. Evidence: branch base SHA above and inspected source
@@ -191,17 +193,53 @@ P1 is claimed by Codex; later tasks remain unclaimed.
     because another task launched a client in the same checkout. Shared launch
     artifacts/logs and GPU contention invalidate the attempt. P1 remains unchecked;
     repeat with isolated launch files and exclusive GPU use before accepting timings.
-- [ ] P2 — Settings model and submenu. Implement persistence, clamping, preset rules,
+- [x] P2 — Settings model and submenu. Implement persistence, clamping, preset rules,
   staged capability gating, and navigation. Acceptance: restart/reload round trip,
   malformed-config recovery, small-window/keyboard checks, and independent pack state.
-- [ ] P3 — Terrain hierarchy builder. Implement snapshots, simplification, material
+  - Owner: Codex. Status: complete for the currently available stages. Immutable
+    preferences, field recovery, preset ownership, atomic persistence, staged gating
+    and allocation-free unchanged-frame adoption are implemented. Later-stage controls
+    remain unavailable with a translated explanation, as required by the staged UI design.
+  - Partial evidence: `./gradlew lodSmoke` passed; live
+    `./gradlew runClient -PmetalLifecycleTest -PmetalLodSettingsTest=true
+    --args='--graphicsBackend default'` passed on M4 Max (13 s). Covers disk
+    reload, independent malformed-field recovery, 640×480 layout, keyboard
+    navigation/reset/back and pack independence. Screenshots: `docs/evidence/lod/settings/`.
+    Process restart verified with `-PmetalLodExpectedRadius=9` after seeding the
+    persisted config; the test also switches Standard/None without changing LOD
+    preferences. `./gradlew build` passed including shader and LOD CPU smoke checks.
+    No geometry-availability or performance gate was promoted.
+- [x] P3 — Terrain hierarchy builder. Implement snapshots, simplification, material
   policy, revision tracking, and seams. Acceptance: deterministic fixtures for solid
   terrain, caves, overhangs, thin geometry, adjacent tiers, edits, and stale jobs;
   measured triangle reduction without missing supported surfaces.
+  - Owner: Codex. Status: complete as a conservative exact-surface first builder.
+    Owning-thread capture copies an immutable 18³ halo snapshot, homogeneous octree
+    cells collapse, matching exposed faces merge at tiers 1–4, and section-edge strips
+    retain unit vertices. Approximate occupancy simplification is not enabled.
+  - Partial evidence: `./gradlew lodSmoke` passes exact face-coverage fixtures for
+    solid terrain, cave tunnels, overhangs, material/tint/light boundaries and halo
+    occlusion at tiers 1–4; unsupported geometry falls back. Solid fixture: 3072 →
+    732 triangles (76.2% reduction), geometric error zero. No live-world reduction
+    is claimed. Queue fixtures cover bounded admission, duplicates, stale edits,
+    world resets, resource generations, unloads and failed workers. Adjacent-tier
+    boundary vertices match. `./gradlew lodMetalSmoke` also verifies fine/coarse
+    coverage and depth on M4 Max. Connecting Minecraft sources and live draw ownership
+    belongs to P4 and remains pending.
 - [ ] P4 — Loaded-terrain Metal rendering. Implement selection, hysteresis, bounded
   upload/retirement, and ordinary-mesh fallback. Acceptance: no cracks, overlapping
   surfaces, near-detail loss, or stale edits along a repeatable movement/zoom route;
   no render-thread waits and memory stays within configured budgets.
+  - Owner: Codex. Status: in progress, isolated Metal geometry prototype only.
+    Establishing atlas-safe repeated texture sampling and buffer lifetime on synthetic
+    fixtures before any loaded-section replacement is enabled.
+  - Partial evidence: `./gradlew lodMetalSmoke` passed on M4 Max. Direct Metal
+    draws at 128²/32²/16²/127² preserve repeated atlas texture, exclude neighboring
+    tile colors, preserve reverse-Z depth, enforce upload allowance and survive
+    logical buffer retirement before GPU completion. This isolated prototype uses
+    a test appearance resolver; it is not a live terrain renderer or pack adapter.
+    P4 remains unchecked until capture/revision hooks, bounded mesh residency,
+    selection transitions and live ordinary-mesh replacement pass their route checks.
 - [ ] P5 — Composition and material compatibility. Validate standard/no-pack paths,
   cutouts, shadow LOD, weather, entities, transparency, and reload behavior; follow
   the water plan for relevant effects. Acceptance: visual evidence and GPU readback

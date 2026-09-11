@@ -81,6 +81,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			throw new AssertionError("Lifecycle test selected unexpected backend: " + backend + " (expected " + expectedBackend + ")");
 		}
 		LOGGER.info("Metal lifecycle validation: {} backend selected", backend);
+		if (Boolean.getBoolean("metalcraft.lodSettingsTest")) {
+			MetalLodSettingsGameTest.run(context);
+			return;
+		}
 
 		if (Boolean.getBoolean("metalcraft.waterIdentityTest")) {
 			new MetalWaterIdentityGameTest(context).run();
@@ -93,7 +97,9 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		}
 
 		if (benchmark) {
-			new MetalRealWorldBenchmark(context, backend).run();
+			try (MetalBenchmarkEnvironment environment = new MetalBenchmarkEnvironment(context)) {
+				new MetalRealWorldBenchmark(context, backend).run();
+			}
 			return;
 		}
 
@@ -282,6 +288,9 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		private final int simulationDistance;
 		private final int phaseTicks;
 		private final int repeats;
+		private final float pitch;
+		private final com.google.gson.JsonObject memorySamples = new com.google.gson.JsonObject();
+		private final com.google.gson.JsonObject cameraSamples = new com.google.gson.JsonObject();
 		private final double minimumFps;
 		private final double minimumOnePercentLow;
 		/** The presented drawable size, recorded so the report states it rather than the request. */
@@ -292,7 +301,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			this.context = context;
 			this.backend = backend;
 			this.seed = System.getProperty("metalcraft.benchmarkSeed", "metalcraft");
-			this.renderDistance = intProperty("metalcraft.benchmarkRenderDistance", 32);
+			this.renderDistance = intProperty("metalcraft.benchmarkRenderDistance", 16);
 			// Matches the reported real session rather than the vanilla default of 12.
 			this.simulationDistance = intProperty("metalcraft.benchmarkSimulationDistance", 16);
 			this.phaseTicks = intProperty("metalcraft.benchmarkPhaseTicks", 400);
@@ -300,6 +309,9 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			// differed by 1.5x with identical per-frame CPU time, so a single pass cannot rank a
 			// change against the machine's own drift.
 			this.repeats = Math.max(1, intProperty("metalcraft.benchmarkRepeats", 3));
+			double requestedPitch = doubleProperty("metalcraft.benchmarkPitch", 0);
+			if (!Double.isFinite(requestedPitch) || requestedPitch < -80 || requestedPitch > 80) throw new IllegalArgumentException("Benchmark pitch must be -80–80 degrees");
+			this.pitch = (float)requestedPitch;
 			this.minimumFps = doubleProperty("metalcraft.benchmarkMinimumFps", 20.0);
 			// A low floor on purpose. These gates exist to catch a broken scene, not to abort a run over
 			// a real frame-time stall: the traversal phase's streaming stalls are a defect the
@@ -339,6 +351,12 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				int[] resolution = this.applyDisplaySettings();
 				this.reloadResourcePacks();
 				double loadedFraction = this.awaitLoadedTerrain(world);
+				this.context.getInput().lookAt(site.yaw(), this.pitch);
+				this.context.waitTicks(5);
+				this.cameraSamples.add("initial", this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.camera()));
+				if (Math.abs(this.cameraSamples.getAsJsonObject("initial").get("pitch").getAsFloat() - this.pitch) > 0.01F) {
+					throw new AssertionError("Benchmark camera did not adopt requested pitch");
+				}
 
 				Path screenshot = this.context.takeScreenshot("metalcraft-world-"
 					+ this.backend.toLowerCase(Locale.ROOT) + "-benchmark");
@@ -354,6 +372,9 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				// whichever one happened to run last.
 				List<MetalFrameMetrics.Phase> phases = new ArrayList<>();
 				for (int repeat = 1; repeat <= this.repeats; repeat++) {
+					this.moveCameraTo(world, site);
+					this.context.waitTicks(100);
+					this.cameraSamples.add("repeat#" + repeat + ":start", this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.camera()));
 					phases.add(this.captureStationary(world, repeat));
 					phases.add(this.capturePan(world, repeat));
 					phases.add(this.captureTraversal(world, repeat));
@@ -484,9 +505,9 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				player.getAbilities().flying = true;
 				player.onUpdateAbilities();
 			}));
-			world.getServer().runCommand(String.format(Locale.ROOT, "tp @a %d %.2f %d %.1f 0",
-				site.x(), site.groundY() + PLAYER_EYE_HEIGHT, site.z(), site.yaw()));
-			this.context.getInput().lookAt(site.yaw(), 0.0F);
+			world.getServer().runCommand(String.format(Locale.ROOT, "tp @a %d %.2f %d %.1f %.1f",
+				site.x(), site.groundY() + PLAYER_EYE_HEIGHT, site.z(), site.yaw(), this.pitch));
+			this.context.getInput().lookAt(site.yaw(), this.pitch);
 		}
 
 		/**
@@ -627,7 +648,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			float step = 360.0F / this.phaseTicks;
 			this.context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
 			for (int tick = 0; tick < this.phaseTicks; tick++) {
-				this.context.getInput().lookAt(startYaw + step * tick, 0.0F);
+				this.context.getInput().lookAt(startYaw + step * tick, this.pitch);
 				this.tick(world);
 			}
 			return this.finishPhase("pan", repeat);
@@ -636,14 +657,14 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		/** Continuous flight, which is the only phase that forces chunk generation, meshing, and upload. */
 		private MetalFrameMetrics.Phase captureTraversal(final TestSingleplayerContext world, final int repeat) {
 			float startYaw = this.context.computeOnClient(client -> client.player.getYRot());
-			this.context.getInput().lookAt(startYaw, 0.0F);
+			this.context.getInput().lookAt(startYaw, this.pitch);
 			this.context.getInput().holdKey(options -> options.keyUp);
 			try {
 				this.context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
 				for (int tick = 0; tick < this.phaseTicks; tick++) {
 					// A slow drift keeps newly generated terrain entering the frustum from the side
 					// rather than only from straight ahead.
-					this.context.getInput().lookAt(startYaw + 20.0F * (float)Math.sin(tick / 60.0), 0.0F);
+					this.context.getInput().lookAt(startYaw + 20.0F * (float)Math.sin(tick / 60.0), this.pitch);
 					this.tick(world);
 				}
 				return this.finishPhase("traversal", repeat);
@@ -655,6 +676,8 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		private MetalFrameMetrics.Phase finishPhase(final String baseName, final int repeat) {
 			String name = this.repeats == 1 ? baseName : baseName + "#" + repeat;
 			MetalFrameMetrics.Phase phase = this.context.computeOnClient(ignored -> MetalFrameMetrics.endCapture(name));
+			this.memorySamples.add(name, this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.sample()));
+			this.cameraSamples.add(name + ":end", this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.camera()));
 			LOGGER.info("Metal benchmark: {}", phase.toLogLine());
 			for (String line : phase.toAttributionLines()) {
 				LOGGER.info("Metal benchmark stall: {}", line);
@@ -731,6 +754,13 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				this.simulationDistance, this.seed, site.x(), site.groundY(), site.z(), site.roughness(),
 				flatFraction, loadedFraction, visibleSections, phases.stream().map(MetalFrameMetrics.Phase::toJson).collect(Collectors.joining(",")));
 			Path output = Path.of("benchmarks", "metalcraft-" + this.backend.toLowerCase(Locale.ROOT) + ".json");
+			var report = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+			report.add("environment", this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.describe()));
+			report.addProperty("routeVersion", 2);
+			report.addProperty("requestedPitchDegrees", this.pitch);
+			report.add("cameraSamples", this.cameraSamples);
+			report.add("memoryAfterPhase", this.memorySamples);
+			json = new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(report);
 			try {
 				Files.createDirectories(output.getParent());
 				Files.writeString(output, json, StandardCharsets.UTF_8);

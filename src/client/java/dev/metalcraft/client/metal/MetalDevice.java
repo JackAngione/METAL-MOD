@@ -42,6 +42,11 @@ public final class MetalDevice implements AutoCloseable {
 		return MetalNative.nRecommendedWorkingSet(this.requireOpenHandle());
 	}
 
+	/** Driver-reported allocation footprint; querying it does not wait for GPU completion. */
+	public synchronized long currentAllocatedBytes() {
+		return MetalNative.nCurrentAllocatedSize(this.requireOpenHandle());
+	}
+
 	public synchronized MetalCommandQueue createCommandQueue() {
 		long queueHandle = MetalNative.nCreateCommandQueue(this.requireOpenHandle());
 		if (queueHandle == 0L) {

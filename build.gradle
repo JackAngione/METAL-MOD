@@ -75,11 +75,37 @@ tasks.named('check') {
 	dependsOn tasks.named('shaderTranslationSmoke')
 }
 
+tasks.register('lodSmoke', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava')
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.lod.LodSmoke'
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('lodSmoke')
+}
+
+tasks.register('lodMetalSmoke', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava')
+	dependsOn tasks.named('processClientResources')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.lod.LodMetalSmoke'
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('lodMetalSmoke')
+}
+
 // Benchmark knobs, forwarded from -P<gradle property> to -D<system property>.
 def benchmarkProperties = [
 	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
 	metalWaterDetailProbe: 'metalcraft.waterDetailProbe',
 	metalBenchmarkSeed: 'metalcraft.benchmarkSeed',
+	metalBenchmarkPitch: 'metalcraft.benchmarkPitch',
+	metalBenchmarkPack: 'metalcraft.benchmarkPack',
+	metalBenchmarkUnlocked: 'metalcraft.benchmarkUnlocked',
+	metalBenchmarkHalfResolution: 'metalcraft.benchmarkHalfResolution',
 	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
 	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',
 	metalBenchmarkResolution: 'metalcraft.benchmarkResolution',
@@ -108,6 +134,8 @@ tasks.named('runClient') {
 		systemProperty 'metalcraft.waterIdentityTest', providers.gradleProperty('metalWaterIdentityTest').getOrElse('false')
 		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
+		systemProperty 'metalcraft.lodSettingsTest', providers.gradleProperty('metalLodSettingsTest').getOrElse('false')
+		systemProperty 'metalcraft.lodExpectedRadius', providers.gradleProperty('metalLodExpectedRadius').getOrElse('-1')
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')
 		systemProperty 'metalcraft.lifecycleShaders', providers.gradleProperty('metalShaderLifecycleTest').getOrElse('false')

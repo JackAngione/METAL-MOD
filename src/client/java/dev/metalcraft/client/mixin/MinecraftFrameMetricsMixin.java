@@ -20,6 +20,9 @@ abstract class MinecraftFrameMetricsMixin {
 	 */
 	@Inject(method = "runTick", at = @At("HEAD"))
 	private void metalcraft$beginFrameMetrics(final boolean advanceGameTime, final CallbackInfo callback) {
+		dev.metalcraft.client.MetalCraftConfig.beginLodFrame(
+			((GpuDeviceAccessor)(Object)com.mojang.blaze3d.systems.RenderSystem.getDevice()).metalcraft$backend()
+				instanceof dev.metalcraft.client.metal.MetalGpuDevice);
 		MetalFrameMetrics.recordFrameStart(System.nanoTime());
 	}
 

@@ -1586,6 +1586,14 @@ Java_dev_metalcraft_client_metal_MetalNative_nRecommendedWorkingSet(JNIEnv *env,
 }
 
 MC_EXPORT JNIEXPORT jlong JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nCurrentAllocatedSize(JNIEnv *env, jclass type, jlong handle) {
+	@autoreleasepool {
+		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+		return device == nil ? 0 : (jlong)device.currentAllocatedSize;
+	}
+}
+
+MC_EXPORT JNIEXPORT jlong JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nCreateCommandQueue(JNIEnv *env, jclass type, jlong deviceHandle) {
 	@autoreleasepool {
 		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, deviceHandle, MCObjectTypeDevice);

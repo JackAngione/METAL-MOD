@@ -66,6 +66,7 @@ public final class MetalNative {
 	static native String nDeviceName(long handle);
 
 	static native long nRecommendedWorkingSet(long handle);
+	static native long nCurrentAllocatedSize(long handle);
 
 	static native long nCreateCommandQueue(long deviceHandle);
 
