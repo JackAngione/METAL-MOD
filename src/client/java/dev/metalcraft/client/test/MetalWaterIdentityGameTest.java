@@ -105,6 +105,13 @@ final class MetalWaterIdentityGameTest {
 					throw new AssertionError("Ordinary transparency expected before the Fabulous check");
 				}
 			});
+			if (Boolean.getBoolean("metalcraft.underwaterProbe")) {
+				this.context.getInput().resizeWindow(RESIZED_WIDTH, RESIZED_HEIGHT);
+				this.context.waitFor(client -> client.getWindow().getWidth() == RESIZED_WIDTH
+					&& client.getWindow().getHeight() == RESIZED_HEIGHT);
+				this.captureW6Comparisons(world);
+				return;
+			}
 			if (Boolean.getBoolean("metalcraft.waterDetailProbe")) {
 				this.context.getInput().resizeWindow(RESIZED_WIDTH, RESIZED_HEIGHT);
 				this.context.waitFor(client -> client.getWindow().getWidth() == RESIZED_WIDTH
@@ -562,6 +569,13 @@ final class MetalWaterIdentityGameTest {
 		if (differentSamples(distortionOff, underwaterEntry, 0.0, 1.0, 12) < 20) {
 			throw new AssertionError("W6 underwater distortion did not change the frozen submerged view");
 		}
+		// Matched near-bed colors with the vanilla underwater path and the clear-water path.
+		this.context.getInput().lookAt(180, 35);
+		this.context.waitTicks(20);
+		this.context.runOnClient(client -> ShaderPackRuntime.active().setOption("water_enabled", false));
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-wu-vanilla-bed", false);
+		this.context.runOnClient(client -> ShaderPackRuntime.active().setOption("water_enabled", true));
+		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-wu-clear-bed", false);
 		this.context.getInput().lookAt(180, -75);
 		this.context.waitTicks(20);
 		this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-water-w6-underwater-looking-up", false);

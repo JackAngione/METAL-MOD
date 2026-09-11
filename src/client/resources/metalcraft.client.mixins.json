@@ -33,7 +33,9 @@
     "SectionCompilerResultsWaterMixin",
     "CompiledSectionMeshWaterMixin",
     "RenderPassWaterDrawMixin",
-    "LevelRendererWaterDrawMixin"
+    "LevelRendererWaterDrawMixin",
+    "WaterFogEnvironmentMixin",
+    "ScreenEffectRendererWaterMixin"
   ],
   "injectors": {
     "defaultRequire": 1
