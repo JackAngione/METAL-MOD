@@ -105,6 +105,27 @@ tasks.register('lodShadingBenchmark', JavaExec) {
 	mainClass = 'dev.metalcraft.client.shader.LodShadingBenchmark'
 }
 
+// Tile feasibility stays outside the runtime JNI library until P6 acceptance passes.
+def lodTileProbe = layout.buildDirectory.file('native/macos-arm64/lod-shading-tile')
+tasks.register('compileLodTileShadingProbe', Exec) {
+	onlyIf { isAppleSiliconBuild }
+	inputs.file('src/smoke/native/lod-shading-tile.m')
+	outputs.file(lodTileProbe)
+	doFirst { lodTileProbe.get().asFile.parentFile.mkdirs() }
+	commandLine 'xcrun', 'clang', '-O2', '-fobjc-arc', '-framework', 'Foundation',
+		'-framework', 'Metal', 'src/smoke/native/lod-shading-tile.m', '-o', lodTileProbe.get().asFile.absolutePath
+}
+tasks.register('lodTileShadingBenchmark', Exec) {
+	dependsOn tasks.named('lodShadingBenchmark'), tasks.named('compileLodTileShadingProbe')
+	onlyIf { isAppleSiliconBuild }
+	commandLine lodTileProbe.get().asFile.absolutePath, 'build/reports/lod-shading'
+}
+tasks.register('lodPackedTileShadingBenchmark', Exec) {
+	dependsOn tasks.named('lodTileShadingBenchmark')
+	onlyIf { isAppleSiliconBuild }
+	commandLine lodTileProbe.get().asFile.absolutePath, 'build/reports/lod-shading', 'packed'
+}
+
 // Benchmark knobs, forwarded from -P<gradle property> to -D<system property>.
 def benchmarkProperties = [
 	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',

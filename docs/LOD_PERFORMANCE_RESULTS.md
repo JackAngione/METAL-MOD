@@ -124,6 +124,108 @@ the better measured choice for this experiment.
 [merged image](evidence/lod/shading-prototype/merged.png), and
 [reconstructed image](evidence/lod/shading-prototype/bands.png) are retained.
 
+## P6 follow-up: in-pass sharing and tile stages
+
+The completion follow-up on 2026-09-11 tested four additional approaches. **P6 is
+still open.** None of the tested approaches reduces net GPU time, and the approaches
+with a quarter-linear band fail the expanded synthetic image budget. Runtime shader
+sources, settings, and capability gates are unchanged.
+
+The new fragment variants reuse shaded samples through either coordinate-verified
+SIMD lookup or quad shuffles. Lookup never assumes that a SIMD group covers a
+particular screen rectangle. Missing or incompatible samples fall back to current
+full-resolution shading. The quad variant is deliberately a **half-only control**;
+a quad does not implement quarter-linear shading. Both variants skip sharing checks
+when the entire group is near or beyond the configured shadow distance.
+
+The native feasibility probe also tests one tile dispatch with shared sample storage,
+and two tile dispatches that pack coarse work before reconstruction. These use Metal
+imageblocks within the existing render encoder, so they require no external G-buffer
+stores or sampled G-buffer textures. The packed version tests whether reducing idle
+SIMD lanes can offset the extra tile dispatch and reconstruction work. Apple's
+[tile/imageblock documentation](https://developer.apple.com/documentation/metal/tailor-your-apps-for-apple-gpus-and-tile-based-deferred-rendering)
+describes the underlying API. Neither probe is linked into the runtime native library.
+
+Machine: Apple M4 Max / 64 GB, macOS 27.0 (26A428), Java 25.0.4. No other Minecraft
+client was present in the process check. Thermal state and power were not sampled.
+These are offscreen fixtures, **not Minecraft worlds**; no generated-world acceptance,
+16/16 gameplay performance, or frame-rate improvement is claimed.
+
+Each fixture uses the actual Standard resolve body and identical exported uniforms,
+including the projection for each target size. Tests cover 1279×719, 1920×1080 and
+3840×2160, separately at the default 96-block and maximum 256-block shadow distance.
+Each configuration has three repeats, 80 warm-up submissions per repeat, and 180
+samples per variant per repeat. Variant order rotates to distribute ordering bias.
+Raw samples and median/p95/p99 are retained. GPU command-buffer intervals include
+coverage/depth, every resolve/store/reconstruction operation and a subsequent
+depth-tested consumer. CPU readbacks and synchronous harness waits are outside them.
+
+The following are medians of the three paired repeat changes at 3840×2160; positive
+values mean slower. Tile modes use their own paired baseline with identical tile
+dimensions (16² direct, 32² packed). Do not compare their absolute baseline costs
+against the Java harness's automatically sized tiles.
+
+| Approach | 96-block shadows | 256-block shadows |
+| --- | ---: | ---: |
+| Stored G-buffer, half/quarter targets and reconstruction | +111.4% | +67.7% |
+| Fragment SIMD half/quarter lookup | +22.5% | +41.3% |
+| Fragment quad, half-only control | +6.1% | +9.0% |
+| Single tile dispatch, half/quarter sharing | +17.2% | +15.8% |
+| Packed coarse tile work plus reconstruction | +49.4% | +49.5% |
+
+The best control at default shadows increases the median from 0.7711 to 0.8175 ms.
+Removing external stores reduces the original regression, but sharing and
+reconstruction still cost more than the shading they remove in these fixtures.
+The default quarter band at 200 blocks lies outside the 96-block shadow volume;
+the 256-block case is needed to exercise its shadow reconstruction.
+
+All sixteen moving 1279×719 configurations retain bit-identical depth and zero near
+pixels above 0.02 maximum channel error. This is a tolerance check, not a claim of
+bit-identical near color. With 256-block shadows, the stored-band approach reaches
+0.03906 error, with 53,491 pixel observations exceeding 0.02. SIMD and tile
+half/quarter sharing reach 0.05261, with 745,570 observations exceeding 0.02. Each
+comparison covers 14,713,616 pixel observations. The half-only control stays below
+0.02 (maximum 0.01792), but fails performance and does not provide quarter shading.
+`imageBudgetPassed` records these failures explicitly; successful benchmark execution
+must not be interpreted as P6 acceptance. The consumer is an opaque depth-tested
+stripe, not a real transparent/water scene. The images were visually inspected.
+
+During probe development, a 32² direct tile requested 40,960 bytes against Metal's
+32,768-byte tile budget. Without checking encoder creation, the missing draw could
+leave the previous image intact and falsely look fast and correct. Those results
+were discarded. The retained direct probe uses 16² tiles, checks encoder creation
+and texture allocation, completed GPU status/timestamps and finite readback
+channels, and retains the corrected measurements only. The packed probe uses 32²
+tiles with 5,120 bytes of shared coarse storage and an explicit producer barrier.
+
+Reproduce the complete matrix (it also runs the original Java comparison):
+
+```bash
+./gradlew lodPackedTileShadingBenchmark
+MTL_DEBUG_LAYER=1 ./gradlew lodPackedTileShadingBenchmark
+./gradlew build
+```
+
+The first command writes performance evidence; the second is separate API validation
+and must not replace the uninstrumented timing reference. Reports are written under
+`build/reports/lod-shading/`. The native probe consumes fixture source/uniform bytes
+exported by the Java task, so Gradle enforces that dependency. Subsets are available
+as `lodShadingBenchmark` and `lodTileShadingBenchmark`.
+
+Retained evidence: [fragment timings/readbacks](evidence/lod/shading-followup/metrics.json),
+[direct tile](evidence/lod/shading-followup/tile-direct-metrics.json),
+[packed tile](evidence/lod/shading-followup/tile-packed-metrics.json),
+[benchmark log](evidence/lod/shading-followup/benchmark.log),
+[validation](evidence/lod/shading-followup/validation.txt),
+[256-block reference](evidence/lod/shading-followup/shadows-256/merged.png) and
+[SIMD reconstruction](evidence/lod/shading-followup/shadows-256/fused.png).
+
+Remaining P6 work is substantive: a design that passes the net-cost gate, moving
+band hysteresis, generated-world silhouette and transparent-intersection validation,
+frame-boundary settings/capability integration, and reload/resize/half-resolution
+lifecycle coverage. These measurements do not prove that all possible shading LOD
+designs fail; they rule out promoting these prototypes as a completed feature.
+
 ## Remaining acceptance
 
 P7 still requires a bounded persistent hierarchy from received terrain, parent-node

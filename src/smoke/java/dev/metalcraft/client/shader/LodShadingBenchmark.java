@@ -20,6 +20,9 @@ import org.joml.Matrix4f;
  * This deliberately cannot establish generated-world image quality or an overall frame-rate benefit. */
 public final class LodShadingBenchmark {
     private static final Path OUTPUT = Path.of("build", "reports", "lod-shading");
+    private static final int SAMPLES = 180;
+    private static final int REPEATS = 3;
+    private enum Variant { MERGED, BANDS, FUSED, QUAD }
     private static final MetalTexture.Format HDR = MetalTexture.Format.RGBA16_FLOAT;
     private static final MetalTexture.Format BYTE = MetalTexture.Format.RGBA8_UNORM;
     private static final MetalTexture.Format DEPTH = MetalTexture.Format.DEPTH32_FLOAT;
@@ -45,34 +48,55 @@ public final class LodShadingBenchmark {
                     constant MCShadowFrame &shadowFrame, constant MCResolveCamera &camera, constant McFog &fog,
                     depth2d_array<float> shadowMap, sampler shadowSampler) {
                 """ + source.substring(body, end) + "\n}\n";
-        source += helper + Files.readString(Path.of("src/smoke/resources/lod-shading-prototype.metal"));
+        source += helper + Files.readString(Path.of("src/smoke/resources/lod-shading-prototype.metal"))
+                + Files.readString(Path.of("src/smoke/resources/lod-shading-fused.metal"));
+        Files.writeString(OUTPUT.resolve("fixture.metal"), source);
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("scope", "Synthetic Standard resolve cost experiment; not world/frame performance or a shipped capability");
         report.put("bands", "near <64 blocks full resolution, middle 64..128 half linear, far >=128 quarter linear");
         report.put("depth", "Common full-resolution opaque depth; reduced targets contain no depth; subsequent depth-tested consumer unchanged");
         report.put("timestamp", "Metal GPUStartTime/GPUEndTime for one command buffer containing all passes; synchronous harness waits are outside measured intervals");
-        report.put("samplesPerVariant", 180);
+        report.put("samplesPerVariantPerRepeat", SAMPLES);
+        report.put("repeats", REPEATS);
+        report.put("warmupSubmissionsPerRepeat", 80);
+        report.put("quantileOrder", List.of("median", "p95", "p99"));
+        report.put("quadScope", "Half-linear shading only; diagnostic simpler alternative, never quarter-linear");
+        report.put("acceptance", "Experimental cost/quality report only; failed gates do not enable runtime capabilities");
+        report.put("java", System.getProperty("java.version"));
+        report.put("os", System.getProperty("os.name") + " " + System.getProperty("os.version"));
         var results = new ArrayList<Object>();
         MetalStallProbe.setEnabled(true);
         try (var device = MetalNative.openDefaultDevice().orElseThrow()) {
             report.put("device", device.name());
-            for (int[] size : new int[][]{{1279,719}, {1920,1080}, {3840,2160}}) {
-                try (var scene = new Scene(device, source, size[0], size[1])) {
-                    for (int i = 0; i < 40; i++) scene.draw((i & 1) != 0, 0);
-                    double[][] timings = {new double[180], new double[180]};
-                    // Alternate order every pair to limit systematic clock/thermal ordering bias.
-                    for (int sample = 0; sample < 180; sample++) for (int order = 0; order < 2; order++) {
-                        int variant = order ^ (sample & 1);
-                        timings[variant][sample] = scene.draw(variant == 1, sample % 16);
+            for (int shadowDistance : new int[]{96, 256}) for (int[] size : new int[][]{{1279,719}, {1920,1080}, {3840,2160}}) {
+                try (var scene = new Scene(device, source, size[0], size[1], shadowDistance)) {
+                    for (int repeat = 0; repeat < REPEATS; repeat++) {
+                        for (int i = 0; i < 80; i++) scene.draw(Variant.values()[i % 4], 0);
+                        double[][] timings = new double[Variant.values().length][SAMPLES];
+                        // Rotate all variant positions, including the reference, within each quartet.
+                        for (int sample = 0; sample < SAMPLES; sample++) for (int order = 0; order < 4; order++) {
+                            int variant = (order + sample + repeat) % 4;
+                            timings[variant][sample] = scene.draw(Variant.values()[variant], sample % 16);
+                        }
+                        var row = new LinkedHashMap<String, Object>();
+                        row.put("shadowDistance", shadowDistance); row.put("width", size[0]); row.put("height", size[1]);
+                        row.put("repeat", repeat + 1);
+                        for (Variant variant : Variant.values()) {
+                            String name = variant.name().toLowerCase(java.util.Locale.ROOT);
+                            row.put(name + "Ms", quantiles(timings[variant.ordinal()]));
+                            row.put(name + "SamplesMs", timings[variant.ordinal()]);
+                            if (variant != Variant.MERGED) {
+                                row.put(name + "MedianChangePercent", 100 * (median(timings[variant.ordinal()]) / median(timings[0]) - 1));
+                                row.put(name + "NetGpuImprovement", median(timings[variant.ordinal()]) < median(timings[0]));
+                                if (repeat == 0 && size[0] == 1279) row.put(name + "Quality", scene.quality(variant));
+                            }
+                        }
+                        row.put("allocatedBytes", device.currentAllocatedBytes());
+                        results.add(row);
+                        System.out.printf("P6 shadows=%d %dx%d repeat=%d GPU medians: merged=%.4f bands=%.4f fused=%.4f quad=%.4f ms%n",
+                                shadowDistance, size[0], size[1], repeat + 1, median(timings[0]), median(timings[1]),
+                                median(timings[2]), median(timings[3]));
                     }
-                    var row = new LinkedHashMap<String, Object>();
-                    row.put("width", size[0]); row.put("height", size[1]);
-                    row.put("mergedMs", quantiles(timings[0])); row.put("bandsMs", quantiles(timings[1]));
-                    row.put("medianChangePercent", 100 * (median(timings[1]) / median(timings[0]) - 1));
-                    row.put("allocatedBytes", device.currentAllocatedBytes());
-                    if (size[0] == 1279) row.put("quality", scene.quality());
-                    results.add(row);
-                    System.out.println(new GsonBuilder().create().toJson(row));
                 }
             }
         } finally { MetalStallProbe.setEnabled(false); }
@@ -91,15 +115,15 @@ public final class LodShadingBenchmark {
         final MetalCommandQueue queue;
         final long[] work = new long[MetalStallProbe.slots()];
         final List<AutoCloseable> owned = new ArrayList<>();
-        final int width, height;
+        final int width, height, shadowDistance;
         final MetalTexture scene, albedo, normal, light, depth, output, half, quarter, shadow;
         final MetalTextureView sceneView, albedoView, normalView, lightView, halfView, quarterView, shadowView;
         final MetalSampler sampler;
         final MetalBuffer options, frame, camera, fog, parameters;
-        final MetalRenderPipeline geometry, resolve, halfPipeline, quarterPipeline, reconstruct, overlay, shadowFixture;
+        final MetalRenderPipeline geometry, resolve, fused, quad, halfPipeline, quarterPipeline, reconstruct, overlay, shadowFixture;
 
-        Scene(MetalDevice device, String source, int width, int height) {
-            this.device = device; this.width = width; this.height = height;
+        Scene(MetalDevice device, String source, int width, int height, int shadowDistance) {
+            this.device = device; this.width = width; this.height = height; this.shadowDistance = shadowDistance;
             queue = own(device.createCommandQueue());
             scene = texture(HDR,width,height); albedo = texture(BYTE,width,height);
             normal = texture(BYTE,width,height); light = texture(BYTE,width,height);
@@ -118,8 +142,8 @@ public final class LodShadingBenchmark {
                 var b = m.bytes();
                 for (int i=0;i<4;i++) new Matrix4f().scaling(.004f,.004f,.001f).m32(.5f).get(i*64,b);
                 new Matrix4f().get(256,b); new Matrix4f().get(320,b);
-                b.putFloat(384,24).putFloat(388,48).putFloat(392,72).putFloat(396,96);
-                b.putFloat(408,1).putInt(416,4).putFloat(420,1f/64).putFloat(424,96).putFloat(428,96);
+                b.putFloat(384,shadowDistance/4f).putFloat(388,shadowDistance/2f).putFloat(392,shadowDistance*.75f).putFloat(396,shadowDistance);
+                b.putFloat(408,1).putInt(416,4).putFloat(420,1f/64).putFloat(424,shadowDistance).putFloat(428,96);
             }
             try (var m = camera.map()) {
                 new Matrix4f().perspective((float)Math.toRadians(70),(float)width/height,.05f,512,true).invert().get(0,m.bytes());
@@ -128,9 +152,17 @@ public final class LodShadingBenchmark {
             }
             try (var m = fog.map()) { for(int i=16;i<48;i+=4) m.bytes().putFloat(i,10000); }
             try (var m = parameters.map()) { m.bytes().putFloat(0,width).putFloat(4,height); }
+            for (var entry : Map.of("options", options, "frame-" + shadowDistance, frame, "camera-" + width, camera, "fog", fog).entrySet()) {
+                try (var mapped = entry.getValue().map()) {
+                    byte[] bytes = new byte[mapped.bytes().remaining()]; mapped.bytes().get(bytes);
+                    Files.write(OUTPUT.resolve(entry.getKey() + ".bin"), bytes);
+                } catch (java.io.IOException error) { throw new java.io.UncheckedIOException(error); }
+            }
             var depthWrite = new MetalRenderPipeline.DepthState(true,true,MetalRenderPipeline.CompareFunction.GREATER,0,0);
             geometry = pipeline(source,"fixture_geometry",GBUFFER,DEPTH,depthWrite);
             resolve = pipeline(source,"resolve_fragment",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
+            quad = pipeline(source,"fixture_quad",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
+            fused = pipeline(source,"fixture_fused",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
             halfPipeline = pipeline("#define LOD_SCALE 2\n"+source,"fixture_band",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),null,MetalRenderPipeline.DepthState.DISABLED);
             quarterPipeline = pipeline("#define LOD_SCALE 4\n"+source,"fixture_band",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),null,MetalRenderPipeline.DepthState.DISABLED);
             reconstruct = pipeline(source,"fixture_reconstruct",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),DEPTH,MetalRenderPipeline.DepthState.DISABLED);
@@ -180,14 +212,15 @@ public final class LodShadingBenchmark {
             return new MetalRenderPass.DepthAttachment(depth,clear?MetalRenderPass.LoadAction.CLEAR:MetalRenderPass.LoadAction.LOAD,
                     MetalRenderPass.StoreAction.STORE,0);
         }
-        double draw(boolean bands,int motion) {
+        double draw(Variant variant,int motion) {
+            boolean bands = variant == Variant.BANDS;
             try(var m=parameters.map()) { m.bytes().putFloat(8,motion); }
             MetalStallProbe.recordCompletedGpuWork(); MetalStallProbe.takeFrame(work,0);
             try(var commands=queue.createCommandBuffer()) {
                 try(var pass=commands.beginRenderPass(new MetalRenderPass.Descriptor(List.of(clear(scene,true),clear(albedo,bands),
                         clear(normal,bands),clear(light,bands)),depth(true),0))) {
                     fullscreen(pass,geometry);
-                    if(!bands) fullscreen(pass,resolve);
+                    if(!bands) fullscreen(pass, variant == Variant.QUAD ? quad : variant == Variant.FUSED ? fused : resolve);
                 }
                 if(bands) {
                     for(int level=0;level<2;level++) try(var pass=commands.beginRenderPass(new MetalRenderPass.Descriptor(
@@ -217,13 +250,13 @@ public final class LodShadingBenchmark {
                 return work[base+MetalStallProbe.FIELD_NANOS]/1e6;
             }
         }
-        Map<String,Object> quality() throws Exception {
+        Map<String,Object> quality(Variant variant) throws Exception {
             long differing = 0, nearDiffering = 0, depthDiffering = 0, pixels = 0;
             double maxError = 0, sumError = 0;
             for(int motion=0;motion<16;motion++) {
-                draw(false,motion); var reference=scene.readback(queue,0).order(ByteOrder.nativeOrder());
+                draw(Variant.MERGED,motion); var reference=scene.readback(queue,0).order(ByteOrder.nativeOrder());
                 var originalDepth=depth.readback(queue,0).order(ByteOrder.nativeOrder());
-                draw(true,motion); var actual=output.readback(queue,0).order(ByteOrder.nativeOrder());
+                draw(variant,motion); var actual=(variant == Variant.BANDS ? output : scene).readback(queue,0).order(ByteOrder.nativeOrder());
                 var bandDepth=depth.readback(queue,0).order(ByteOrder.nativeOrder());
                 for(int p=0;p<width*height;p++) {
                     double error=0;
@@ -234,11 +267,12 @@ public final class LodShadingBenchmark {
                     if(originalDepth.getInt(p*4)!=bandDepth.getInt(p*4)) depthDiffering++;
                     maxError=Math.max(maxError,error); sumError+=error; pixels++;
                 }
-                if(motion==7) { image(reference,"merged.png"); image(actual,"bands.png"); }
+                if(motion==7) { image(reference,"merged.png"); image(actual,variant == Variant.BANDS ? "bands.png" : variant == Variant.FUSED ? "fused.png" : "quad.png"); }
             }
             if(depthDiffering!=0||nearDiffering!=0) throw new AssertionError("Full-resolution depth/near ownership changed");
             return Map.of("motionSteps",16,"pixels",pixels,"pixelsOver002",differing,"nearPixelsOver002",nearDiffering,
-                    "depthBitDifferences",depthDiffering,"maximumChannelError",maxError,"meanMaximumChannelError",sumError/pixels);
+                    "depthBitDifferences",depthDiffering,"maximumChannelError",maxError,"meanMaximumChannelError",sumError/pixels,
+                    "imageBudgetPassed", differing == 0);
         }
         void image(ByteBuffer data,String name) throws Exception {
             var image=new BufferedImage(width,height,BufferedImage.TYPE_INT_RGB);
@@ -247,7 +281,9 @@ public final class LodShadingBenchmark {
                 for(int c=0;c<3;c++) rgb=(rgb<<8)|Math.clamp(Math.round(Float.float16ToFloat(data.getShort((y*width+x)*8+c*2))*255),0,255);
                 image.setRGB(x,y,rgb);
             }
-            ImageIO.write(image,"png",OUTPUT.resolve(name).toFile());
+            Path imageDirectory = OUTPUT.resolve("shadows-" + shadowDistance);
+            Files.createDirectories(imageDirectory);
+            ImageIO.write(image,"png",imageDirectory.resolve(name).toFile());
         }
         public void close() throws Exception { for(int i=owned.size()-1;i>=0;i--) owned.get(i).close(); }
     }

@@ -351,6 +351,29 @@ Earlier partial-progress entries below are retained as dated evidence, not curre
   conservative depth, and reconstruction described above. Acceptance: clean moving
   silhouettes and transparent intersections, full-detail near terrain, and a measured
   net GPU improvement including every added pass; otherwise keep this task open.
+  - Owner: `/root`. Status: follow-up evaluated; acceptance still failed (2026-09-11).
+    Four additional prototypes remove external G-buffer stores: spatial SIMD sample
+    lookup, half-only quad sharing, one tile dispatch, and packed coarse tile work
+    followed by tile reconstruction. All remain isolated smoke experiments.
+  - [x] P6 follow-up cost matrix: `./gradlew lodPackedTileShadingBenchmark` runs
+    all five approaches at 1279×719, 1920×1080 and 3840×2160, with 96/256-block
+    shadow coverage and three repeats of 180 samples per variant. Apple M4 Max,
+    64 GB, macOS 27.0. Every approach fails its paired all-pass GPU cost gate.
+    At 4K/default shadows, even the half-only control is 6.1% slower; the complete
+    half/quarter approaches are 17.2–111.4% slower than their paired baselines.
+  - [x] P6 follow-up image readback: sixteen moving odd-size fixtures preserve
+    full-resolution depth bit-for-bit and have no near-pixel errors above 0.02.
+    Extending shadows to 256 blocks exposes distant image-budget failures in every
+    half/quarter approach (maximum channel error 0.0391–0.0526). The earlier default
+    fixture had no shadow work at quarter-band depth; its passing result did not
+    establish quarter-band lighting quality. Reports now explicitly flag this failure.
+    [Commands, measurements, limitations and artifacts](LOD_PERFORMANCE_RESULTS.md#p6-follow-up-in-pass-sharing-and-tile-stages).
+    P6 stays unchecked: no net GPU improvement, generated-world motion/transparent
+    intersection acceptance, runtime integration, or distance-band hysteresis has passed.
+  - Validation of the follow-up: the complete matrix passes execution in 30 s and
+    again under `MTL_DEBUG_LAYER=1` in 31 s, with no Metal API errors. `./gradlew build`
+    passes in 11 s, including existing CPU/Metal/shader smoke checks;
+    `git diff --check` passes. These validate the probes, not the failed P6 gates.
   - Owner: `/root`. Status: prototype evaluated; acceptance failed (2026-09-11).
     `./gradlew lodShadingBenchmark` compares the actual Standard resolve with 1×/half/
     quarter bands, full-resolution coverage/depth, stored G-buffer inputs and depth/
