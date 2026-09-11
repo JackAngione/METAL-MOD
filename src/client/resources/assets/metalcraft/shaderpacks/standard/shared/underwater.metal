@@ -8,8 +8,8 @@ struct McUnderwaterFrame {
 };
 
 // World color is already fogged by Minecraft. Only displace it here; adding another
-// absorption/fog term would double the biome-aware distance attenuation. The encoded
-// water overlay, hand and HUD are drawn after grade and remain undistorted.
+// absorption/fog term would double the biome-aware distance attenuation. The Standard water fog
+// is tuned before upload; its vanilla screen veil is suppressed. Hand/HUD stay undistorted.
 static inline float2 mc_underwater_uv(float2 uv, float2 extent, float seconds, float strength) {
     if (!isfinite(strength) || strength <= 0.0 || !isfinite(seconds)
         || !all(isfinite(uv)) || !all(isfinite(extent)) || any(extent <= 0.0)) return uv;

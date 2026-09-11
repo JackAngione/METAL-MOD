@@ -53,6 +53,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | WD3 | Clumped geometric patterns with shared travel direction | WD2 | /root | done | 2026-09-09: visibility regression fixed with true noise-height gradients and directional reflections; final-image checks, natural ocean, build, shader-package identity and lifecycle pass. See visible-detail closure evidence. |
 | [x] | WD4 | Crossing wave motion and scattered reflections | WD3 | /root | done | 2026-09-10: independent crossing layers and bounded local sun glints; GPU, full NORMAL-world Metal 16/16 motion/appearance and lifecycle checks pass. See WD4 completion evidence. |
 | [x] | WD5 | Water detail render distance | WD4 | /root | done | 2026-09-10: 2–32 chunk slider/default 16, filtered distant waves, persistence/GPU and natural-ocean distance comparison pass; build and NORMAL/Metal/16/16 lifecycle pass. See WD5 completion evidence. |
+| [x] | WU | Clearer natural underwater appearance | W6, W7 | /root | done | 2026-09-10: tuned single water fog, removed screen veil, reduced submerged surface tint/opacity; build/Metal checks, NORMAL-world full/focused visual tests and lifecycle pass. See WU evidence below. |
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
 
 ## Implementation tasks and acceptance criteria
@@ -2385,3 +2386,61 @@ instead of percentage formatting. Full NORMAL/Metal/16/16 client run is pending.
   including reload, resize/fullscreen, recovery and shutdown.
 - `git diff --check` passes. No new textures or passes. Full performance
   qualification remains tracked by W8.
+
+### WU — Clearer underwater appearance (`/root`, 2026-09-10)
+
+- [x] Claim task and inspect current underwater ownership.
+- [x] Reduce unnatural blue veil and improve nearby clarity, retaining gentle distortion.
+- [x] Validate build/GPU checks and inspect NORMAL-world underwater, entry/exit, upward and cave captures.
+- [x] Run lifecycle regression and record evidence.
+
+Acceptance: nearby terrain retains recognizable color and detail, distance still fades
+into restrained water haze, mild animated distortion remains bounded, and disabled
+water preserves vanilla behavior. No duplicate post-process fog.
+
+WU implementation evidence: `UnderwaterAppearance` tunes the existing `FogData` at
+`WaterFogEnvironment.setupFog` tail, before the shared world clear/uniform upload.
+Negative starts become zero; the original biome/vision span is extended 1.6x.
+Fog color retains 25% of its original hue plus a luminance-scaled muted cyan component.
+This preserves dark fog without injecting light. Blindness/darkness environments
+retain priority because the hook applies only when the water environment is selected.
+`ScreenEffectRendererWaterMixin` suppresses only the water veil, gated to an active
+Standard pack on Metal with water enabled; water-off/other packs keep vanilla behavior.
+The existing bounded 1.5-pixel distortion and entry easing are retained. This supersedes
+W6's original policy of retaining the vanilla veil and unmodified water fog.
+
+`./gradlew build` passes in 16s (`/tmp/underwater-clear-build-final.log`), including
+fog near-visibility/color/darkness assertions and existing Metal distortion identity,
+edge, period and extent checks. NORMAL-world live comparisons and lifecycle remain
+pending; no visual acceptance is claimed from the build alone.
+
+WU visual evidence: full water matrix passed in 4m8s
+(`/tmp/underwater-clear-client.log`). Inspecting that run identified a remaining blue
+sheet on the underside of the surface. The final `gbuffer.metal` adjustment retains
+20% of the submerged atlas/biome saturation and 45% of its alpha, before existing
+reflection/fog composition. Above-water shading is unchanged. It adds no passes or
+textures; underwater scattering remains the single existing fog contribution.
+
+The final shader passes `./gradlew build` in 25s and the focused NORMAL seed-12345
+16/16 client in 1m: `./gradlew runClient -PmetalLifecycleTest
+-PmetalWaterIdentityTest=true -PmetalJvmArgs=-Dmetalcraft.underwaterProbe=true`
+(`/tmp/underwater-clear-focused.log`). This retained probe runs the existing W6
+foam, entry, distortion off/on, partial, upward, exit and creative cave/HUD checks,
+plus matched vanilla/clear bed captures. Nearby gray stone no longer appears royal
+blue; the fence and sun above the surface are clearer, ripples remain visible, and
+cave/hand/HUD preserve low-light contrast. The frozen distortion pair still passes
+its visible-change assertion; foam coverage checks pass with zero sky/fence leakage.
+Evidence retained in `build/underwater-clear-evidence/`: `before-entry.png`,
+`after-entry.png`, `vanilla-bed.png`, `clear-bed.png`, `after-upward.png`,
+`after-cave.png`, `after-partial.png`, and `after-exit.png`. The original before entry
+is from the prior full water run; the vanilla/clear bed pair is matched in this run.
+Lifecycle validation is the remaining closure check. W8 release/performance remains
+separate; these runs do not establish full-frame performance measurements.
+
+WU completed 2026-09-10: `./gradlew runClient -PmetalLifecycleTest
+-PmetalShaderLifecycleTest=true` passes in 44s
+(`/tmp/underwater-clear-lifecycle.log`), covering NORMAL-world reload, resize,
+fullscreen, failed-pack recovery, reopen and clean shutdown. `./gradlew jar sourcesJar`
+passes in 3s (`/tmp/underwater-clear-package.log`); packaged underwater shader and
+new mixins/helper match the tested workspace. `git diff --check` passes.
+All WU acceptance criteria are complete. Existing W8 release gate remains open.

@@ -15,6 +15,21 @@ public final class UnderwaterFrameInputsSmoke {
 	}
 
 	public static void run() {
+		var fog = new net.minecraft.client.renderer.fog.FogData();
+		fog.environmentalStart = -8.0F;
+		fog.environmentalEnd = 24.0F;
+		fog.color.set(0.02F, 0.12F, 0.8F, 1.0F);
+		UnderwaterAppearance.apply(fog);
+		if (fog.environmentalStart < 0.0F || fog.environmentalEnd <= 24.0F
+			|| fog.skyEnd != fog.environmentalEnd || fog.cloudEnd != fog.environmentalEnd
+			|| fog.color.z - fog.color.x >= 0.4F || fog.color.w != 1.0F) {
+			throw new AssertionError("Clear water must preserve near visibility and reduce saturated blue haze");
+		}
+		fog.color.set(0.0F, 0.0F, 0.0F, 1.0F);
+		UnderwaterAppearance.apply(fog);
+		if (fog.color.x != 0.0F || fog.color.y != 0.0F || fog.color.z != 0.0F) {
+			throw new AssertionError("Underwater haze must not add light in darkness");
+		}
 		assertIdentity(UnderwaterFrameInputs.NONE, "missing frame");
 		assertIdentity(UnderwaterFrameInputs.create(12.0F, false, 1.0, true), "water exit");
 		assertIdentity(UnderwaterFrameInputs.create(12.0F, true, 1.0, false), "disabled distortion");

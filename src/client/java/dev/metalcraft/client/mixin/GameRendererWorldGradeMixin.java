@@ -80,7 +80,7 @@ abstract class GameRendererWorldGradeMixin {
 			gpu, color, depth, fabulous);
 		this.metalcraft$linearWorld = frame;
 		// Match the extracted camera's WATER classification; ease only the new distortion
-		// over the first quarter block. Vanilla retains biome fog and its water overlay.
+		// over the first quarter block. The tuned biome fog owns attenuation; Standard omits the screen veil.
 		var level = Minecraft.getInstance().level;
 		if (level != null && cameraState.fogType == FogType.WATER) {
 			var eyeBlock = net.minecraft.core.BlockPos.containing(cameraState.pos);

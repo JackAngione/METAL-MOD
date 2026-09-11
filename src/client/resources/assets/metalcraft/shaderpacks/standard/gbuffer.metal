@@ -351,6 +351,13 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     if (MC_OPTION_WATER_ENABLED && in.waterMaterial == 1.0
         && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u
             || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)) {
+        if (waterFrame.cameraSubmerged != 0u) {
+            // Viewed from below, the atlas/biome tint otherwise looks like a blue sheet.
+            // Keep a faint surface texture; distance fog owns the submerged water color.
+            float surfaceLuminance = dot(shaded.rgb, float3(0.2126, 0.7152, 0.0722));
+            shaded.rgb = mix(float3(surfaceLuminance), shaded.rgb, 0.2);
+            shaded.a *= 0.45;
+        }
         float3 normalWorld = mc_water_detailed_normal(
             in.waterNormalWorld, in.waterFlow, in.waterPeriodicWorldPosition,
             waterFrame.animationSeconds, MC_OPTION_WATER_WAVE_STRENGTH,

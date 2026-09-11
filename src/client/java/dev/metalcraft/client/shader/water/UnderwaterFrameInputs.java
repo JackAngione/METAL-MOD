@@ -2,7 +2,7 @@ package dev.metalcraft.client.shader.water;
 
 import java.nio.ByteBuffer;
 
-/** World-only distortion; Minecraft owns underwater distance fog and the water overlay. */
+/** World-only distortion; the tuned Minecraft fog owns distance attenuation. */
 public record UnderwaterFrameInputs(float animationSeconds, float strength) {
 	public static final UnderwaterFrameInputs NONE = new UnderwaterFrameInputs(0.0F, 0.0F);
 	public static final int UNIFORM_BYTES = 16;
