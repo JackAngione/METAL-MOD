@@ -1,6 +1,6 @@
 # LOD feature implementation plan
 
-Status: planning complete; implementation not started.
+Status: P1 baseline and integration audit in progress.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
 `e0c116931908dc6747117348bce88998971b8752`. Existing uncommitted water work was
@@ -171,7 +171,7 @@ resources. Changing horizon never changes Minecraft render/simulation settings.
 Progress protocol: claim a task with owner/status before implementation; record
 partial progress or blockers beneath it; check it off only with validation evidence
 (commands, machine, scenario, and artifacts). Update this plan in the same change.
-All implementation tasks below remain unclaimed.
+P1 is claimed by Codex; later tasks remain unclaimed.
 
 - [x] P0 — Inspect terrain/render/settings seams, create branch from water effects,
   and document staged design. Evidence: branch base SHA above and inspected source
@@ -181,6 +181,16 @@ All implementation tasks below remain unclaimed.
   Capture LOD-off CPU/GPU/memory baselines and screenshots on a fixed standard-world
   route at 16/16, Default/Metal. Acceptance: reproducible populated-world captures and
   pass-level timings, with known bottlenecks and selected hook contracts documented.
+  - Owner: Codex. Status: in progress (2026-09-10). Auditing the existing benchmark
+    and mapped renderer before introducing LOD behavior. Acceptance remains open
+    until populated-world measurements and hook contracts are verified.
+  - Partial evidence: [mapped interface audit](LOD_INTEGRATION_AUDIT.md) records
+    snapshot isolation, invalidation and pre-batching selection candidates.
+    `./gradlew build` passed including shader smoke checks on M4 Max/64 GB.
+    The 4K/16/16 Default benchmark confirmed Metal at startup but was stopped
+    because another task launched a client in the same checkout. Shared launch
+    artifacts/logs and GPU contention invalidate the attempt. P1 remains unchecked;
+    repeat with isolated launch files and exclusive GPU use before accepting timings.
 - [ ] P2 — Settings model and submenu. Implement persistence, clamping, preset rules,
   staged capability gating, and navigation. Acceptance: restart/reload round trip,
   malformed-config recovery, small-window/keyboard checks, and independent pack state.
