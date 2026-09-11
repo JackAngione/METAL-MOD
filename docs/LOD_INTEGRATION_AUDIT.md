@@ -1,6 +1,6 @@
 # LOD integration audit
 
-P1 work in progress, 2026-09-10. No LOD rendering is enabled by this audit.
+P1 completed, 2026-09-10. No live LOD rendering is enabled by this audit.
 
 ## Verified mapped interfaces
 
@@ -106,9 +106,89 @@ coverage (featureless fraction 0.8741); use the revised pitch control for the ne
 | Traversal | 0.872 | 56.58 |
 
 Frame intervals sit near 8.33 ms / 120 Hz and acquisition consumes about 7.4 ms.
-The harness explicitly flagged display pacing. GPU pass spans identify sky and
-immediate entity/item draws as significant in this view; they are overlapping spans,
-not additive frame costs. These numbers do not establish a terrain LOD speedup.
+The harness explicitly flagged display pacing. GPU pass labels identify physical
+encoders: with pass merging enabled, a `Sky disc` span also includes compatible
+terrain work merged into that encoder. It cannot be attributed to sky alone.
+The spans overlap and are not additive frame costs. These numbers do not establish
+a terrain LOD speedup; a split-pass diagnostic capture is needed for terrain attribution.
 The revised harness now records explicit pack/half-resolution/unlocked settings,
 camera pitch, requested LOD preferences, and heap/Metal allocation samples after
 each phase. Memory samples are point-in-time values, not peak or resident-set usage.
+
+## Verified route version 2
+
+Artifacts: `docs/evidence/lod/baseline-route2/metrics.json` and `scene.png`.
+M4 Max/64 GB, macOS 27.0, Java 25.0.4, no pack, 1920×1080, 16/16,
+Default/Metal, half-resolution off, unlocked presentation on, VSync off, FOV 70.
+Command: original plan baseline command with resolution 1920×1080 and
+`-PmetalBenchmarkPitch=30 -PmetalBenchmarkPack=none -PmetalBenchmarkUnlocked=true
+-PmetalBenchmarkHalfResolution=false`. Three 400-tick repeats, each reset to the
+same site and warmed for 100 ticks. Startup, pan and traversal camera samples are
+recorded; all three repeats reached exactly the same traversal endpoint.
+
+Actual initial pitch is verified at 30°. The initial screenshot draws 972 sections,
+loaded fraction 0.9954 (rounded to 0.995 in the log), with featureless fraction 0.678.
+The earlier `baseline-1080` attempt predates the server-teleport pitch fix and repeat
+reset; its requested-pitch metadata is not proof of its initial camera angle. Retain
+it only as exploratory evidence, not as an A/B reference for route version 2.
+
+| Phase | CPU median / p95 / p99 (ms), medians across repeats | Median 1% low FPS | Mean completed-command-buffer GPU time (ms), median across repeats |
+| --- | --- | ---: | ---: |
+| Stationary | 0.976 / 1.123 / 1.250 | 381.57 | 0.791 |
+| Pan | 0.673 / 1.059 / 1.221 | 451.82 | 0.607 |
+| Traversal | 0.950 / 1.228 / 1.494 | 334.72 | 0.821 |
+
+The GPU column is deliberately **not** labeled GPU-frame percentiles: the native
+probe reports aggregate completed-command-buffer work, which is not a per-frame
+distribution. GPU-frame median/p95/p99 instrumentation remains a release-gate gap.
+Post-phase Metal allocation samples range from 1026–1155 MiB; heap used samples
+range from 745–1649 MiB. Neither is a peak. Thermal state was not measured.
+Stationary FPS varies by 10.8% across repeats; any future small regression claim
+must account for that variability. No LOD speedup is claimed.
+
+## Split-pass diagnostic capture
+
+Artifacts: `docs/evidence/lod/baseline-split/metrics.json` and `scene.png`.
+The route-version-2 invocation above plus `-PmetalPassMerging=false` completed
+successfully in 7m14s, again with three repeats. This is a diagnostic configuration,
+separate from the ordinary merged performance baseline. The opaque terrain encoder
+is now labeled `Section layers for opaque` rather than being folded into `Sky disc`.
+
+| Phase | Median of mean opaque-terrain spans (ms) | Individual-repeat means (ms) |
+| --- | ---: | --- |
+| Stationary | 0.571 | 0.561, 0.620, 0.571 |
+| Pan | 0.375 | 0.342, 0.375, 0.382 |
+| Traversal | 0.608 | 0.596, 0.609, 0.608 |
+
+These spans include stage overlap/stalls; do not sum them with other passes or
+substitute them for total GPU-frame time. Entity/item work, clouds and terrain all
+remain measurable contributors. Stationary FPS spread is 18.2% in this diagnostic
+run, so this evidence does not support small speedup claims. P1's reproducible
+baseline and hook-audit gate is satisfied; P8 still requires paired LOD-on/off tests,
+GPU-frame distributions, further scenes/resolutions/packs and final budget tuning.
+
+## Remaining live-adapter contracts (P4/P5)
+
+The tested `LodMetalGeometry` prototype draws a custom vertex ABI into an isolated
+color/depth pass. Its appearance resolver is synthetic. It must not replace a vanilla
+draw until the following contracts are implemented and verified:
+
+- Capture actual model/atlas appearance, tint and per-vertex light/AO. Vanilla's
+  `BlockQuadOutput` receives `BakedQuad` and `QuadInstance` values after lighting;
+  copy those values before reuse if this seam is selected. Irregular models, cutouts,
+  fluids, rotated/noncanonical UVs and nonconstant shading need explicit policies.
+- Carry session/resource/revision IDs from extraction through build and upload.
+  Recheck compiled-mesh identity before suppressing an ordinary draw, since an
+  upload may replace it between preparation and submission.
+- Keep custom buffers out of the ordinary BLOCK vertex pipeline. Preflight all
+  bindings and resources before transferring surface ownership; failure must retain
+  the ordinary mesh. The prototype does not yet implement world fog/lightmap or
+  Standard's linear HDR G-buffer contract.
+- Feed `LodMeshResidency` a monotonic GPU completion timeline. The existing Metal
+  shared events can be polled without waiting; do not use a fixed frame-delay guess
+  or charge only currently visible meshes. Retired in-flight buffers remain charged.
+- Apply availability fallbacks and transition limits before final neighbor balancing.
+  Candidate selection alone is not proof that an uploaded tier exists.
+
+No-pack and Standard both remain gated for live LOD. Multiresolution composition,
+shadow LOD and extended-horizon rendering have no advertised capability yet.

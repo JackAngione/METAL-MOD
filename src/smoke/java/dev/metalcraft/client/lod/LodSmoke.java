@@ -20,6 +20,7 @@ public final class LodSmoke {
         geometry();
         selection();
         scheduling();
+        residency();
         System.out.println("LOD smoke passed: settings recovery/round trip/gates, exact surface coverage, caves/overhangs/materials/seams, selection and stale/bounded jobs");
     }
 
@@ -131,6 +132,11 @@ public final class LodSmoke {
         check(LodSelector.select(true,200,200,.05,2160,1,settings,errors,0)<=near,"Retina error scale");
         check(LodSelector.select(true,200,200,.05,1080,.3,settings,errors,0)<=near,"zoom retains detail");
         check(LodSelector.select(true,200,200,.05,1080,1,settings,new double[]{0,Double.NaN},4)==0,"missing tiers fallback");
+        int[] balanced=LodSelector.balance(new int[]{0,4,4,4,4},new int[][]{{1},{0,2},{1,3},{2,4},{3}});
+        check(java.util.Arrays.equals(balanced,new int[]{0,1,2,3,4}),"neighbor tiers differ by at most one");
+        check(java.util.Arrays.equals(LodSelector.balance(new int[]{4,0},new int[][]{{1},{}}),new int[]{1,0}),"an adjacency pair constrains both endpoints");
+        check(LodSelector.transition(0,4,true)==1 && LodSelector.transition(4,0,true)==0,"bounded coarsening and immediate near-detail restoration");
+        check(LodSelector.transition(0,4,false)==4,"smoothing toggle independent of seam enforcement");
     }
 
     private static void scheduling() {
@@ -168,4 +174,32 @@ public final class LodSmoke {
     }
 
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
+
+    private static final class Resource implements AutoCloseable {
+        int closed;
+        public void close() { closed++; }
+    }
+
+    private static void residency() {
+        Resource first=new Resource(), second=new Resource();
+        var a=new LodMeshResidency.Key(KEY,1);
+        var b=new LodMeshResidency.Key(KEY,2);
+        try(var cache=new LodMeshResidency<Resource>(100)) {
+            check(cache.upload(a,80,()->first),"resident upload admitted");
+            check(cache.use(a,1)==first,"mesh borrows current resource");
+            check(!cache.upload(b,80,()->{throw new AssertionError("allocated beyond budget");}),"in-flight bytes remain charged");
+            check(cache.chargedBytes()==80 && cache.retiredCount()==1 && first.closed==0,"deferred retirement preserves accounting");
+            cache.beginFrame(1);
+            check(first.closed==1 && cache.chargedBytes()==0,"completed use releases exactly once");
+            check(cache.upload(b,80,()->second),"replacement admitted after completion");
+            cache.use(b,2);
+            cache.invalidate(key->true);
+            check(cache.use(b,3)==null && cache.chargedBytes()==80,"invalidated surface loses ownership immediately");
+            cache.setBudget(40);
+            check(!cache.upload(a,30,Resource::new),"budget reduction waits without allocating");
+            cache.beginFrame(2);
+            check(second.closed==1 && cache.upload(a,30,Resource::new),"budget reduction recovers after completion");
+        }
+        check(first.closed==1 && second.closed==1,"no duplicate retirement at shutdown");
+    }
 }

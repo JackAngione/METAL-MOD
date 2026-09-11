@@ -47,6 +47,8 @@ final class MetalLodSettingsGameTest {
             context.takeScreenshot("metalcraft-lod-settings-small");
             context.runOnClient(c -> {
                 var screen = c.gui.screen();
+                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 4,
+                        "resize does not duplicate option widgets");
                 boolean disabled = widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).map(e -> (CycleButton<?>)e)
                         .anyMatch(b -> !b.active && b.getMessage().getString().contains("Enable terrain LOD"));
                 check(disabled, "unavailable rendering control disabled");
@@ -58,6 +60,9 @@ final class MetalLodSettingsGameTest {
             check(MetalCraftConfig.lod().equals(LodSettings.defaults()), "keyboard reset restores defaults");
             context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
             context.waitForScreen(MetalCraftOptionsScreen.class);
+            context.runOnClient(c -> check(widgets(c.gui.screen()).stream()
+                    .filter(w -> w instanceof Button && w.getMessage().getString().equals("Level of Detail…")).count() == 1,
+                    "back navigation does not duplicate the parent layout"));
             check(pack.equals(context.computeOnClient(c -> ShaderPackRuntime.active() == null ? "" : ShaderPackRuntime.active().selectedPackId())), "pack selection unchanged");
             context.runOnClient(c -> {
                 ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);

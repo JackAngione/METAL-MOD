@@ -26,7 +26,7 @@ import net.minecraft.network.chat.Component;
 /** MetalCraft's renderer settings screen. */
 public final class MetalCraftOptionsScreen extends Screen {
 	private static final Component TITLE = Component.translatable("metalcraft.options.title");
-	private final HeaderAndFooterLayout layout = new HeaderAndFooterLayout(this);
+	private HeaderAndFooterLayout layout;
 	private final Screen lastScreen;
 	private StringWidget resolutionStatus;
 
@@ -37,6 +37,7 @@ public final class MetalCraftOptionsScreen extends Screen {
 
 	@Override
 	protected void init() {
+		this.layout = new HeaderAndFooterLayout(this);
 		this.layout.addTitleHeader(TITLE, this.font);
 
 		LinearLayout contents = LinearLayout.vertical().spacing(12);
@@ -221,7 +222,7 @@ public final class MetalCraftOptionsScreen extends Screen {
 
 	@Override
 	protected void repositionElements() {
-		this.layout.arrangeElements();
+		if (this.layout != null) this.layout.arrangeElements();
 	}
 
 	@Override

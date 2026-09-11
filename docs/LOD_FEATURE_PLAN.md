@@ -1,7 +1,7 @@
 # LOD feature implementation plan
 
-Status: P2/P3 foundations complete; P1 capture refinement and P4 Metal prototype
-in progress. Live terrain replacement remains disabled.
+Status: P1–P3 complete; P4 Metal prototype and resource ownership in progress.
+P5–P8 have not started. Live terrain replacement remains disabled.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
 `e0c116931908dc6747117348bce88998971b8752`. Existing uncommitted water work was
@@ -178,14 +178,14 @@ can proceed during P1 capture; integration acceptance still depends on P1.
 - [x] P0 — Inspect terrain/render/settings seams, create branch from water effects,
   and document staged design. Evidence: branch base SHA above and inspected source
   paths listed in this document. No runtime behavior changed or performance measured.
-- [ ] P1 — Baseline and integration audit. Identify exact mapped chunk snapshot,
+- [x] P1 — Baseline and integration audit. Identify exact mapped chunk snapshot,
   invalidation, draw-selection, and depth-composition hooks; record pack capabilities.
   Capture LOD-off CPU/GPU/memory baselines and screenshots on a fixed standard-world
   route at 16/16, Default/Metal. Acceptance: reproducible populated-world captures and
   pass-level timings, with known bottlenecks and selected hook contracts documented.
-  - Owner: Codex. Status: in progress (2026-09-10). Auditing the existing benchmark
-    and mapped renderer before introducing LOD behavior. Acceptance remains open
-    until populated-world measurements and hook contracts are verified.
+  - Owner: Codex. Status: complete (2026-09-10). Source-traced snapshot, invalidation,
+    batching and composition contracts, pack capability limits, and reproducible
+    standard-world 16/16 Default/Metal captures are documented in the audit.
   - Partial evidence: [mapped interface audit](LOD_INTEGRATION_AUDIT.md) records
     snapshot isolation, invalidation and pre-batching selection candidates.
     `./gradlew build` passed including shader smoke checks on M4 Max/64 GB.
@@ -193,6 +193,15 @@ can proceed during P1 capture; integration acceptance still depends on P1.
     because another task launched a client in the same checkout. Shared launch
     artifacts/logs and GPU contention invalidate the attempt. P1 remains unchecked;
     repeat with isolated launch files and exclusive GPU use before accepting timings.
+  - Subsequent isolated runs completed: [source audit and measurements](LOD_INTEGRATION_AUDIT.md).
+    Route version 2 verifies actual pitch and identical repeat endpoints, includes
+    CPU percentiles, command-buffer GPU means and sampled heap/Metal allocations.
+    A split-pass diagnostic run also completed three repeats and exposes opaque
+    terrain GPU spans independently. Evidence: `docs/evidence/lod/baseline-route2/`
+    and `docs/evidence/lod/baseline-split/`; both commands passed. The initial near-4K
+    attempt, display pacing, thermal/peak-memory limits and missing GPU-frame
+    percentile instrumentation are explicitly documented. The broader release
+    matrix and performance claims remain P8 acceptance work.
 - [x] P2 — Settings model and submenu. Implement persistence, clamping, preset rules,
   staged capability gating, and navigation. Acceptance: restart/reload round trip,
   malformed-config recovery, small-window/keyboard checks, and independent pack state.
@@ -240,6 +249,14 @@ can proceed during P1 capture; integration acceptance still depends on P1.
     a test appearance resolver; it is not a live terrain renderer or pack adapter.
     P4 remains unchecked until capture/revision hooks, bounded mesh residency,
     selection transitions and live ordinary-mesh replacement pass their route checks.
+  - Added `LodMeshResidency`: admission precedes allocation; LRU eviction removes
+    ownership, while in-flight resources remain charged until a completion timeline
+    advances. CPU fixtures cover invalidation, reduced budgets, deferred retirement
+    and exactly-once release. `./gradlew build` passed with CPU and Metal smoke checks.
+    The live renderer still needs to supply a nonblocking GPU completion timeline.
+  - Candidate selection now has neighbor relaxation (at most one tier difference)
+    and bounded coarsening with immediate near-detail restoration. These are CPU
+    components awaiting the live selection/availability integration, not shipped LOD.
 - [ ] P5 — Composition and material compatibility. Validate standard/no-pack paths,
   cutouts, shadow LOD, weather, entities, transparency, and reload behavior; follow
   the water plan for relevant effects. Acceptance: visual evidence and GPU readback

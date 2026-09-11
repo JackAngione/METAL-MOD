@@ -4,6 +4,40 @@ package dev.metalcraft.client.lod;
 public final class LodSelector {
     private LodSelector() { }
 
+    /** Loaded-section adjacency relaxation, applied after transition limits. Fine decisions win. */
+    public static int[] balance(int[] selected, int[][] neighbors) {
+        if(selected.length!=neighbors.length) throw new IllegalArgumentException("Mismatched adjacency");
+        int[] result=selected.clone();
+        java.util.ArrayDeque<Integer> changed=new java.util.ArrayDeque<>();
+        for(int i=0;i<result.length;i++) {
+            if(result[i]<-1||result[i]>4) throw new IllegalArgumentException("Invalid tier");
+            for(int neighbor:neighbors[i]) if(neighbor<0||neighbor>=result.length) throw new IllegalArgumentException("Invalid neighbor index");
+            changed.add(i);
+        }
+        while(!changed.isEmpty()) {
+            int node=changed.removeFirst();
+            if(result[node]<0) continue;
+            for(int neighbor:neighbors[node]) {
+                if(result[neighbor]<0) continue;
+                if(result[neighbor]>result[node]+1) {
+                    result[neighbor]=result[node]+1;
+                    changed.add(neighbor);
+                } else if(result[node]>result[neighbor]+1) {
+                    result[node]=result[neighbor]+1;
+                    changed.add(node);
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Detail restoration is immediate; optional smoothing bounds coarsening to one tier per frame. */
+    public static int transition(int previousTier,int selectedTier,boolean smoothing) {
+        if(previousTier < -1 || previousTier > 4 || selectedTier < -1 || selectedTier > 4) throw new IllegalArgumentException("Invalid tier");
+        if(previousTier<0 || selectedTier<0 || !smoothing) return selectedTier;
+        return Math.min(selectedTier,previousTier+1);
+    }
+
     public static int select(boolean visible, double nearestDepth, double distanceToBounds,
             double nearPlane, int sceneHeight, double verticalFovRadians, LodSettings settings,
             double[] worldErrors, int previousTier) {

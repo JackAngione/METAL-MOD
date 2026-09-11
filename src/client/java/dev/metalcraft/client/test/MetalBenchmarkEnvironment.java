@@ -72,6 +72,8 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         value.addProperty("vsync", client.options.enableVsync().get());
         value.addProperty("frameLimit", client.options.framerateLimit().get());
         value.addProperty("fov", client.options.fov().get());
+        value.addProperty("passMerging", Boolean.parseBoolean(System.getProperty("metalcraft.passMerging", "true")));
+        value.addProperty("commandBatching", Boolean.parseBoolean(System.getProperty("metalcraft.commandBatching", "true")));
         value.add("lodRequested", new Gson().toJsonTree(MetalCraftConfig.lod()));
         value.addProperty("lodGeometryAvailable", false);
         value.addProperty("memorySampling", "Point-in-time after each phase; not a peak or resident-set measurement");

@@ -20,7 +20,7 @@ import net.minecraft.network.chat.Component;
 /** Keyboard-accessible staged LOD settings, independent of shader-pack preferences. */
 public final class MetalCraftLodOptionsScreen extends Screen {
     private final Screen parent;
-    private final HeaderAndFooterLayout layout = new HeaderAndFooterLayout(this);
+    private HeaderAndFooterLayout layout;
 
     public MetalCraftLodOptionsScreen(Screen parent) {
         super(text("title"));
@@ -31,6 +31,7 @@ public final class MetalCraftLodOptionsScreen extends Screen {
 
     @Override
     protected void init() {
+        layout = new HeaderAndFooterLayout(this);
         layout.addTitleHeader(title, font);
         int width = Math.max(150, Math.min(310, this.width - 40));
         LinearLayout rows = LinearLayout.vertical().spacing(8);
@@ -80,6 +81,6 @@ public final class MetalCraftLodOptionsScreen extends Screen {
         repositionElements();
     }
 
-    @Override protected void repositionElements() { layout.arrangeElements(); }
+    @Override protected void repositionElements() { if(layout != null) layout.arrangeElements(); }
     @Override public void onClose() { minecraft.gui.setScreen(parent); }
 }
