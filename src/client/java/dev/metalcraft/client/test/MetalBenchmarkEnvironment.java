@@ -13,6 +13,8 @@ import dev.metalcraft.client.mixin.GpuDeviceAccessor;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.Minecraft;
+import org.lwjgl.glfw.GLFW;
+import dev.metalcraft.client.metal.MetalSurfaceProbe;
 
 /** Explicit benchmark controls and provenance. Restores persisted renderer preferences after a run. */
 final class MetalBenchmarkEnvironment implements AutoCloseable {
@@ -122,6 +124,46 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         value.addProperty("yaw", player.getYRot());
         value.addProperty("pitch", player.getXRot());
         return value;
+    }
+
+    static void focus(ClientGameTestContext context) {
+        context.runOnClient(c -> GLFW.glfwFocusWindow(c.getWindow().handle()));
+        context.waitFor(c -> MetalSurfaceProbe.presentationState(c.getWindow().handle()) == 15
+                && GLFW.glfwGetWindowAttrib(c.getWindow().handle(), GLFW.GLFW_FOCUSED) == GLFW.GLFW_TRUE, 200);
+    }
+
+    /** One phase, checked on every game tick. A lost/occluded/resized window rejects the capture. */
+    static final class Presentation {
+        private final long window = Minecraft.getInstance().getWindow().handle();
+        private final boolean fullscreen = GLFW.glfwGetWindowMonitor(window) != 0L;
+        private final int[] drawable = MetalSurfaceProbe.drawableSize();
+        private int checks;
+
+        Presentation() { check(); }
+
+        void check() {
+            int state = MetalSurfaceProbe.presentationState(window);
+            if (state != 15 || GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_FOCUSED) != GLFW.GLFW_TRUE
+                    || GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_ICONIFIED) != GLFW.GLFW_FALSE
+                    || (GLFW.glfwGetWindowMonitor(window) != 0L) != fullscreen
+                    || !java.util.Arrays.equals(drawable, MetalSurfaceProbe.drawableSize())) {
+                throw new AssertionError("Benchmark presentation changed: AppKit state=" + state
+                        + ", focused=" + GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_FOCUSED));
+            }
+            checks++;
+        }
+
+        JsonObject describe() {
+            check();
+            JsonObject value = new JsonObject();
+            value.addProperty("passed", true);
+            value.addProperty("checks", checks);
+            value.addProperty("fullscreen", fullscreen);
+            value.addProperty("drawableWidth", drawable[0]);
+            value.addProperty("drawableHeight", drawable[1]);
+            value.addProperty("scope", "Every game tick: AppKit active/visible/not-minimized/not-occluded, GLFW focused, stable mode and drawable; not a GPU pacing guarantee");
+            return value;
+        }
     }
 
     @Override public void close() {

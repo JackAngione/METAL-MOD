@@ -1,0 +1,96 @@
+(lldb) target create /private/var/folders/4j/9d9rf3nn6gx9ldx_krmzcj_h0000gn/T/lwjgl_jackangione/3.4.1-snapshot/arm64/libglfw.dylib
+Current executable set to '/private/var/folders/4j/9d9rf3nn6gx9ldx_krmzcj_h0000gn/T/lwjgl_jackangione/3.4.1-snapshot/arm64/libglfw.dylib' (arm64).
+(lldb) disassemble -s 0x12064 -c 25
+libglfw.dylib`___lldb_unnamed_symbol_12064:
+libglfw.dylib[0x12064] <+0>:  sub    sp, sp, #0x90
+libglfw.dylib[0x12068] <+4>:  stp    d9, d8, [sp, #0x30]
+libglfw.dylib[0x1206c] <+8>:  stp    x26, x25, [sp, #0x40]
+libglfw.dylib[0x12070] <+12>: stp    x24, x23, [sp, #0x50]
+libglfw.dylib[0x12074] <+16>: stp    x22, x21, [sp, #0x60]
+libglfw.dylib[0x12078] <+20>: stp    x20, x19, [sp, #0x70]
+libglfw.dylib[0x1207c] <+24>: stp    x29, x30, [sp, #0x80]
+libglfw.dylib[0x12080] <+28>: add    x29, sp, #0x80
+libglfw.dylib[0x12084] <+32>: mov    x19, x1
+libglfw.dylib[0x12088] <+36>: mov    x20, x0
+libglfw.dylib[0x1208c] <+40>: add    x1, sp, #0x18
+libglfw.dylib[0x12090] <+44>: bl     0x12254                   ; ___lldb_unnamed_symbol_12254
+libglfw.dylib[0x12094] <+48>: mov    x0, x20
+libglfw.dylib[0x12098] <+52>: mov    x1, x19
+libglfw.dylib[0x1209c] <+56>: bl     0x9908                    ; ___lldb_unnamed_symbol_9908
+libglfw.dylib[0x120a0] <+60>: mov    x21, x0
+libglfw.dylib[0x120a4] <+64>: add    x0, sp, #0x18
+libglfw.dylib[0x120a8] <+68>: mov    x1, x21
+libglfw.dylib[0x120ac] <+72>: bl     0x9ca4                    ; ___lldb_unnamed_symbol_9ca4
+libglfw.dylib[0x120b0] <+76>: cbz    w0, 0x121cc               ; <+360>
+libglfw.dylib[0x120b4] <+80>: ldr    w0, [x20, #0x100]
+libglfw.dylib[0x120b8] <+84>: mov    x1, #0x0                  ; =0
+libglfw.dylib[0x120bc] <+88>: bl     0x178a0                   ; symbol stub for: CGDisplayCopyAllDisplayModes
+libglfw.dylib[0x120c0] <+92>: mov    x19, x0
+libglfw.dylib[0x120c4] <+96>: bl     0x17714                   ; symbol stub for: CFArrayGetCount
+(lldb) disassemble -s 0x15680 -c 65
+libglfw.dylib`___lldb_unnamed_symbol_15420:
+libglfw.dylib[0x15680] <+608>: cmn    w9, #0x1
+libglfw.dylib[0x15684] <+612>: b.eq   0x15698                   ; <+632>
+libglfw.dylib[0x15688] <+616>: ldr    x0, [x20, #0x3d0]
+libglfw.dylib[0x1568c] <+620>: scvtf  d0, w8
+libglfw.dylib[0x15690] <+624>: scvtf  d1, w9
+libglfw.dylib[0x15694] <+628>: bl     0x19580
+libglfw.dylib[0x15698] <+632>: ldr    w8, [x20, #0x14]
+libglfw.dylib[0x1569c] <+636>: ldr    x0, [x20, #0x3d0]
+libglfw.dylib[0x156a0] <+640>: cmp    w8, #0x0
+libglfw.dylib[0x156a4] <+644>: mov    w8, #0x3                  ; =3
+libglfw.dylib[0x156a8] <+648>: csel   x2, xzr, x8, eq
+libglfw.dylib[0x156ac] <+652>: bl     0x19700
+libglfw.dylib[0x156b0] <+656>: ldr    w8, [x20, #0x8]
+libglfw.dylib[0x156b4] <+660>: cmp    w8, #0x0
+libglfw.dylib[0x156b8] <+664>: mov    w8, #0x84                 ; =132
+libglfw.dylib[0x156bc] <+668>: mov    w9, #0x200                ; =512
+libglfw.dylib[0x156c0] <+672>: csel   x2, x9, x8, eq
+libglfw.dylib[0x156c4] <+676>: ldr    x0, [x20, #0x3d0]
+libglfw.dylib[0x156c8] <+680>: bl     0x19540
+libglfw.dylib[0x156cc] <+684>: adrp   x8, 37
+libglfw.dylib[0x156d0] <+688>: add    x8, x8, #0x360
+libglfw.dylib[0x156d4] <+692>: ldr    w8, [x8, #0x340]
+libglfw.dylib[0x156d8] <+696>: cbz    w8, 0x156e8               ; <+712>
+libglfw.dylib[0x156dc] <+700>: ldr    x0, [x28]
+libglfw.dylib[0x156e0] <+704>: mov    x2, #0x0                  ; =0
+libglfw.dylib[0x156e4] <+708>: bl     0x19780
+libglfw.dylib[0x156e8] <+712>: ldr    x0, [x20, #0x3d0]
+libglfw.dylib[0x156ec] <+716>: mov    w2, #0x1                  ; =1
+libglfw.dylib[0x156f0] <+720>: bl     0x19680
+libglfw.dylib[0x156f4] <+724>: ldr    x20, [x20, #0x3d0]
+libglfw.dylib[0x156f8] <+728>: mov    x0, x20
+libglfw.dylib[0x156fc] <+732>: bl     0x19000
+libglfw.dylib[0x15700] <+736>: mov    x2, x0
+libglfw.dylib[0x15704] <+740>: mov    x0, x20
+libglfw.dylib[0x15708] <+744>: bl     0x198a0
+libglfw.dylib[0x1570c] <+748>: b      0x15808                   ; <+1000>
+libglfw.dylib[0x15710] <+752>: ldr    x0, [x20, #0x3d0]
+libglfw.dylib[0x15714] <+756>: mov    w2, #0x19                 ; =25
+libglfw.dylib[0x15718] <+760>: bl     0x19700
+libglfw.dylib[0x1571c] <+764>: ldr    x0, [x20, #0x3d0]
+libglfw.dylib[0x15720] <+768>: mov    w2, #0x0                  ; =0
+libglfw.dylib[0x15724] <+772>: bl     0x19680
+libglfw.dylib[0x15728] <+776>: ldr    x0, [x20, #0x50]
+libglfw.dylib[0x1572c] <+780>: add    x1, x20, #0x34
+libglfw.dylib[0x15730] <+784>: bl     0x12064                   ; ___lldb_unnamed_symbol_12064
+libglfw.dylib[0x15734] <+788>: ldr    x8, [x20, #0x50]
+libglfw.dylib[0x15738] <+792>: ldr    w0, [x8, #0x100]
+libglfw.dylib[0x1573c] <+796>: bl     0x17894                   ; symbol stub for: CGDisplayBounds
+libglfw.dylib[0x15740] <+800>: fmov   d8, d0
+libglfw.dylib[0x15744] <+804>: fmov   d9, d2
+libglfw.dylib[0x15748] <+808>: fmov   d10, d3
+libglfw.dylib[0x1574c] <+812>: fadd   d0, d1, d3
+libglfw.dylib[0x15750] <+816>: fmov   d11, #-1.00000000
+libglfw.dylib[0x15754] <+820>: fadd   d0, d0, d11
+libglfw.dylib[0x15758] <+824>: fcvt   s12, d0
+libglfw.dylib[0x1575c] <+828>: bl     0x17990                   ; symbol stub for: CGMainDisplayID
+libglfw.dylib[0x15760] <+832>: bl     0x17894                   ; symbol stub for: CGDisplayBounds
+libglfw.dylib[0x15764] <+836>: fcvt   d0, s12
+libglfw.dylib[0x15768] <+840>: fsub   d0, d3, d0
+libglfw.dylib[0x1576c] <+844>: fadd   d0, d0, d11
+libglfw.dylib[0x15770] <+848>: fcvt   s0, d0
+libglfw.dylib[0x15774] <+852>: fcvt   d1, s0
+libglfw.dylib[0x15778] <+856>: ldr    x0, [x20, #0x3d0]
+libglfw.dylib[0x1577c] <+860>: fmov   d0, d8
+libglfw.dylib[0x15780] <+864>: fmov   d2, d9

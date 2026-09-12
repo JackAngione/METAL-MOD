@@ -71,8 +71,13 @@ final class MetalLodHorizonBenchmark {
                         if (stable < 20) throw new AssertionError("Horizon GPU residency did not stabilize");
                         var before = LodDistantRenderer.stats();
                         String name = "horizon-" + horizon + "-" + selectedPack + "-half-" + selectedHalf + "-lod-" + enabled + "#" + (repeat + 1);
+                        MetalBenchmarkEnvironment.focus(context);
+                        var presentation = context.computeOnClient(c -> new MetalBenchmarkEnvironment.Presentation());
                         context.runOnClient(c -> MetalFrameMetrics.beginCapture(30));
-                        context.waitTicks(80);
+                        for (int tick = 0; tick < 80; tick++) {
+                            context.waitTick();
+                            context.runOnClient(c -> presentation.check());
+                        }
                         var phase = context.computeOnClient(c -> MetalFrameMetrics.endCapture(name));
                         var after = LodDistantRenderer.stats();
                         if (phase.frames() < 120 || phase.gpuFrame().samplesMs().length < phase.frames() * .95
@@ -83,12 +88,14 @@ final class MetalLodHorizonBenchmark {
                             throw new AssertionError("Horizon benchmark lost valid bounded terrain ownership");
                         var row = new LinkedHashMap<String, Object>();
                         row.put("phase", com.google.gson.JsonParser.parseString(phase.toJson()));
+                        row.put("presentation", context.computeOnClient(c -> presentation.describe()));
                         row.put("horizon", horizon); row.put("enabled", enabled); row.put("repeat", repeat + 1);
                         row.put("environment", context.computeOnClient(c -> MetalBenchmarkEnvironment.describe()));
                         row.put("camera", context.computeOnClient(c -> MetalBenchmarkEnvironment.camera()));
                         row.put("drawable", MetalSurfaceProbe.drawableSize());
                         row.put("trackedChunks", tracked.size()); row.put("missingTrackedChunks", 0);
                         row.put("distantBefore", before); row.put("distantAfter", after);
+                        row.put("distantDiagnostics", context.computeOnClient(c -> LodDistantRenderer.diagnostics()));
                         results.add(row);
                         System.out.println("LOD horizon benchmark: " + name + " CPU interval=" + phase.p50IntervalMs()
                                 + " GPU=" + phase.gpuFrame().p50Ms() + " ms, represented sections=" + after.frameSections());

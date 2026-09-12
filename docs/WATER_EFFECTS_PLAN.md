@@ -2447,6 +2447,17 @@ All WU acceptance criteria are complete. Existing W8 release gate remains open.
 
 ## LOD composition regression progress (2026-09-11)
 
+P8 native-validation continuation (2026-09-12), owner Codex: the complete build
+now passes with `MTL_DEBUG_LAYER=1` (17s, then 16s after horizon instrumentation).
+SPIRV-Cross native texture-buffer emission fixes the sampler ABI assertion; the
+shadow-filtering smoke fixture uses separate layered-depth and ordinary-color
+vertex entry points. Production water GPU fixtures pass in both builds. Water
+effect shaders and the water/depth ownership ABI are unchanged in this continuation;
+the prior full NORMAL-world 16/16 merged/split regression below remains the live
+composition evidence. [Native validation logs](evidence/lod/p8-release/validation/README.md).
+The 16-case LOD performance matrix completes but misses loaded-geometry release
+targets. W8 stays open for its independent water release-performance requirements.
+
 2026-09-12 continuation claimed by Codex for the P6 full-resolution distant-lighting
 fallback and P8 benchmark instrumentation. Preserve opaque color/depth ownership and
 the water forward ABI; rerun the generated-world merged/split water regression after

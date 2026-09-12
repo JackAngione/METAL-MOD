@@ -128,6 +128,12 @@ public final class LodDistantRenderer {
         var current=cache;
         if(current!=null) current.invalidate(new LodDistantNode.Key(0,x,y,z));
     }
+    public record Diagnostics(long peakGpuPayloadBytes, LodDistantCache.Diagnostics cache) { }
+    /** Render-thread report; payload high-water marks are not driver allocation or process peaks. */
+    public static Diagnostics diagnostics() {
+        var current=cache;
+        return new Diagnostics(residency.peakChargedBytes(), current==null?null:current.diagnostics());
+    }
     /** Invoked on compiler workers before MeshData ownership is released. No mutable level escapes. */
     public static void capture(SectionPos section,SectionCompiler.Results results,LodRevisionTracker.@Nullable Ticket ticket) {
         var current=cache;

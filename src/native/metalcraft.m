@@ -1779,6 +1779,16 @@ Java_dev_metalcraft_client_metal_MetalNative_nTakeGpuWork(JNIEnv *env, jclass ty
 	(*env)->SetLongArrayRegion(env, destination, 0, 2, values);
 }
 
+// Called only by the benchmark on the AppKit/render thread, never by normal frames.
+MC_EXPORT JNIEXPORT jint JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nWindowPresentationState(JNIEnv *env, jclass type, jlong cocoaWindow) {
+	if (cocoaWindow == 0 || !NSThread.isMainThread) return 0;
+	NSWindow *window = (__bridge NSWindow *)(void *)(uintptr_t)cocoaWindow;
+	return (NSApp.isActive ? 1 : 0) | (window.isVisible ? 2 : 0)
+		| (!window.isMiniaturized ? 4 : 0)
+		| ((window.occlusionState & NSWindowOcclusionStateVisible) != 0 ? 8 : 0);
+}
+
 MC_EXPORT JNIEXPORT void JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nBeginGpuFrameCapture(JNIEnv *env, jclass type) {
 	os_unfair_lock_lock(&mc_gpu_capture_lock);

@@ -300,6 +300,8 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		private final float pitch;
 		private final com.google.gson.JsonObject memorySamples = new com.google.gson.JsonObject();
 		private final com.google.gson.JsonObject cameraSamples = new com.google.gson.JsonObject();
+		private final com.google.gson.JsonObject presentationSamples = new com.google.gson.JsonObject();
+		private MetalBenchmarkEnvironment.Presentation presentation;
 		private final double minimumFps;
 		private final double minimumOnePercentLow;
 		/** The presented drawable size, recorded so the report states it rather than the request. */
@@ -643,10 +645,19 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			world.getServer().runOnServer(server -> server.getPlayerList().getPlayers().forEach(player ->
 				player.connection.chunkSender.onChunkBatchReceivedByClient(PlayerChunkSender.MAX_CHUNKS_PER_TICK)));
 			this.context.waitTick();
+			if (this.presentation != null) this.context.runOnClient(c -> this.presentation.check());
+		}
+
+		private void beginPhase() {
+			MetalBenchmarkEnvironment.focus(this.context);
+			this.context.runOnClient(c -> {
+				this.presentation = new MetalBenchmarkEnvironment.Presentation();
+				MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES);
+			});
 		}
 
 		private MetalFrameMetrics.Phase captureStationary(final TestSingleplayerContext world, final int repeat) {
-			this.context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
+			this.beginPhase();
 			for (int tick = 0; tick < this.phaseTicks; tick++) {
 				this.tick(world);
 			}
@@ -657,7 +668,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		private MetalFrameMetrics.Phase capturePan(final TestSingleplayerContext world, final int repeat) {
 			float startYaw = this.context.computeOnClient(client -> client.player.getYRot());
 			float step = 360.0F / this.phaseTicks;
-			this.context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
+			this.beginPhase();
 			for (int tick = 0; tick < this.phaseTicks; tick++) {
 				this.context.getInput().lookAt(startYaw + step * tick, this.pitch);
 				this.tick(world);
@@ -671,7 +682,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			this.context.getInput().lookAt(startYaw, this.pitch);
 			this.context.getInput().holdKey(options -> options.keyUp);
 			try {
-				this.context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
+				this.beginPhase();
 				for (int tick = 0; tick < this.phaseTicks; tick++) {
 					// A slow drift keeps newly generated terrain entering the frustum from the side
 					// rather than only from straight ahead.
@@ -687,6 +698,8 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		private MetalFrameMetrics.Phase finishPhase(final String baseName, final int repeat) {
 			String name = this.repeats == 1 ? baseName : baseName + "#" + repeat;
 			MetalFrameMetrics.Phase phase = this.context.computeOnClient(ignored -> MetalFrameMetrics.endCapture(name));
+			this.presentationSamples.add(name, this.context.computeOnClient(c -> this.presentation.describe()));
+			this.presentation = null;
 			this.memorySamples.add(name, this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.sample()));
 			this.cameraSamples.add(name + ":end", this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.camera()));
 			LOGGER.info("Metal benchmark: {}", phase.toLogLine());
@@ -775,6 +788,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			report.addProperty("requestedPitchDegrees", this.pitch);
 			report.add("cameraSamples", this.cameraSamples);
 			report.add("memoryAfterPhase", this.memorySamples);
+			report.add("presentationAfterPhase", this.presentationSamples);
 			json = new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(report);
 			try {
 				Files.createDirectories(output.getParent());

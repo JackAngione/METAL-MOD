@@ -36,11 +36,17 @@ final class ShadowFilteringSmoke {
 			    float2 p = id == 0 ? float2(-1,-1) : (id == 1 ? float2(3,-1) : float2(-1,3));
 			    return {float4(p,0.5,1), 0};
 			}
+			// The sampled color target is 2D; only the depth writer selects an array layer.
+			struct SampleV { float4 position [[position]]; };
+			vertex SampleV sample_vs(uint id [[vertex_id]]) {
+			    float2 p = id == 0 ? float2(-1,-1) : (id == 1 ? float2(3,-1) : float2(-1,3));
+			    return {float4(p,0.5,1)};
+			}
 			struct Depth { float value [[depth(any)]]; };
 			fragment Depth depth_fs(V in [[stage_in]], constant MCShadowFrame& f [[buffer(3)]]) {
 			    return {any(in.position.xy * f.inverseResolution < 0.5) ? 0.25 : 0.75};
 			}
-			fragment float4 sample_fs(V in [[stage_in]], constant MCShadowFrame& f [[buffer(3)]],
+			fragment float4 sample_fs(SampleV in [[stage_in]], constant MCShadowFrame& f [[buffer(3)]],
 			    constant float4x4& shadowToRelative [[buffer(4)]], depth2d_array<float> map [[texture(5)]],
 			    sampler s [[sampler(5)]]) {
 			    float offset = (floor(in.position.x) - 32.0) / 16.0;
@@ -62,7 +68,7 @@ final class ShadowFilteringSmoke {
 				 new MetalRenderPipeline.DepthState(true, true, MetalRenderPipeline.CompareFunction.ALWAYS, 0, 0),
 				 MetalRenderPipeline.RasterState.DEFAULT, MetalRenderPipeline.InputPrimitiveTopology.TRIANGLE));
 			 var samplePipeline = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
-				 source, "vs", source, "sample_fs", List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA16_FLOAT)),
+				 source, "sample_vs", source, "sample_fs", List.of(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA16_FLOAT)),
 				 null, MetalRenderPipeline.VertexDescriptor.EMPTY, MetalRenderPipeline.DepthState.DISABLED,
 				 MetalRenderPipeline.RasterState.DEFAULT, MetalRenderPipeline.InputPrimitiveTopology.TRIANGLE))) {
 			try (var mapping = inverse.map()) {

@@ -274,6 +274,10 @@ public final class MetalShaderTranslationSmoke {
 		);
 		assertSlotMasks(texel.vertex(), 0, 1);
 		assertSlotMasks(texel.fragment(), 0, 0);
+		if (!texel.vertex().metalSource().contains("texture_buffer<int>")) {
+			throw new AssertionError("Texel-buffer translation must match native MTLTextureTypeTextureBuffer bindings:\n"
+				+ texel.vertex().metalSource());
+		}
 
 		RenderPipeline mappedPipelineDefinition = mappedPipeline();
 		String mappedVertex = Blaze3DMetalMappings.vertexShaderWithLocations(

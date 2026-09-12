@@ -162,6 +162,8 @@ public final class MetalNative {
 
 	static native void nBlitTextureToDrawable(long commandBufferHandle, long textureHandle, long drawableHandle);
 
+	static native int nWindowPresentationState(long cocoaWindow);
+
 	static native long nCreateFence(long deviceHandle);
 
 	static native void nSignalFence(long commandBufferHandle, long fenceHandle, long value);

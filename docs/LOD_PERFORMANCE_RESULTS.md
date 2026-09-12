@@ -7,10 +7,75 @@ half/quarter-resolution prototypes fail their net-GPU-cost gate. The persistent 
 route and merged/split composition regressions pass. All three release
 capability gates remain closed by default.
 
-P8 is currently blocked on an unlocked display and stable presentation qualification.
-The native-fullscreen harness correction builds but still needs live verification.
-Eight 1080p cases are retained as diagnostic evidence; the full 16-case matrix is
-not complete. Loaded-geometry savings remain far below the proposed shipping target.
+P8's unlocked-display **16-case matrix is complete**, including 144 measured phases
+and clean process exits. Native fullscreen is verified at 3840×2160. Continuous
+focus/visibility/mode checks pass throughout every phase. The full build also
+passes Metal API validation after correcting the translated texel-buffer type and
+a layered vertex shader in the shadow-filtering test fixture.
+
+P8 release acceptance remains open: loaded geometry misses its optimization gates.
+The subsequent horizon rerun stopped before measurement because focus could not be
+acquired; the desktop tool confirmed that the Mac had locked again. That attempt
+is rejected, and the fresh horizon and pre-LOD baseline runs await an unlocked display.
+The user accepts modest costs for a larger horizon; this does not establish a
+loaded-geometry speedup or qualify unmeasured dense coverage.
+
+## P8 confirmed loaded matrix (2026-09-12)
+
+All 16 Standard/None × 1080p-windowed/native-fullscreen × full/half scene × off/on
+cases pass the measurement contract on M4 Max/64 GB/macOS 27.0, NORMAL seed
+`metalcraft`, Default/Metal, 16/16. Total client execution is 32m35s. There are
+172,383 captured frames, at least 99.656% GPU sample coverage, and 11,808 successful
+presentation checks across 144 phases. Every case receives all 1,057 server-tracked
+chunks and drains the light/render queues. All sampled thermal states are nominal.
+
+Each table entry is **median frame-interval change / p99 change**, LOD on versus off.
+Values are medians of the three repeat percentiles, not pooled percentiles.
+
+| Drawable / pack / scene | Stationary | Pan | Traversal |
+| --- | ---: | ---: | ---: |
+| 1080p / Standard / full | +6.67% / +3.28% | +8.52% / +13.32% | +7.33% / +10.17% |
+| 1080p / Standard / half | +6.53% / +3.46% | +4.52% / +2.10% | +5.72% / +8.47% |
+| 1080p / None / full | +16.28% / +0.25% | +36.57% / +15.78% | +24.55% / +8.94% |
+| 1080p / None / half | +11.63% / −10.16% | +17.84% / −7.53% | +43.83% / −5.65% |
+| 4K / Standard / full | +14.24% / +9.24% | +11.69% / +8.78% | +12.13% / +18.34% |
+| 4K / Standard / half | +3.83% / +0.45% | +2.19% / +2.76% | +3.57% / +3.74% |
+| 4K / None / full | +14.10% / +5.96% | +12.11% / −5.83% | +11.49% / +6.71% |
+| 4K / None / half | +17.33% / +10.20% | +8.33% / +0.80% | +12.16% / +2.75% |
+
+Distant-triangle reductions are only **0.127–0.250%** across the 24 phase summaries.
+LOD preparation p95 stays below **0.234 ms**, and no upload failures are recorded.
+The proposed 50% distant-triangle target is missed; these frame/GPU spans do not
+establish the separate 20% exclusive terrain-GPU target. No preset is promoted.
+
+The maximum sampled OS process-lifetime physical-footprint peak is 5.09 GiB;
+maximum sampled Metal allocation is 1.55 GiB. These have different scopes and must
+not be added together. Logical loaded capture reservations remain within 32 MiB
+and retained CPU meshes within 64 MiB. Full native API-validation builds pass in
+17s after the sampler/fixture corrections and 16s after adding horizon diagnostics.
+[Before/after validation](evidence/lod/p8-release/validation/README.md).
+
+Foreground checks establish presentation state, not freedom from drawable pacing.
+Acquire waits, CPU/GPU spans and repeat ranges remain in the raw reports; the
+larger None-pack changes must not all be attributed to geometry cost. The separate
+world processes share seed and camera route but do not produce identical geometry
+counts: terrain input triangles differ by approximately −4.13% to +2.02% across
+matched phase summaries. Inspected 4K Standard/full and 1080p None/half images show
+matching near terrain but some variation in distant coverage and player skins.
+These are performance diagnostics, not a pixel-parity acceptance test.
+
+The conservative mesher rejects candidates with no triangle reduction. Accepted
+replacements nevertheless require a 48-byte-per-vertex texture-repeat sidecar in
+addition to the ordinary 28-byte vertex. The 4K Standard/full replacements save
+about 2.5% of their own triangles while affecting only a small part of the scene.
+This helps explain why the current approach has not demonstrated a net benefit;
+a benefit threshold alone has not been implemented or measured.
+
+[Raw matrix, source patch and inspected images](evidence/lod/p8-release/matrix/README.md)
+and [matched summary](evidence/lod/p8-release/matrix/summary.json). The prior GLFW
+cleanup crash is symbolicated to a null monitor in its Cocoa video-mode path;
+which callback caused that state is unresolved. Sixteen clean exits do not prove
+an intermittent fault fixed. [Crash analysis](evidence/lod/p8-release/validation/glfw-analysis.md).
 
 ## P8 measurement contract
 
@@ -43,9 +108,12 @@ Loaded-mesh worker measurements report cumulative admitted attempts, total and
 maximum build time, plus reservation and retained-byte high-water charges. They
 include rejected attempts and exclude queue wait/upload. Heap and Metal allocations
 are snapshots; OS process resident/physical-footprint peaks include startup. These
-are not GPU allocation peaks or hierarchy-build latency percentiles. Horizon disk
-usage is sampled after worker batches; transient atomic-write storage is not a
-measured peak. Thermal states are recorded (0 nominal to 3 critical). Only M4 Max
+are not GPU allocation peaks or hierarchy-build latency percentiles. The new horizon diagnostics additionally record logical GPU mesh payload high-water
+charges (including resources awaiting GPU completion), compressed queue high-water
+bytes, owned disk payload before atomic rename/trim, completed worker-batch latency,
+and repeated edit-to-persist latency. The locked-display attempt did not complete
+that route, so no fresh horizon result is claimed. Disk payload excludes filesystem
+metadata/allocation rounding; GPU payload excludes driver allocation overhead. Thermal states are recorded (0 nominal to 3 critical). Only M4 Max
 hardware is tested; base/lower-memory Apple Silicon and power consumption remain
 unmeasured.
 
@@ -58,7 +126,7 @@ recorded per capture. User-approved modest large-horizon cost is evaluated again
 the provisional +25% median / +35% p99 reporting budget. It does not waive correctness
 or justify claiming a speedup from loaded geometry.
 
-## P8 explored-horizon results
+## Earlier provisional explored-horizon results
 
 These are provisional timing results. Lock/focus state was not recorded per phase;
 computer-use later reported the Mac locked while qualifying the loaded-terrain
@@ -108,7 +176,7 @@ and zero charged distant bytes at both closes and after clear. This is correctne
 and sparse explored-patch performance evidence; dense horizons remain unqualified.
 Exact command/source identity: [invocation](evidence/lod/release-horizon/invocation.json).
 
-## P8 loaded-matrix checkpoint
+## Earlier provisional loaded-matrix checkpoint
 
 Eight 1080p cases completed on the same source revision, with Standard/None,
 full/half, off/on and three camera-route repeats. Every retained run passes
@@ -135,7 +203,7 @@ The first native case was correctly rejected at 3840×2104/windowed, despite
 requesting fullscreen. Fabric's resizeWindow forces windowed mode. The benchmark
 now skips that resize for native fullscreen, applies only scene scaling, and checks
 actual GLFW monitor attachment before capture. The build passes in 15s; live
-verification is pending an unlocked display. [Failure/correction](evidence/lod/window-mode-failure/validation.txt).
+verification subsequently passes in the confirmed matrix above. [Failure/correction](evidence/lod/window-mode-failure/validation.txt).
 
 ## Historical generated-world geometry A/B
 
@@ -539,24 +607,27 @@ image and transition gates.
 
 P8 remains unchecked. The remaining work is:
 
-- Run a fresh Standard/None × 1080p/native × full/half × off/on matrix on an unlocked
-  display, verify consistent presentation, and recheck the fullscreen correction.
-  Use `python3 scripts/lod-release-matrix.py --phase-ticks 80 --output build/reports/lod-release-confirmed`;
-  `--resume` reuses only matching successful captures. Repeat the horizon timing
-  qualification with known display conditions as well.
-- Measure release-disabled overhead against the pre-LOD baseline. The current
-  experimental off/on pairs do not establish the <=2% median / <=5% p99 gate.
+- Finish the fresh 128/256-chunk horizon route with continuous presentation checks,
+  first-build/repair timing and resource payload high-water measurements. The first
+  new attempt was rejected before timing because focus could not be acquired;
+  the Mac was locked. [Rejected attempt](evidence/lod/p8-release/horizon-focus-rejected/README.md).
+- Measure disabled overhead against pre-LOD `f48460d`. A detached baseline with the
+  same measurement harness is prepared and compiles. The eight-case runner and
+  matched summary are ready; live capture still awaits an unlocked display.
+  [Baseline patch and provenance](evidence/lod/p8-release/baseline-prepared/README.md).
+  Experimental off/on pairs alone do not establish the <=2% median / <=5% p99 gate.
 - Improve loaded geometry enough to meet the targets, or explicitly revise those
-  targets with appropriate evidence. Exact-surface merging currently saves about
-  0.13–0.23% of distant triangles in the diagnostic scenes; no preset is a proven
-  speedup. Keep LOD off, Balanced, full shading and a 16-chunk horizon by default.
-- Qualify dense horizon coverage, first-build/repair churn and transient GPU/disk
-  peaks; test base/lower-memory Apple Silicon where available. Current data is
-  sparse explored-patch coverage on M4 Max only.
-- Resolve the existing full native-validation sampler assertion and the intermittent
-  GLFW final-window-reset crash; neither is silently counted as a pass.
+  targets with appropriate evidence. The confirmed matrix saves 0.127–0.250% of
+  distant triangles; no tested configuration demonstrates a median speedup.
+  Keep LOD off, Balanced, full shading and a 16-chunk horizon by default.
+- Qualify dense horizon coverage and repair churn under that load, actual driver
+  GPU allocation peaks, and base/lower-memory Apple Silicon where available.
+  Explored patches and logical payload counters do not establish these gates.
+- Resolve the intermittent GLFW final-window-reset crash. Its null-monitor native
+  fault is identified; the callback sequence that creates that state is not.
 
-GPU frame distributions, loaded-worker timings, CPU charge peaks, OS memory peaks,
-thermal provenance and the same-world cache re-enable fix are implemented and tested.
-No release capability is promoted; a modest large-horizon cost remains acceptable
-under the user's clarification, with the measured tradeoff stated explicitly.
+The full 16-case capture, native sampler correction, shadow fixture correction,
+continuous presentation checks, GPU distributions, loaded-worker timings, CPU charge
+peaks, OS memory peaks, thermal provenance and same-world re-enable regression are
+complete. No release capability is promoted. Modest large-horizon cost remains
+acceptable under the user's clarification, with its measured tradeoff explicit.

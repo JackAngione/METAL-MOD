@@ -12,12 +12,16 @@ import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 
 /** Explores received NORMAL terrain, then observes it beyond the ordinary 16-chunk client horizon. */
 final class MetalLodHorizonGameTest {
+    private static final ThreadLocal<java.util.Map<String,java.util.List<Long>>> WAITS = new ThreadLocal<>();
     static void run(ClientGameTestContext context) {
         boolean benchmark=Boolean.getBoolean("metalcraft.lodHorizonBenchmark");
         int diskBudget=benchmark ? LodSettings.defaults().diskBudgetMiB() : 512;
         var saved=MetalCraftConfig.lod();
         String pack=context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
         var report=new LinkedHashMap<String,Object>();
+        var waits=new LinkedHashMap<String,java.util.List<Long>>();
+        WAITS.set(waits);
+        report.put("readinessWaitNanos",waits);
         var marker=new dev.metalcraft.client.lod.LodDistantNode.Key(0,-96,14,-11);
         var builder=context.worldBuilder().adjustSettings(settings -> {
             var normal=settings.getSettings().worldgenLoadContext().lookupOrThrow(net.minecraft.core.registries.Registries.WORLD_PRESET)
@@ -38,6 +42,7 @@ final class MetalLodHorizonGameTest {
             });
             net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave save;
             try(var world=builder.create()) {
+                long explorationStarted=System.nanoTime();
                 save=world.getWorldSave();
                 world.getServer().runCommand("gamemode spectator @a");
                 world.getServer().runCommand("tp @a -1535.5 236 -127.5 22.5 35");
@@ -49,6 +54,8 @@ final class MetalLodHorizonGameTest {
                         && LodDistantRenderer.stats().cache().queuedNodes()==0);
                 context.waitTicks(120);
                 report.put("explored",LodDistantRenderer.stats());
+                report.put("explorationElapsedNanos",System.nanoTime()-explorationStarted);
+                report.put("exploredDiagnostics",context.computeOnClient(c -> LodDistantRenderer.diagnostics()));
                 if(LodDistantRenderer.stats().cache().dropped()!=0)
                     throw new AssertionError("Prepared horizon scene lost captures to backpressure");
                 System.out.println("LOD horizon explored: "+LodDistantRenderer.stats());
@@ -106,6 +113,24 @@ final class MetalLodHorizonGameTest {
                         && LodDistantRenderer.stats().cache().queuedNodes()==0);
                 context.waitTicks(100);
                 report.put("revisitRecaptures",LodDistantRenderer.recaptures());
+                if (benchmark) {
+                    var repairs=new java.util.ArrayList<java.util.Map<String,Object>>();
+                    for (String block:java.util.List.of("diamond_block","emerald_block","gold_block")) {
+                        long revision=LodDistantRenderer.entry(marker).receivedRevision();
+                        long started=System.nanoTime();
+                        world.getServer().runCommand("fill -1552 224 -177 -1520 248 -176 minecraft:"+block);
+                        await(context,"repeated edit persistence",() -> {
+                            var entry=LodDistantRenderer.entry(marker);
+                            return entry.receivedRevision()>revision && entry.stored()
+                                    && entry.receivedRevision()==entry.persistedRevision()
+                                    && LodDistantRenderer.stats().cache().queuedNodes()==0;
+                        });
+                        repairs.add(java.util.Map.of("block",block,"elapsedNanos",System.nanoTime()-started,
+                                "entry",LodDistantRenderer.entry(marker),"stats",LodDistantRenderer.stats(),
+                                "diagnostics",context.computeOnClient(c -> LodDistantRenderer.diagnostics())));
+                    }
+                    report.put("repeatedRepairs",repairs);
+                }
                 context.runOnClient(c -> MetalCraftConfig.setLod(MetalCraftConfig.lod().withHorizon(32,true,diskBudget)));
                 world.getServer().runCommand("tp @a -1535.5 236 256.5 180 3");
                 context.getInput().lookAt(180,3);
@@ -169,6 +194,7 @@ final class MetalLodHorizonGameTest {
             context.waitFor(c -> LodDistantRenderer.stats().gpuBytes()==0,2400);
             report.put("finalClose",LodDistantRenderer.stats());
         } finally {
+            WAITS.remove();
             try {
                 Path path=Path.of("build/lod-horizon.json"); Files.createDirectories(path.getParent());
                 Files.writeString(path,new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(report));
@@ -192,6 +218,7 @@ final class MetalLodHorizonGameTest {
         System.out.println("LOD horizon re-enable passed: same world/cache recovered valid distant draws");
     }
     static void await(ClientGameTestContext context,String stage,java.util.function.BooleanSupplier ready) {
+        long started=System.nanoTime();
         long[] logged={System.nanoTime()};
         context.waitFor(c -> {
             if (System.nanoTime()-logged[0]>10_000_000_000L) {
@@ -200,5 +227,7 @@ final class MetalLodHorizonGameTest {
             }
             return ready.getAsBoolean();
         },2400);
+        var waits=WAITS.get();
+        if(waits!=null) waits.computeIfAbsent(stage,ignored->new java.util.ArrayList<>()).add(System.nanoTime()-started);
     }
 }

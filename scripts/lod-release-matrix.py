@@ -38,6 +38,11 @@ def qualify(report, pack, half, enabled, fullscreen, resolution, repeats):
     if len(report["phases"]) != repeats * 3:
         raise ValueError("Missing route repeats")
     for phase in report["phases"]:
+        presentation = report.get("presentationAfterPhase", {}).get(phase["phase"], {})
+        if not presentation.get("passed") or presentation.get("checks", 0) < 60:
+            raise ValueError("Missing continuous foreground/visibility checks")
+        if presentation["fullscreen"] != fullscreen:
+            raise ValueError("Actual monitor attachment differs from requested fullscreen")
         gpu = phase["gpuFrame"]
         if len(gpu["samplesMs"]) < phase["frames"] * .95 or gpu["invalidFrames"] or gpu["overflowFrames"]:
             raise ValueError("GPU frame sample coverage failed")
@@ -59,7 +64,7 @@ def main():
     environment = os.environ.copy()
     if environment.get("MTL_DEBUG_LAYER") not in (None, "0"):
         raise SystemExit("Run performance measurements without Metal API validation; validate separately")
-    for label, resolution, fullscreen in (("1080p", (1920, 1080), False), ("native", (3840, 2160), True)):
+    for label, resolution, fullscreen in (("native", (3840, 2160), True), ("1080p", (1920, 1080), False)):
         for pack in ("standard", "none"):
             for half in (False, True):
                 for enabled in (False, True):
@@ -90,6 +95,8 @@ def main():
                     (folder / "invocation.json").write_text(json.dumps(provenance, indent=2) + "\n")
                     if result.returncode:
                         raise SystemExit(f"{name} failed; see {folder / 'client.log'}")
+                    if source_digest() != identity:
+                        raise SystemExit("Sources changed during this capture; refusing its provenance")
                     report_path = Path("run/benchmarks/metalcraft-metal.json")
                     if report_path.stat().st_mtime < started:
                         raise SystemExit("Client did not write a fresh benchmark report")

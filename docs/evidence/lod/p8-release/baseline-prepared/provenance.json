@@ -1,0 +1,8 @@
+{
+  "baseCommit": "f48460d2477b587cc12e39326198682a32b5d9c7",
+  "measurementPatchSha256": "8b9564a43b726d914f6de74215c0bdd9f4af1dac44284ab02fd1447d5d691eb3",
+  "compileCommand": "./gradlew compileClientJava",
+  "compileExitCode": 0,
+  "compileElapsed": "5s",
+  "liveCaptureComplete": false
+}

@@ -1,0 +1,51 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+
+> Configure project :
+Fabric Loom: 1.17.20
+
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava UP-TO-DATE
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses UP-TO-DATE
+> Task :compileShaderSmokeJava UP-TO-DATE
+> Task :processShaderSmokeResources NO-SOURCE
+> Task :shaderSmokeClasses UP-TO-DATE
+
+> Task :shaderTranslationSmoke FAILED
+[15:10:06] [main/ERROR]: MetalCraft shader extension dev.metalcraft.client.metal.MetalShaderTranslationSmoke$$Lambda/0x000007fe01043618 failed to register; other extensions will still load
+java.lang.IllegalStateException: intentional extension failure
+	at dev.metalcraft.client.metal.MetalShaderTranslationSmoke.lambda$assertExtensionIsolation$0(MetalShaderTranslationSmoke.java:386)
+	at dev.metalcraft.client.MetalCraftClient.registerExtensions(MetalCraftClient.java:52)
+	at dev.metalcraft.client.metal.MetalShaderTranslationSmoke.assertExtensionIsolation(MetalShaderTranslationSmoke.java:389)
+	at dev.metalcraft.client.metal.MetalShaderTranslationSmoke.main(MetalShaderTranslationSmoke.java:247)
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by dev.metalcraft.client.metal.MetalNative in an unnamed module (file:/Users/jackangione/Desktop/VULKAN%20SHADERS/build/classes/java/client/)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+2026-09-12 15:10:06.255 java[89906:5197990] Metal API Validation Enabled
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.lwjgl.system.MemoryUtil (file:/Users/jackangione/.gradle/caches/modules-2/files-2.1/org.lwjgl/lwjgl/3.4.1/129e06a04f93992cb2a45172435b21fc4b60dd7d/lwjgl-3.4.1-unsafe.jar)
+WARNING: Please consider reporting this to the maintainers of class org.lwjgl.system.MemoryUtil
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+-[MTLDebugRenderCommandEncoder validateCommonDrawErrors:]:6032: failed assertion `Draw Errors Validation
+Vertex Function(main0): incorrect type of texture (MTLTextureTypeTextureBuffer) bound at Texture binding at index 0 (expect MTLTextureType2D) for _45[0].
+'
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':shaderTranslationSmoke' (registered in build file 'build.gradle').
+> Process 'command '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java'' finished with non-zero exit value 134 (this value may indicate that the process was terminated with the SIGABRT signal)
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 4s
+6 actionable tasks: 1 executed, 5 up-to-date

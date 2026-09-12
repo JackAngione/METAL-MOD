@@ -4,9 +4,11 @@ Status: P1–P5 complete for conservative loaded geometry and composition compat
 P6 is complete in the plan-authorized full-resolution reduced-lighting scope;
 half/quarter pixel-resolution shading remains deferred.
 P7 functional cache acceptance is complete; P8 release acceptance remains open.
-Current P8 blocker: the Mac is locked, presentation pacing is inconsistent, and the
-corrected fullscreen harness still needs a fresh live matrix. Geometry savings also
-remain far below the provisional shipping target.
+P8 continuation (2026-09-12): the full 16-case matrix and native API-validation build
+pass execution, including continuous presentation checks and verified 4K fullscreen.
+Loaded geometry misses its performance targets. The subsequent horizon attempt was
+rejected before timing after the Mac locked again; horizon and pre-LOD baseline
+qualification await an unlocked display. Defaults and release gates stay conservative.
 Geometry is available only with the experimental validation flag;
 release capability gates remain closed.
 
@@ -507,83 +509,80 @@ Final live checks remain in progress at this checkpoint.
   from evidence, document tradeoffs/limitations, and update README. Acceptance: all
   correctness gates pass and published targets are met or explicitly revised with
   measured results; do not market unmeasured extreme-distance performance.
-  - Continuation owner: Codex (2026-09-12). Implementation/instrumentation complete;
-    release qualification incomplete. Awaiting an unlocked display for a fresh matrix.
-    - Re-enable regression claimed: the new paired horizon route fails after
-      disabling and re-enabling in the same world (`cache=null`, enabled settings).
-      The renderer's reopen condition omits the absent-cache state when world,
-      atlas and device are unchanged. A focused live toggle assertion now tests
-      cache recreation and restored distant ownership before performance capture.
-      [Original failing route](evidence/lod/horizon-reenable-failure/lod-horizon.json).
-      The focused toggle fails before the fix and passes afterward (78s each,
-      NORMAL seed `metalcraft`, 16/16 Default/Metal, `MTL_DEBUG_LAYER=1`). Cache
-      absence now triggers reopening even when world/device/atlas are unchanged.
-      The four-tick reopen assertion and restored-draw assertion remain in the
-      full horizon route. [Before/after evidence](evidence/lod/horizon-reenable-failure/validation.txt).
-    - [x] Nonblocking GPU frame distributions: group render-thread submissions
-      by frame and report first-start/last-end spans, raw samples and p50/p95/p99.
-      Pending, invalid, empty and overflow frames are explicit; phase generations
-      reject late callbacks. Real native completion fixtures pass multi-buffer,
-      empty/incomplete-frame and phase-isolation checks. `./gradlew build` passes.
-    - [x] Worker build timing, CPU reservation/retention high-water charges, OS
-      resident/physical-footprint process peaks, and thermal-state provenance are
-      reported with their measurement scope. No sampled GPU allocation is called
-      an allocation peak.
-    - [ ] Correct the receive/render readiness contract, explicitly select
-      windowed/fullscreen dimensions, warm the full camera pan, and collect the
-      Standard/None × 1080p/native × full/half × off/on matrix with three repeats.
-      Initial readiness probe receives all 1,057 server-tracked chunks and drains
-      light/render queues. Its saved fullscreen state overrode the 1080p request;
-      actual 3840×2160 dimensions are retained, not mislabeled as 1080p. The first
-      windowed follow-up exposed insufficient behind-camera warm-up (444 visible
-      sections, below 600); that run is rejected. A full pan now primes rendering.
-      [Probe and rejected run](evidence/lod/release-readiness-probe/metrics.json).
-      Eight 1080p cases pass receive/render/GPU-sample capture checks. The eighth initially completed
-      its phases/world close but crashed in GLFW during Fabric's final window-size
-      reset; its nonzero exit rejects that attempt. Exact unchanged retry passes;
-      the cleanup crash's root cause remains unresolved.
-      [Crash, invocation and rejected timing data](evidence/lod/window-reset-failure/validation.txt).
-      Presentation/acquire pacing differs between several pairs despite identical
-      requested controls, so the large FPS/GPU-span changes are not release evidence.
-      Computer-use reports the Mac locked; phase-by-phase lock/focus state was not
-      recorded. [Eight diagnostic captures](evidence/lod/release-windowed-diagnostic/validation.txt).
-      The first native case is rejected: Fabric resizeWindow overrides fullscreen,
-      producing 3840×2104/windowed. Fullscreen now skips windowed resize and verifies
-      actual GLFW monitor attachment before capture. `./gradlew build` passes (15s);
-      live verification remains pending unlock. [Failure and correction](evidence/lod/window-mode-failure/validation.txt).
-    - [x] Paired warm-cache 128/256-chunk horizon measurements at 16/16, including
-      Standard/None and full/half rendering, with actual represented-section counts.
-      The new optional horizon benchmark rejects missing tracked chunks, unsettled
-      GPU residency, incomplete timing and lost/budget-exceeding distant draws.
-      Final 48 captures and lifecycle pass in 12m37s on M4 Max/64 GB at native
-      3840×2160, with Standard/None and full/half scenes, default 2 GiB disk budget.
-      Every repeat represents 1,007 sections at 128 chunks and 1,001 at 256;
-      these are explored patches, not dense circles. GPU coverage is >=99.76%,
-      thermal state is nominal, uploads never fail, and both closes/clear retain
-      zero distant GPU bytes. Peak OS process physical footprint is 5.39 GiB.
-      Median interval changes: 128 chunks +25.03%/+16.46% Standard full/half,
-      +28.02%/+17.34% None full/half; 256 chunks +21.38%/+15.14% Standard,
-      +5.20%/−1.97% None. All p99 changes are within +5.17%; apparent small
-      improvements are timing variability. 128/full Standard is borderline against
-      +25%, and 128/full None exceeds that provisional budget by 3 percentage points
-      (0.30 ms absolute cost). No dense-coverage or universal performance claim follows.
-      [Matched summaries and repeat changes](evidence/lod/release-horizon/summary.json).
-      Inspected 128 off/on, 256 on and repaired/reloaded images: the remembered patch
-      is visible, with unknown gaps and omitted distant fluids explicit. Lock/focus
-      was not sampled during this earlier run; repeat under verified presentation
-      conditions before using its frame-time figures for release acceptance.
-    - [ ] Remaining release qualification: fresh stable-presentation 16-case matrix;
-      pre-LOD disabled-overhead baseline; pass or explicitly revise loaded-geometry
-      targets with adequate evidence; dense horizon/repair-churn throughput and
-      transient GPU/disk peaks; lower-memory hardware when available; resolve the
-      native-validation sampler assertion and intermittent GLFW cleanup failure.
-      The eight diagnostic scenes save only about 0.13–0.23% of distant triangles;
-      preset tuning alone has not established the proposed 50% saving. Defaults stay
-      LOD off, Balanced, full shading, 16-chunk horizon; capability gates stay closed.
-      Final local checkpoint: normal `./gradlew build` passes in 15s after the
-      fullscreen correction, Python runners compile, and `git diff --check` passes.
-      No benchmark process remains active. Development options are reset to 16/16,
-      LOD off, a 16-chunk horizon and the default 2 GiB disk budget.
+  - Continuation owner: Codex (2026-09-12). Measurement implementation is complete;
+    release criteria remain unmet. [Current results and remaining work](LOD_PERFORMANCE_RESULTS.md).
+    - [x] Full native-validation build. The texel-buffer assertion was a translator
+      ABI mismatch; SPIRV-Cross now emits native Metal texture buffers. A shader-schema
+      regression fails before the fix; real texel sampling passes after. The newly
+      reachable shadow-filtering fixture now uses separate layered-depth and ordinary
+      color vertex entry points. `MTL_DEBUG_LAYER=1 ./gradlew build` passes in 17s,
+      then 16s after horizon diagnostics. [Evidence](evidence/lod/p8-release/validation/README.md).
+    - [x] Nonblocking GPU frame distributions, loaded-worker total/max build timing,
+      CPU reservation/retention high-water charges, OS resident/physical-footprint
+      process peaks, and thermal provenance. Native multi-buffer, empty/incomplete,
+      phase-isolation and delayed-completion fixtures pass. GPU spans include gaps
+      and are not exclusive terrain timings; sampled allocations are not peaks.
+    - [x] Receive/render readiness, full-pan warm-up and actual fullscreen selection.
+      The 16-case Standard/None × 1080p/native × full/half × off/on matrix completes
+      on M4 Max/64 GB, NORMAL seed `metalcraft`, 16/16 Default/Metal. All 144 phases
+      receive all 1,057 tracked chunks and pass continuous AppKit/GLFW foreground,
+      visibility, monitor-attachment and drawable checks (11,808 checks total).
+      Native drawable is 3840×2160. GPU coverage is >=99.656%, sampled thermal state
+      is nominal, uploads never fail, and all 16 clients exit cleanly. Source state
+      is frozen across the matrix and saved with each invocation's digest.
+      [Raw cases and source patch](evidence/lod/p8-release/matrix/README.md).
+      Capture qualification does not establish image parity or unpaced presentation:
+      input triangle counts vary about −4.13% to +2.02% between matched phase summaries,
+      and some None-pack cases have substantial acquire/presentation variability.
+      Earlier locked-display/window-mode attempts remain diagnostic history only:
+      [window-mode rejection](evidence/lod/window-mode-failure/validation.txt),
+      [earlier windowed captures](evidence/lod/release-windowed-diagnostic/validation.txt).
+    - [x] Same-world distant-cache re-enable regression. Missing cache state now
+      triggers reopening even when world/device/atlas are unchanged. The focused
+      assertion fails before the fix and passes afterward (78s, native API validation,
+      NORMAL, 16/16 Default/Metal); the full horizon route retains this assertion.
+      [Before/after evidence](evidence/lod/horizon-reenable-failure/validation.txt).
+    - [ ] Fresh 128/256-chunk timing qualification. The earlier 48-capture explored
+      patch route passes lifecycle in 12m37s, but did not record lock/focus state.
+      Its 1,007/1,001 represented sections are sparse patches, not dense circles.
+      [Earlier provisional timing](evidence/lod/release-horizon/summary.json).
+      The new route checks presentation continuously and records exploration/warm-up
+      waits, three repeated edit-to-persist latencies, worker update latency, compressed
+      queue high-water, charged GPU mesh payload (including retired resources), and
+      owned disk payload before atomic rename/trim. Native build passes. The first
+      new run fails before timing at focus acquisition after the Mac locks again;
+      it is rejected and retained. [Failure](evidence/lod/p8-release/horizon-focus-rejected/README.md).
+      Run `python3 scripts/lod-run-horizon.py` after unlock. Payload counters exclude
+      driver allocation overhead and filesystem metadata/rounding.
+    - [ ] Pre-LOD disabled-overhead gate (<=2% median / <=5% p99). The detached
+      `f48460d` baseline with an auditable measurement-only backport compiles.
+      `scripts/lod-run-baseline.py` runs the eight counterparts of the current matrix;
+      `scripts/lod-disabled-summary.py` checks source/command/capture identity.
+      Live measurement remains pending unlock. Current matrix pairs are experimental
+      capability off/on, not evidence for this separate disabled-overhead gate.
+      [Prepared baseline patch and provenance](evidence/lod/p8-release/baseline-prepared/README.md).
+    - [ ] Loaded-geometry targets. The confirmed matrix saves only **0.127–0.250%**
+      of distant triangles, versus the proposed 50%. Median intervals increase in
+      every tested configuration; 4K Standard/full increases 11.69–14.24% across
+      phases. LOD preparation p95 stays below 0.234 ms, but no 20% exclusive terrain-GPU
+      saving is established. Improve the approach or explicitly revise the release
+      scope with measured evidence; the user accepts modest large-horizon cost,
+      not an unmeasured loaded-geometry speedup.
+    - [ ] Dense horizon/repair-churn throughput, actual driver GPU allocation peaks,
+      and base/lower-memory Apple Silicon. Current evidence is M4 Max explored
+      patches only; logical payload high-water instrumentation does not close these gates.
+    - [ ] Intermittent GLFW final-window-reset fault. Symbolication locates a null
+      monitor in GLFW's Cocoa video-mode path. The callback sequence that creates
+      that state is unknown. Sixteen clean matrix exits do not prove it fixed.
+      [Local binary disassembly and analysis](evidence/lod/p8-release/validation/glfw-analysis.md).
+    - [x] Evidence-based defaults and documentation: LOD off, Balanced, full shading,
+      16-chunk horizon and the default 2 GiB disk budget. All three release capability
+      gates stay closed. README documents capture tools, scope and remaining limits;
+      no measured optimization or dense extreme-distance claim is promoted.
+    - Final checkpoint: native build passes in 16s; all seven Python runners/summaries
+      compile; the archived matrix regenerates identically; `git diff --check` passes.
+      No benchmark process remains active. Development render/simulation distances
+      are restored to 16/16, with LOD off and full shading.
   - Owner: `/root`. Status: partially evaluated; release criteria unmet (2026-09-11). Added explicit
     LOD-on/off benchmark configuration, whole-terrain/distant triangle counters and
     per-frame LOD preparation percentiles. A three-repeat Standard near-4K A/B pair

@@ -38,6 +38,10 @@ public final class LodDistantCache implements AutoCloseable {
     private volatile Set<LodDistantNode.Key> diskLeaves = Set.of();
     private boolean scheduled, clear, clearAll, failed;
     private long serial, queuedBytes, captured, saved, reads, dropped, failures;
+    private long peakQueuedBytes;
+    private LodDistantStore.Diagnostics storeDiagnostics = new LodDistantStore.Diagnostics(0,0,0,0);
+    public record Diagnostics(long peakQueuedBytes, LodDistantStore.Diagnostics store) { }
+    public synchronized Diagnostics diagnostics() { return new Diagnostics(peakQueuedBytes, storeDiagnostics); }
     private volatile long recaptures;
     private volatile long generation;
     private volatile View view;
@@ -146,6 +150,7 @@ public final class LodDistantCache implements AutoCloseable {
         if (packed!=null && queuedBytes+packed.length>QUEUE_BYTES) { packed=null; ticket=null; dropped++; }
         pending.put(key,new Update(packed,ticket,revision));
         if (packed!=null) queuedBytes+=packed.length;
+        peakQueuedBytes = Math.max(peakQueuedBytes, queuedBytes);
         schedule();
     }
     public synchronized void clear() {
@@ -260,6 +265,7 @@ public final class LodDistantCache implements AutoCloseable {
                 stats=new Stats(store!=null,captured,saved,reads,dropped,failures,queuedBytes,pending.size(),
                         store==null?0:store.diskBytes(),store==null?0:store.corruptEntries(),store==null?0:store.evictions(),store==null?0:store.keys().size());
                 if (store!=null) {
+                    storeDiagnostics = store.diagnostics();
                     diskLeaves=leaves(store.keys());
                     persistedVersions.keySet().retainAll(diskLeaves);
                 }

@@ -18,6 +18,9 @@ public final class LodDistantStore implements AutoCloseable {
     private final Map<Path, Entry> inventory = new HashMap<>();
     private final Set<LodDistantNode.Key> index = new HashSet<>();
     private long budget, diskBytes, corrupt, evicted;
+    private long peakDiskBytes, updateBatches, updateNanos, maxUpdateNanos;
+    public record Diagnostics(long peakDiskPayloadBytes, long updateBatches, long updateNanos, long maxUpdateNanos) { }
+    public Diagnostics diagnostics() { return new Diagnostics(peakDiskBytes, updateBatches, updateNanos, maxUpdateNanos); }
 
     public LodDistantStore(Path root, String world, String dimension, String materials, long budget) throws IOException {
         if (budget < MAX_FILE_BYTES) throw new IllegalArgumentException("Cache budget too small");
@@ -116,6 +119,7 @@ public final class LodDistantStore implements AutoCloseable {
     public void putLeaves(List<LodDistantNode> leaves) throws IOException { updateLeaves(leaves,Set.of()); }
 
     public void updateLeaves(List<LodDistantNode> leaves,Set<LodDistantNode.Key> removed) throws IOException {
+        long started = System.nanoTime();
         Set<LodDistantNode.Key> changed=new HashSet<>(removed), parents=new HashSet<>();
         for (var leaf:leaves) changed.add(leaf.key());
         if (leaves.size()>16 || changed.size()>16) throw new IllegalArgumentException("Distant update batch exceeds bound");
@@ -138,6 +142,8 @@ public final class LodDistantStore implements AutoCloseable {
             parents=next;
         }
         trim();
+        long elapsed = System.nanoTime() - started;
+        updateBatches++; updateNanos += elapsed; maxUpdateNanos = Math.max(maxUpdateNanos, elapsed);
     }
     public LodDistantNode read(LodDistantNode.Key key) throws IOException {
         if (!index.contains(key)) return null;
@@ -212,6 +218,9 @@ public final class LodDistantStore implements AutoCloseable {
                 while(buffer.hasRemaining()) channel.write(buffer);
                 channel.force(true);
             }
+            // The complete temporary file coexists with the current inventory until rename.
+            // Counts owned file payloads, excluding filesystem metadata/allocation rounding.
+            peakDiskBytes = Math.max(peakDiskBytes, diskBytes + bytes.length);
             Files.move(temp,target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
             Entry old=inventory.put(target,new Entry(bytes.length,System.currentTimeMillis()));
             index.add(node.key());
@@ -230,6 +239,7 @@ public final class LodDistantStore implements AutoCloseable {
         budget = bytes; trim();
     }
     private void trim() throws IOException {
+        peakDiskBytes = Math.max(peakDiskBytes, diskBytes);
         while (diskBytes > budget || inventory.size() > MAX_FILES) {
             Path oldest = inventory.entrySet().stream().min(Comparator.comparingLong(e -> e.getValue().accessed))
                     .orElseThrow().getKey();

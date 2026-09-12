@@ -21,10 +21,15 @@ def summarize(rows):
                                           max(r["distantAfter"]["frameSections"] for r in rows)]
     result["maxSampledDistantGpuBytes"] = max(r["distantAfter"]["gpuBytes"] for r in rows)
     result["maxSampledDiskBytes"] = max((r["distantAfter"].get("cache") or {}).get("diskBytes", 0) for r in rows)
+    diagnostics = [r["distantDiagnostics"] for r in rows]
+    result["maxDistantGpuPayloadHighWaterBytes"] = max(d["peakGpuPayloadBytes"] for d in diagnostics)
+    result["maxCompressedQueueHighWaterBytes"] = max((d.get("cache") or {}).get("peakQueuedBytes",0) for d in diagnostics)
+    result["maxDiskPayloadHighWaterBytes"] = max(((d.get("cache") or {}).get("store") or {}).get("peakDiskPayloadBytes",0) for d in diagnostics)
+    result["maxStoreUpdateMs"] = max(((d.get("cache") or {}).get("store") or {}).get("maxUpdateNanos",0) for d in diagnostics) / 1e6
     result["maxProcessPeakPhysicalFootprintBytes"] = max(r["environment"]["processPeakPhysicalFootprintBytes"] for r in rows)
     result["thermalStates"] = [r["environment"]["thermalState"] for r in rows]
     result["p95LoadedPrepareMs"] = statistics.median(r["phase"]["lod"]["p95PrepareMs"] for r in rows)
-    result["distantTrianglesPerFrame"] = statistics.median(
+    result["distantTrianglesPerCapturedFrameIncludingWarmup"] = statistics.median(
         (r["distantAfter"]["triangles"] - r["distantBefore"]["triangles"]) / r["phase"]["frames"] for r in rows)
     result["medianIntervalRangeMs"] = [min(r["phase"]["p50IntervalMs"] for r in rows),
                                        max(r["phase"]["p50IntervalMs"] for r in rows)]
@@ -33,7 +38,12 @@ def summarize(rows):
 
 def main(path):
     report = json.loads(Path(path).read_text())
-    output = {"scope": "Paired stationary explored patches, not dense circles; three repeats; median of repeat percentiles", "cases": []}
+    output = {"scope": "Paired stationary explored patches, not dense circles; three repeats; median of repeat percentiles",
+              "resourceScope": "GPU high-water is successful charged mesh payload including retired resources, not driver allocations; disk high-water includes temporary owned file payload before rename/trim, not filesystem metadata; store latency is completed worker batches, not queue wait",
+              "explorationElapsedNanos": report["explorationElapsedNanos"],
+              "exploredDiagnostics": report["exploredDiagnostics"],
+              "readinessWaitNanos": report["readinessWaitNanos"],
+              "repeatedRepairs": report["repeatedRepairs"], "cases": []}
     for horizon in (128, 256):
         rows = report["benchmark" + str(horizon)]
         if len(rows) != 24:
@@ -53,6 +63,8 @@ def main(path):
                         if off["environment"][key] != on["environment"][key]:
                             raise ValueError("Mismatched environment: " + key)
                     for row in (off, on):
+                        if not row.get("presentation", {}).get("passed") or row["presentation"].get("checks", 0) < 80:
+                            raise ValueError("Missing continuous foreground/visibility checks")
                         gpu = row["phase"]["gpuFrame"]
                         if len(gpu["samplesMs"]) < row["phase"]["frames"] * .95 or gpu["invalidFrames"] or gpu["overflowFrames"]:
                             raise ValueError("Incomplete GPU timing")

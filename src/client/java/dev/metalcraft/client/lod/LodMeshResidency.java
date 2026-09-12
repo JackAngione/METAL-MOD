@@ -25,6 +25,7 @@ public final class LodMeshResidency<R extends AutoCloseable> implements AutoClos
     private final ArrayDeque<Entry> retired = new ArrayDeque<>();
     private long budget;
     private long charged;
+    private long peakCharged;
     private long completed;
     private boolean closed;
 
@@ -66,6 +67,7 @@ public final class LodMeshResidency<R extends AutoCloseable> implements AutoClos
         R resource=Objects.requireNonNull(allocator.get());
         resident.put(key,new Entry(resource,bytes));
         charged=Math.addExact(charged,bytes);
+        peakCharged=Math.max(peakCharged,charged);
         return true;
     }
 
@@ -114,6 +116,8 @@ public final class LodMeshResidency<R extends AutoCloseable> implements AutoClos
     }
 
     public long chargedBytes() { return charged; }
+    /** Successful mesh payload allocations, including resources awaiting GPU completion. */
+    public long peakChargedBytes() { return peakCharged; }
     public boolean contains(Key key) { requireOpen(); return resident.containsKey(key); }
     public int residentCount() { return resident.size(); }
     public int retiredCount() { return retired.size(); }
