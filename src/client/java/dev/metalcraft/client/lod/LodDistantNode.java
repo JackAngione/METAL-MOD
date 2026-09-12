@@ -8,7 +8,7 @@ import java.util.List;
 /** Immutable exact opaque surfaces. Parents batch received children without filling unknown space. */
 public final class LodDistantNode {
     public static final int STRIDE = 28;
-    public static final int MAX_BYTES = 1 << 20;
+    public static final int MAX_BYTES = 4 << 20;
     public static final int MAX_LEVEL = 8;
     public record Key(int level, int x, int y, int z) {
         public Key {
@@ -31,6 +31,12 @@ public final class LodDistantNode {
             return originX() >= cx + radius || originX() + blocks() <= cx - radius
                     || originZ() >= cz + radius || originZ() + blocks() <= cz - radius;
         }
+        public boolean outsideLoaded(double cx,double cz,int chunks) {
+            // Minecraft owns a chunk-aligned (2r+1) square. A camera-centered safety
+            // ring would leave artificial missing strips at the loaded/cache seam.
+            double centerX=(Math.floor(cx/16)+.5)*16, centerZ=(Math.floor(cz/16)+.5)*16;
+            return outside(centerX,centerZ,(chunks+.5)*16);
+        }
         public double distanceSquared(double cx, double cy, double cz) {
             double dx = Math.max(Math.max(originX()-cx, cx-originX()-blocks()), 0);
             double dy = Math.max(Math.max(originY()-cy, cy-originY()-blocks()), 0);
@@ -52,13 +58,20 @@ public final class LodDistantNode {
     private final Key key;
     private final List<Layer> layers;
     private final int children, sections;
+    private final boolean complete;
+    private final float[] bounds = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY,
+            Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
 
     public LodDistantNode(Key key, List<Layer> layers, int children, int sections) {
+        this(key,layers,children,sections,true);
+    }
+    LodDistantNode(Key key,List<Layer> layers,int children,int sections,boolean complete) {
         this.key = java.util.Objects.requireNonNull(key);
+        this.complete=complete;
         this.layers = List.copyOf(layers);
         this.children = children;
         this.sections = sections;
-        if (layers.size() > 2 || bytes() > MAX_BYTES || children < 0 || children > 255 || sections < 0
+        if ((!complete && (key.level==0 || !layers.isEmpty())) || layers.size() > 2 || bytes() > MAX_BYTES || children < 0 || children > 255 || sections < 0
                 || sections > 1 << 24 || (key.level == 0 && (children != 0 || sections != 1)))
             throw new IllegalArgumentException("Invalid distant node");
         int seen = 0;
@@ -71,6 +84,8 @@ public final class LodDistantNode {
                     float p = b.getFloat(i + axis*4);
                     if (!Float.isFinite(p) || p < -16 || p > key.blocks() + 16)
                         throw new IllegalArgumentException("Invalid position");
+                    bounds[axis]=Math.min(bounds[axis],p);
+                    bounds[axis+3]=Math.max(bounds[axis+3],p);
                 }
                 for (int axis = 0; axis < 2; axis++) {
                     float uv = b.getFloat(i + 16 + axis*4);
@@ -81,10 +96,18 @@ public final class LodDistantNode {
     }
     public Key key() { return key; }
     public List<Layer> layers() { return layers; }
+    public boolean complete() { return complete; }
     public int children() { return children; }
     public int sections() { return sections; }
     public int bytes() { return layers.stream().mapToInt(Layer::bytes).sum(); }
     public boolean drawable() { return bytes() > 0; }
+    /** Actual received surface bounds, avoiding huge empty bounds in partially explored parents. */
+    public double distanceSquared(double x, double y, double z) {
+        double dx=Math.max(Math.max(key.originX()+bounds[0]-x,x-key.originX()-bounds[3]),0);
+        double dy=Math.max(Math.max(key.originY()+bounds[1]-y,y-key.originY()-bounds[4]),0);
+        double dz=Math.max(Math.max(key.originZ()+bounds[2]-z,z-key.originZ()-bounds[5]),0);
+        return dx*dx+dy*dy+dz*dz;
+    }
 
     /** Oversize parents retain a child manifest, so selection refines instead of truncating surfaces. */
     public static LodDistantNode parent(Key key, List<LodDistantNode> children) {
@@ -98,7 +121,7 @@ public final class LodDistantNode {
             mask |= 1<<index;
             sections += child.sections;
             bytes += child.bytes();
-            complete &= child.key.level == 0 || child.drawable() || child.sections == 0;
+            complete &= child.complete;
         }
         List<Layer> layers = new ArrayList<>();
         if (complete && bytes <= MAX_BYTES) for (int layer = 0; layer < 2; layer++) {
@@ -117,6 +140,6 @@ public final class LodDistantNode {
             }
             layers.add(new Layer(layer, output.array()));
         }
-        return new LodDistantNode(key, layers, mask, sections);
+        return new LodDistantNode(key, layers, mask, sections,complete && bytes<=MAX_BYTES);
     }
 }

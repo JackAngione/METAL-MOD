@@ -62,7 +62,7 @@
   "metalcraft.lod.horizon.tooltip": "Experimental explored opaque terrain only. Unseen terrain and distant fluids remain absent. Cached terrain can be stale until revisited. Dense terrain may exceed the bounded cache. Disk cache must be on for extended terrain.",
   "metalcraft.lod.disk_cache": "Distant terrain disk cache",
   "metalcraft.lod.disk_budget": "Disk cache budget",
-  "metalcraft.lod.clear_cache": "Clear current world cache",
+  "metalcraft.lod.clear_cache": "Clear distant terrain cache",
   "metalcraft.lod.reset": "Reset to Defaults",
   "metalcraft.lod.experimental_geometry": "Experimental loaded-terrain LOD. Performance targets are still under validation.",
   "metalcraft.lod.unsupported_pack": "Terrain LOD currently supports the Standard pack and no shader pack.",

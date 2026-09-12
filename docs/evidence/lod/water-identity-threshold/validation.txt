@@ -1,0 +1,14 @@
+2026-09-12, Apple M4 Max/64 GB/macOS 27.0, NORMAL seed 12345, 16/16 Default/Metal.
+
+The merged horizon-water run in before.log failed at the half-resolution identity check.
+The saved image visibly contains the magenta diagnostic mask. A 2-pixel-stride RGB
+analysis found 37 samples passing the old absolute highlight cutoff, but 23,595
+samples with R > G+70, B > G+70 and min(R,B) > 120. The native image had 75 old-cutoff
+samples / 20,817 magenta-chroma samples; baseline had zero under either predicate.
+The retained split-path identity image had 80 / 20,756 samples respectively.
+
+The test now checks magenta chroma and requires at least 500 samples (previously 50).
+The <=10 baseline/restored leakage limit is unchanged. This verifies broad diagnostic
+coverage without depending on a few lit highlights surviving half-resolution filtering.
+No water renderer or shader appearance change was needed. Final merged evidence is
+in ../horizon-water-merged/; split production-cache evidence is in ../horizon-water-split/.

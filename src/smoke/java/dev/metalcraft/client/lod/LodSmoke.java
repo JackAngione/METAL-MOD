@@ -24,6 +24,7 @@ public final class LodSmoke {
         bakedFaces();
         captureLifecycle();
         atlas();
+        LodDistantSmoke.run();
         check(LodSettings.defaults().meshBudgetBytes(64L << 30, 1L << 30, 0) == (512L << 20), "automatic working-set budget is capped");
         check(LodSettings.defaults().meshBudgetBytes(1L << 30, 1L << 30, 0) == 1, "other renderer pressure removes admission headroom");
         check(LodSettings.defaults().meshBudgetBytes(0, 1L << 30, 0) == (128L << 20), "unknown working set retains a bounded fallback");

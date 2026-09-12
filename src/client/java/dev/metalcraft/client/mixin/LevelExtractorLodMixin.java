@@ -5,12 +5,24 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.extract.LevelExtractor;
 import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(LevelExtractor.class)
 abstract class LevelExtractorLodMixin {
+    @Shadow private ClientLevel level;
+    @Shadow private net.minecraft.client.SectionUpdateTracker sectionUpdateTracker;
+    @Shadow @Final private net.minecraft.client.renderer.state.level.LevelRenderState levelRenderState;
+
+    @Inject(method="extract",at=@At("TAIL"))
+    private void metalcraft$recaptureDistant(net.minecraft.client.DeltaTracker delta,net.minecraft.client.Camera camera,
+                                           float partialTick,CallbackInfo ci) {
+        if (level!=null && sectionUpdateTracker!=null)
+            dev.metalcraft.client.lod.LodDistantRecapture.extract(level,sectionUpdateTracker,levelRenderState);
+    }
     @Inject(method = "setLevel", at = @At("HEAD"))
     private void metalcraft$worldLod(@Nullable ClientLevel level, CallbackInfo ci) {
         dev.metalcraft.client.lod.LodDistantRenderer.worldChanged();

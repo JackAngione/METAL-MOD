@@ -13,6 +13,7 @@ import org.joml.Matrix4f;
 /** Hardware comparison of coarsened geometry against the finest prototype tier. */
 public final class LodMetalSmoke {
     public static void main(String[] args) {
+        dev.metalcraft.client.metal.MetalUniformTailSmoke.run();
         dev.metalcraft.client.metal.MetalLodTimelineSmoke.run();
         dev.metalcraft.client.metal.MetalLodWorldSmoke.run();
         var empty = new TerrainSnapshot.Material(0,TerrainSnapshot.Policy.EMPTY,-1,0);

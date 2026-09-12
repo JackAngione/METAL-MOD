@@ -2447,6 +2447,12 @@ All WU acceptance criteria are complete. Existing W8 release gate remains open.
 
 ## LOD composition regression progress (2026-09-11)
 
+P7 completion continuation claimed by `/root`: validate persistent distant opaque
+nodes with the existing forward water and full-resolution opaque-depth snapshot.
+The cache/scheduler and resident-buffer fixes do not change the water ABI. The
+extended-horizon water regression will record actual distant draw ownership;
+W8 remains open for its independent release-performance requirements.
+
 P7 continuation claimed by `/root` (2026-09-11): validate distant opaque/cutout
 parent meshes entering the existing terrain pass before water snapshots and forward
 translucency. Extend atmospheric distance fog only; keep fluid/status-effect fog
@@ -2487,3 +2493,37 @@ LOD shadow draws, four safe stale-owner fallbacks, zero upload failures and zero
 charged GPU bytes after close. Identity/depth, above/below water, refraction, foam,
 reflections, HDR/Fabulous, crossings and reload assertions pass. Evidence:
 `docs/evidence/lod/water-batched/`. W8 remains open for its release-performance matrix.
+
+P7 final cache compatibility (2026-09-12), owner `/root`: the complete split-pass
+water matrix passes in **4m34s**, NORMAL seed 12345, 16/16, Default/Metal,
+Apple M4 Max/64 GB/macOS 27.0, with `MTL_DEBUG_LAYER=1`. It explores received terrain
+before the water fixture and renders a **64-chunk** cached opaque horizon.
+Command: `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true
+-PmetalLodHorizonExperimental=true -PmetalTestLodHorizon=64 -PmetalPassMerging=false
+--args='--graphicsBackend default'`. Final cache fixes include parent repair,
+bounded behind-camera recapture and startup inventory invalidation.
+
+The matrix records **675,629** distant world draws and **733,501** loaded replacement
+draws; zero upload failures and zero charged GPU bytes after close. Identity/depth,
+native/half/resize, refraction, foam, underwater, SSR tiers, reflected camera movement,
+ordinary/Fabulous transparency and reload assertions pass. Selected identity,
+underwater and SSR images were inspected; magenta identity water is the intentional
+diagnostic mode. Evidence: `docs/evidence/lod/horizon-water-split/`. The final merged-pass
+repeat is recorded below. The water ABI and effect appearance are unchanged; uniform
+tail allocation was padded to match MSL's 16-byte alignment under API validation.
+W8 remains open for release performance qualification.
+
+The final merged repeat exposed a test-predicate failure at half resolution: its
+visible identity mask had 23,595 magenta-chroma samples but only 37 samples above
+the old absolute highlight cutoff. The native mask had 20,817 chroma samples;
+baseline had zero. Identity validation now requires magenta hue contrast across
+at least 500 samples, up from 50 highlight samples, retaining the <=10 negative
+baseline/restored limit. This changes the diagnostic assertion only. The failing
+capture and measured counts are retained in `docs/evidence/lod/water-identity-threshold/`;
+the merged matrix subsequently passed with the revised predicate in **4m35s**.
+It recorded **686,912** distant world draws and **720,735** loaded replacement draws,
+zero upload failures and zero charged GPU bytes after close. Command above without
+`-PmetalPassMerging=false`; same NORMAL seed, 16/16 Default/Metal and native API
+validation. Final merged artifacts and inspected images:
+`docs/evidence/lod/horizon-water-merged/`. P7 composition compatibility is complete;
+W8's broader release performance matrix remains open.

@@ -136,6 +136,7 @@ def benchmarkProperties = [
 	metalBenchmarkPack: 'metalcraft.benchmarkPack',
 	metalBenchmarkLod: 'metalcraft.benchmarkLod',
 	metalTestLod: 'metalcraft.testLod',
+	metalTestLodHorizon: 'metalcraft.testLodHorizon',
 	metalBenchmarkUnlocked: 'metalcraft.benchmarkUnlocked',
 	metalBenchmarkHalfResolution: 'metalcraft.benchmarkHalfResolution',
 	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',

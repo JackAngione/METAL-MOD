@@ -1,0 +1,22 @@
+
+> Configure project :
+Fabric Loom: 1.17.20
+
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses
+> Task :compileShaderSmokeJava
+> Task :processShaderSmokeResources NO-SOURCE
+> Task :shaderSmokeClasses
+
+> Task :lodSmoke
+Solid fixture: 3072 -> 732 triangles; world error 0
+Distant cache smoke passed: exact parents, persistence, corruption, global budget/lock, visible priority, stale queues, clear/close races
+LOD smoke passed: settings recovery/round trip/gates, exact surface coverage, caves/overhangs/materials/seams, selection and stale/bounded jobs
+
+BUILD SUCCESSFUL in 3s
+6 actionable tasks: 3 executed, 3 up-to-date

@@ -50,6 +50,7 @@ final class MetalWaterIdentityGameTest {
 			settings.setAllowCommands(true);
 			settings.getGameRules().set(GameRules.ADVANCE_TIME, false, null);
 			settings.getGameRules().set(GameRules.ADVANCE_WEATHER, false, null);
+			if (MetalLodTestScope.HORIZON>16) settings.getGameRules().set(GameRules.SPECTATORS_GENERATE_CHUNKS,true,null);
 		});
 		boolean originalDebug = WaterIdentityDebug.enabled();
 		WaterRoutingDebug.Mode originalRoutingDebug = WaterRoutingDebug.mode();
@@ -62,6 +63,7 @@ final class MetalWaterIdentityGameTest {
 		try (var world = builder.create()) {
 			this.context.waitFor(client -> client.level != null && client.player != null);
 			world.getServer().runCommand("gamemode spectator @a");
+			MetalLodTestScope.prepareHorizon(this.context,world);
 			world.getServer().runCommand("tp @a 0 193 18 180 40");
 			this.context.waitTicks(80);
 			world.getServer().runCommand("fill -14 180 -10 14 180 10 minecraft:white_concrete");
@@ -951,7 +953,7 @@ final class MetalWaterIdentityGameTest {
 		int baselineMagenta = magentaSamples(baseline);
 		int waterMagenta = magentaSamples(water);
 		int restoredMagenta = magentaSamples(restored);
-		if (waterMagenta < 50) {
+		if (waterMagenta < 500) {
 			throw new AssertionError("Water identity diagnostic did not cover water: " + waterMagenta);
 		}
 		if (baselineMagenta > 10 || restoredMagenta > 10) {
@@ -969,10 +971,10 @@ final class MetalWaterIdentityGameTest {
 					int c0 = pixel & 255;
 					int c1 = (pixel >>> 8) & 255;
 					int c2 = (pixel >>> 16) & 255;
-					int max = Math.max(c0, Math.max(c1, c2));
-					int min = Math.min(c0, Math.min(c1, c2));
-					int mid = c0 + c1 + c2 - max - min;
-					if (max > 180 && mid > 150 && min < 100) count++;
+					// The identity color is composited and lit: half-resolution filtering
+					// can remove its few >180 highlights while preserving the full mask.
+					// Require magenta chroma over a broad area, independent of those peaks.
+					if (c0 > c1 + 70 && c2 > c1 + 70 && Math.min(c0, c2) > 120) count++;
 				}
 			}
 			return count;

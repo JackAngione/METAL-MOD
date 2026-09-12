@@ -1,0 +1,4 @@
+MTL_DEBUG_LAYER=1 ./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true -PmetalLodHorizonExperimental=true -PmetalTestLodHorizon=64 -PmetalPassMerging=false --args='--graphicsBackend default'
+Passed in 4m34s on 2026-09-12; NORMAL seed 12345, 16/16 Default/Metal, M4 Max/64 GB/macOS 27.0.
+675629 distant world draws; 733501 loaded replacement draws; zero upload failures and zero charged GPU bytes after close.
+Final cache source includes partial-parent repair, bounded offscreen recapture and startup inventory invalidation fixes.

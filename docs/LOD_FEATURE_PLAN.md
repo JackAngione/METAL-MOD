@@ -1,7 +1,9 @@
 # LOD feature implementation plan
 
 Status: P1–P5 complete for conservative loaded geometry and composition compatibility.
-P6–P8 remain open; P7 implementation is in progress. Geometry is available only with the experimental validation flag;
+P6 feasibility evaluation is complete; its implementation remains unchecked and deferred.
+P7 functional cache acceptance is complete; P8 release acceptance remains open.
+Geometry is available only with the experimental validation flag;
 release capability gates remain closed.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
@@ -173,8 +175,27 @@ resources. Changing horizon never changes Minecraft render/simulation settings.
 Progress protocol: claim a task with owner/status before implementation; record
 partial progress or blockers beneath it; check it off only with validation evidence
 (commands, machine, scenario, and artifacts). Update this plan in the same change.
-P1–P5 are complete; `/root` owns P6 and P8 evaluation and P7 implementation.
+P1–P5 and P7 are complete; `/root` owns P6 and P8 evaluation.
 Earlier partial-progress entries below are retained as dated evidence, not current blockers.
+
+Continuation claimed by `/root` (2026-09-11): finish P7 cache ownership, global
+eviction, cancellation, visible scheduling and the generated-world horizon route;
+then evaluate P6 against its measured cost and image gates. Required validation
+remains unchecked until results are recorded. P8 release tuning is separate.
+
+Continuation checkpoint: root-wide disk accounting and exclusive process locking,
+ancestor-first invalidation, pending-edit exclusion, visible result priority,
+unsupported-capture revocation and device shutdown cleanup are implemented.
+`lodSmoke` passes persistence, corruption, namespace, global budget, clear/close
+and stale-worker fixtures. The initial horizon route exposed teleport invalidation
+overflow clearing unrelated explored data. A minimized 4,097-new-section fixture
+fails with diskBytes=0/dropped=1 before the fix and passes afterward (3 s).
+Never-cached dirty sections are now ignored after namespace initialization.
+The subsequent live route also exposed missing behind-camera recapture and a startup
+dirty storm before disk inventory completed. Bounded existing-section extraction
+repairs the first; deferring initial invalidation until inventory repairs the second.
+The 4,097-unknown-section startup fixture fails before and passes after that fix.
+Final live checks remain in progress at this checkpoint.
 
 - [x] P0 — Inspect terrain/render/settings seams, create branch from water effects,
   and document staged design. Evidence: branch base SHA above and inspected source
@@ -347,10 +368,16 @@ Earlier partial-progress entries below are retained as dated evidence, not curre
     Full-terrain triangle reductions were 0.508% merged and 0.511% split; these are
     composition coverage runs, not controlled performance A/B measurements.
     `./gradlew build` passed in 12s with CPU and production Metal GPU fixtures.
-- [ ] P6 — Distance-dependent shading resolution. Prototype and measure the bands,
-  conservative depth, and reconstruction described above. Acceptance: clean moving
-  silhouettes and transparent intersections, full-detail near terrain, and a measured
-  net GPU improvement including every added pass; otherwise keep this task open.
+- [ ] P6 — Distance-dependent shading resolution (implementation deferred).
+  - [x] Feasibility evaluation completed, 2026-09-12: retain full-resolution
+    rasterization and the existing merged Standard resolve. Five measured approaches
+    fail the all-pass GPU-cost gate; the half/quarter approaches also fail the
+    extended-shadow image budget. The implementation checkbox remains open because
+    those acceptance criteria have not passed.
+    Half/Quarter/Auto controls and the multiresolution capability remain unavailable.
+    A future implementation must pass moving silhouettes, transparent intersections,
+    near-detail preservation, band hysteresis and net GPU improvement including every
+    added pass. [Decision and retained evidence](LOD_PERFORMANCE_RESULTS.md#p6-decision).
   - Owner: `/root`. Status: follow-up evaluated; acceptance still failed (2026-09-11).
     Four additional prototypes remove external G-buffer stores: spatial SIMD sample
     lookup, half-only quad sharing, one tile dispatch, and packed coarse tile work
@@ -368,7 +395,7 @@ Earlier partial-progress entries below are retained as dated evidence, not curre
     fixture had no shadow work at quarter-band depth; its passing result did not
     establish quarter-band lighting quality. Reports now explicitly flag this failure.
     [Commands, measurements, limitations and artifacts](LOD_PERFORMANCE_RESULTS.md#p6-follow-up-in-pass-sharing-and-tile-stages).
-    P6 stays unchecked: no net GPU improvement, generated-world motion/transparent
+    At this checkpoint P6 stayed unchecked: no net GPU improvement, generated-world motion/transparent
     intersection acceptance, runtime integration, or distance-band hysteresis has passed.
   - Validation of the follow-up: the complete matrix passes execution in 30 s and
     again under `MTL_DEBUG_LAYER=1` in 31 s, with no Metal API errors. `./gradlew build`
@@ -381,38 +408,50 @@ Earlier partial-progress entries below are retained as dated evidence, not curre
     0.784 → 1.631 ms (+108%). Odd-size moving foreground/depth readback passes, but this
     synthetic fixture does not establish world-image acceptance. No runtime capability
     is enabled. [Full results and remaining requirements](LOD_PERFORMANCE_RESULTS.md).
-- [ ] P7 — Extended-horizon cache. Implement persistent parent nodes, cache versioning,
+- [x] P7 — Extended-horizon cache. Implement persistent parent nodes, cache versioning,
   eviction, and visible-region scheduling. Acceptance: explored standard terrain at
   32/64/128/256 LOD chunks while Minecraft remains 16/16; bounded memory/draw counts,
   correct world isolation, and graceful missing/corrupt/stale data behavior.
-  - Owner: `/root`. Status: in progress (2026-09-11). Implementing bounded persistent
-    opaque terrain nodes, hierarchy selection and direct Metal composition. Unknown
-    terrain stays absent; runtime and standard-world acceptance will be recorded here.
-  - Progress checkpoint (2026-09-11): added immutable emitted SOLID/CUTOUT leaf data,
-    exact-surface parent batching through eight octree levels, compressed versioned
-    files with checksums and atomic replacement, ancestor invalidation, per-namespace
-    eviction, a bounded background queue/result set, and Metal residency/draw hooks.
-    The renderer uses existing opaque pipelines and full-resolution world depth.
-    Translucent terrain is excluded. Parent batching does **not** yet simplify the
-    full-resolution emitted surfaces; dense coverage and stage-3 scaling remain unproven.
-  - Unvalidated UI/camera/fog integration and the NORMAL-world 32/64/128/256 test
-    harness are isolated behind `-PmetalLodHorizonExperimental=true` or the explicit
-    `-PmetalLodHorizonTest=true` lifecycle test. The ordinary loaded-geometry
-    experimental flag does not enable this work. P7's checkbox and release gates
-    remain closed.
-  - Next work: add deterministic cache/scheduler correctness fixtures; enforce a
-    total disk budget across world/resource namespaces and serialize concurrent
-    process access; prioritize visible requests before spending the CPU result budget;
-    audit cancellation/clear/reload races and invalidate unsupported recaptures;
-    validate resident-buffer shutdown and clear-cache behavior. Then run and inspect
-    the generated-world horizon/revisit/edit/reload/reopen route, corruption and
-    isolation checks, and water composition regression at 16/16 Default/Metal.
-    The first live launch was stopped at environment permission handling; no horizon
-    runtime or screenshot acceptance is claimed at this checkpoint.
-  - Checkpoint validation: `./gradlew build` passed in 13 s on Apple M4 Max,
-    including the existing `lodSmoke`, `lodMetalSmoke` and shader translation/GPU
-    checks. The new live harness compiles. `git diff --check` passed. These checks
-    establish build/regression health, not the outstanding P7 cache or live criteria.
+  - [x] Cache correctness and lifecycle (2026-09-12): root-wide disk budget and
+    exclusive lock, bounded compressed captures, visible selection, pending/stale
+    revision exclusion, checksummed version-2 atomic storage, ancestor repair and
+    inactive global clear pass production scheduler/filesystem smoke fixtures.
+    Startup and teleport dirty-storm fixtures preserve unrelated explored terrain.
+    Offscreen received cached sections use bounded existing asynchronous extraction.
+  - [x] NORMAL-world horizon route (2026-09-12): M4 Max/64 GB/macOS 27.0,
+    16/16 Default/Metal, `MTL_DEBUG_LAYER=1 ./gradlew runClient -PmetalLifecycleTest
+    -PmetalLodHorizonTest=true --args='--graphicsBackend default'` passes in 3m41s.
+    32/64/128/256 snapshots submit 96/119/122/129 opaque draws and retain
+    69.2/104.5/108.3/109.8 MiB distant GPU memory. Standard/None, edits, 1,282 hidden
+    recaptures, reload, dimension isolation, persisted reopen and active/inactive
+    clear pass. Every recorded cache has zero drops/failures; no upload failures;
+    disable and both closes release all charged distant GPU bytes. Images inspected.
+    [Measurements and limitations](LOD_PERFORMANCE_RESULTS.md#p7-generated-world-results),
+    [artifacts](evidence/lod/horizon-final/lod-horizon.json).
+  - [x] Extended-water compatibility (2026-09-12): full merged/split NORMAL-world
+    matrices at 16/16 Default/Metal, 64-chunk cached horizon and `MTL_DEBUG_LAYER=1`
+    pass in 4m35s/4m34s. They record 686,912/675,629 distant draws, zero upload
+    failures and zero charged distant GPU bytes after close. Identity/depth,
+    refraction/foam/SSR, underwater, native/half/resize, ordinary/Fabulous and reload
+    checks pass. [Merged](evidence/lod/horizon-water-merged/validation.txt) and
+    [split](evidence/lod/horizon-water-split/validation.txt) commands and artifacts.
+    The water plan is updated in the same change; W8 remains open.
+  - Owner: `/root`. Status: complete for explored opaque cache functionality
+    (2026-09-12). Exact emitted SOLID/CUTOUT surfaces batch through eight parent
+    levels and enter existing Metal opaque pipelines/full-resolution depth. Unknown
+    terrain and distant fluids remain absent. The bounded selection can omit data
+    in denser scenes; dense 256-chunk coverage and performance remain P8 work.
+  - Access remains experimental: `-PmetalLodHorizonExperimental=true` or the explicit
+    `-PmetalLodHorizonTest=true` lifecycle test. The ordinary loaded-geometry flag
+    does not enable it. No release capability was promoted.
+  - Final `./gradlew build` passes in 14s on M4 Max, including production cache,
+    CPU/Metal LOD, padded-uniform readback and shader translation/GPU checks.
+    `git diff --check` passes. Earlier failed runs are retained as regression
+    evidence, including startup dirty overflow and the half-resolution diagnostic
+    highlight threshold; the final route/matrices above include their fixes.
+    General shader lifecycle (42s) and the separate creative-search route (20s)
+    also pass under native API validation, NORMAL terrain, 16/16 Default/Metal.
+    [Final commands and logs](evidence/lod/horizon-final/validation.txt).
 - [ ] P8 — Tune presets and release gates. Complete the matrix below, set defaults
   from evidence, document tradeoffs/limitations, and update README. Acceptance: all
   correctness gates pass and published targets are met or explicitly revised with
@@ -454,8 +493,9 @@ Earlier partial-progress entries below are retained as dated evidence, not curre
     native batching, smoke, and benchmark-report changes; `git diff --check` passes.
     The development configuration is left with LOD disabled. P6–P8 remain unchecked.
 
-Dependencies: P1 → P2/P3 → P4 → P5 → P6; P7 builds on P4/P5 and does not require P6.
-P8 requires P2–P7. Ship geometry-only milestones explicitly if later stages remain open.
+Dependencies: P1 → P2/P3 → P4 → P5 → P6 evaluation; P7 builds on P4/P5 and does not require shading LOD.
+P8 requires P2–P7 correctness and the recorded P6 scope decision. A geometry/cache
+milestone must explicitly exclude multiresolution shading and its unpassed gates.
 
 ## Validation and performance gates
 

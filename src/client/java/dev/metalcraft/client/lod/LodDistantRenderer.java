@@ -26,29 +26,58 @@ public final class LodDistantRenderer {
     private static @Nullable Object level;
     private static @Nullable LodAtlas atlas;
     private static @Nullable MetalGpuDevice device;
-    private static final LodMeshResidency<Mesh> residency=new LodMeshResidency<>(32L<<20);
+    public static final long MAX_GPU_BYTES = 128L<<20;
+    private static LodMeshResidency<Mesh> residency=new LodMeshResidency<>(MAX_GPU_BYTES);
     private record Owner(LodDistantNode.Key key,long version) { }
     private static final Map<LodMeshResidency.Key,Owner> owners=new HashMap<>();
     private static List<LodDistantCache.Candidate> selected=List.of();
     private static volatile LodSettings settings=LodSettings.defaults();
     private static long session, generation, draws, triangles, uploads, uploadBytes, failures;
     private static int frameDraws, frameSections;
-    private static volatile Stats published=new Stats(null,0,0,0,0,0,0,0,0,0);
+    private static double frameFarthestBlocks;
+    private static volatile Stats published=new Stats(null,0,0,0,0,0,0,0,0,0,0);
     public record Stats(LodDistantCache.Stats cache, long draws, long triangles, long uploads,
-                        long uploadBytes, long uploadFailures, long gpuBytes, int residentNodes, int frameDraws, int frameSections) { }
+                        long uploadBytes, long uploadFailures, long gpuBytes, int residentNodes, int frameDraws,
+                        int frameSections, double frameFarthestBlocks) { }
     private record Layer(int layer,int indices) { }
     private record Mesh(List<GpuBuffer> buffers,List<Layer> layers) implements AutoCloseable {
         @Override public void close() { buffers.forEach(GpuBuffer::close); }
     }
     private LodDistantRenderer() { }
+    static @Nullable LodDistantCache currentCache() { return cache; }
+    static LodSettings frameSettings() { return settings; }
+    public static long recaptures() { var current=cache; return current==null?0:current.recaptures(); }
     public static int horizon() { return settings.enabled() && settings.diskCache() ? settings.horizonChunks() : 16; }
     public static Stats stats() { return published; }
-    public static void clearCache() { var current=cache; if(current!=null) current.clear(); }
+    private static Path cacheRoot() {
+        return Minecraft.getInstance().gameDirectory.toPath().resolve(Boolean.getBoolean("fabric.client.gametest")
+                ? "build/lod-test-cache" : "metalcraft-lod");
+    }
+    public static void clearCache() {
+        var current=cache;
+        if(current!=null) current.clear();
+        else LodDistantCache.clearRoot(cacheRoot(),(long)dev.metalcraft.client.MetalCraftConfig.lod().diskBudgetMiB()<<20);
+    }
+    public static LodDistantCache.EntryState entry(LodDistantNode.Key key) {
+        var current=cache;
+        return current==null?new LodDistantCache.EntryState(0,-1,false):current.entry(key);
+    }
     public static void encoded(int indices) { draws++; triangles+=indices/3; }
     public static void worldChanged() {
+        LodDistantRecapture.reset();
         var previous=cache; cache=null;
         if(previous!=null) previous.close();
         level=null;
+    }
+
+    /** Device shutdown follows command submission; native buffers retain their in-flight owners. */
+    public static void close(MetalGpuDevice closing) {
+        if (device != closing) return;
+        worldChanged();
+        selected=List.of(); owners.clear(); residency.close();
+        residency=new LodMeshResidency<>(MAX_GPU_BYTES);
+        device=null; atlas=null; session++;
+        published=new Stats(null,draws,triangles,uploads,uploadBytes,failures,0,0,0,0,0);
     }
 
     public static void beginFrame(@Nullable MetalGpuDevice metal,LodSettings next) {
@@ -66,7 +95,7 @@ public final class LodDistantRenderer {
                 String world=server!=null ? "local:"+server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize()
                         : client.getCurrentServer()!=null ? "server:"+client.getCurrentServer().ip.toLowerCase(Locale.ROOT) : null;
                 if(world!=null) {
-                    cache=new LodDistantCache(client.gameDirectory.toPath().resolve("metalcraft-lod"),world,
+                    cache=new LodDistantCache(cacheRoot(),world,
                             client.level.dimension().identifier().toString(),atlas.fingerprint(),client.getResourceManager());
                     generation=cache.generation();
                     // Already compiled sections need fresh received output after enabling/reopening the cache.
@@ -77,7 +106,7 @@ public final class LodDistantRenderer {
         if(metal==null) return;
         residency.beginFrame(metal.completedResourceSubmission());
         long budget=next.meshBudgetBytes(metal.metal().recommendedWorkingSetBytes(),metal.metal().currentAllocatedBytes(),residency.chargedBytes());
-        residency.setBudget(Math.max(1,Math.min(32L<<20,budget/2)));
+        residency.setBudget(Math.max(1,Math.min(MAX_GPU_BYTES,budget/2)));
         var current=cache;
         if(current!=null) {
             if(generation!=current.generation()) {
@@ -90,8 +119,8 @@ public final class LodDistantRenderer {
             owners.keySet().removeIf(key -> !residency.contains(key));
         }
         published=new Stats(current==null?null:current.stats(),draws,triangles,uploads,uploadBytes,failures,
-                residency.chargedBytes(),residency.residentCount(),frameDraws,frameSections);
-        frameDraws=0; frameSections=0;
+                residency.chargedBytes(),residency.residentCount(),frameDraws,frameSections,frameFarthestBlocks);
+        frameDraws=0; frameSections=0; frameFarthestBlocks=0;
     }
     public static void dirty(int x,int y,int z) {
         var current=cache;
@@ -109,10 +138,11 @@ public final class LodDistantRenderer {
                 if(mesh==null) continue;
                 var state=mesh.drawState();
                 if(state.primitiveTopology()!=PrimitiveTopology.QUADS || !state.format().equals(DefaultVertexFormat.BLOCK)
-                        || state.format().getVertexSize()!=LodDistantNode.STRIDE || state.vertexCount()%4!=0) return;
+                        || state.format().getVertexSize()!=LodDistantNode.STRIDE || state.vertexCount()%4!=0)
+                    throw new IllegalArgumentException("Unsupported distant vertex layout");
                 int length=Math.multiplyExact(state.vertexCount(),LodDistantNode.STRIDE);
                 bytes+=length;
-                if(bytes>LodDistantNode.MAX_BYTES) return;
+                if(bytes>LodDistantNode.MAX_BYTES) throw new IllegalArgumentException("Oversized distant section");
                 var buffer=mesh.vertexBuffer().duplicate();
                 byte[] copy=new byte[length]; buffer.get(copy);
                 if(ByteOrder.nativeOrder()!=ByteOrder.LITTLE_ENDIAN) throw new IllegalStateException("Unsupported host byte order");
@@ -120,7 +150,7 @@ public final class LodDistantRenderer {
             }
             current.capture(new LodDistantNode(new LodDistantNode.Key(0,section.x(),section.y(),section.z()),layers,0,1),ticket);
         } catch(IllegalArgumentException unsupported) {
-            current.invalidate(new LodDistantNode.Key(0,section.x(),section.y(),section.z()));
+            current.reject(new LodDistantNode.Key(0,section.x(),section.y(),section.z()));
         }
     }
     private static LodMeshResidency.Key key(LodDistantCache.Candidate c) {
@@ -131,16 +161,27 @@ public final class LodDistantRenderer {
         var current=cache;
         if(current==null || device==null || !settings.enabled()) return original;
         int loaded=Minecraft.getInstance().options.getEffectiveRenderDistance();
-        current.view(new LodDistantCache.View(camera.pos.x,camera.pos.y,camera.pos.z,loaded,horizon(),(long)settings.diskBudgetMiB()<<20));
+        long diskBudget = (long)settings.diskBudgetMiB()<<20;
+        float projectionX=camera.projectionMatrix.m00(), projectionY=camera.projectionMatrix.m11();
+        if (current.needsView(camera.pos.x,camera.pos.y,camera.pos.z,loaded,horizon(),diskBudget,
+                camera.yRot,camera.xRot,projectionX,projectionY)) {
+            var frustum = new net.minecraft.client.renderer.culling.Frustum(camera.cullFrustum);
+            current.view(new LodDistantCache.View(camera.pos.x,camera.pos.y,camera.pos.z,loaded,horizon(),diskBudget,
+                    camera.yRot,camera.xRot,projectionX,projectionY,k -> frustum.isVisible(
+                    new net.minecraft.world.phys.AABB(k.originX(),k.originY(),k.originZ(),
+                            k.originX()+k.blocks(),k.originY()+k.blocks(),k.originZ()+k.blocks()))));
+        }
         var result=current.takeResult();
         if(result!=null && result.generation()==current.generation()) selected=result.nodes();
         long allowance=switch(settings.backgroundWork()) { case LOW -> 256L<<10; case BALANCED -> 1L<<20; case HIGH -> 2L<<20; };
+        // Every supported node must eventually fit even at Low; at most one 4 MiB node then uploads.
+        allowance=Math.max(allowance,LodDistantNode.MAX_BYTES);
         int maximum=switch(settings.backgroundWork()) { case LOW -> 2; case BALANCED -> 4; case HIGH -> 8; };
         var visible=new ArrayList<LodDistantCache.Candidate>();
         for(var c:selected) {
             var k=c.node().key();
-            if(current.version(k)!=c.version() || !k.outside(camera.pos.x,camera.pos.z,(loaded+1)*16.0)
-                    || k.distanceSquared(camera.pos.x,camera.pos.y,camera.pos.z)>=Math.pow(horizon()*16.0,2)) continue;
+            if(current.version(k)!=c.version() || !k.outsideLoaded(camera.pos.x,camera.pos.z,loaded)
+                    || c.node().distanceSquared(camera.pos.x,camera.pos.y,camera.pos.z)>=Math.pow(horizon()*16.0,2)) continue;
             if(!camera.cullFrustum.isVisible(new net.minecraft.world.phys.AABB(k.originX(),k.originY(),k.originZ(),
                     k.originX()+k.blocks(),k.originY()+k.blocks(),k.originZ()+k.blocks()))) continue;
             visible.add(c);
@@ -186,6 +227,8 @@ public final class LodDistantRenderer {
                 frameDraws++;
             }
             frameSections+=entry.getKey().node().sections();
+            frameFarthestBlocks=Math.max(frameFarthestBlocks,Math.sqrt(entry.getKey().node()
+                    .distanceSquared(camera.pos.x,camera.pos.y,camera.pos.z)));
         }
         return new ChunkSectionsToRender(original.textureView(),original.drawGroupsPerLayer(),maxIndices,original.chunkSectionInfos());
     }

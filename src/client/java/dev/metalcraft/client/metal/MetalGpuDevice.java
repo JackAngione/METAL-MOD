@@ -606,6 +606,9 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		long allocationSize = (usage & GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER) != 0
 			? Math.addExact(size, 255L)
 			: size;
+		// MSL rounds uniform struct tails to 16 bytes, even when the last GLSL member
+		// ends at byte 12 or 56. Preserve the logical range while backing the padded type.
+		if ((usage & GpuBuffer.USAGE_UNIFORM) != 0) allocationSize = Math.addExact(allocationSize, 15L) & ~15L;
 		return new MetalGpuBuffer(usage, size, this.metal.createBuffer(allocationSize, storageMode));
 	}
 
@@ -802,6 +805,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			if (this.linearWorldSession != null) this.linearWorldSession.close();
 			this.commandEncoder.close();
 			dev.metalcraft.client.lod.LodLoadedRenderer.close(this);
+			dev.metalcraft.client.lod.LodDistantRenderer.close(this);
 			this.clearLodPipelines();
 			if (this.shaderPackRuntime != null) {
 				this.shaderPackRuntime.close();
