@@ -1,0 +1,58 @@
+
+> Configure project :
+Fabric Loom: 1.17.20
+
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses
+> Task :compileShaderSmokeJava
+> Task :processShaderSmokeResources NO-SOURCE
+> Task :shaderSmokeClasses
+
+> Task :metalFrameMetricsSmoke
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by dev.metalcraft.client.metal.MetalNative in an unnamed module (file:/Users/jackangione/Desktop/VULKAN%20SHADERS/build/classes/java/client/)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+2026-09-12 09:43:50.061 java[89438:4586830] Metal API Validation Enabled
+GPU frame capture passed: multi-buffer spans, empty/incomplete frames and phase isolation
+
+> Task :lodMetalSmoke
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by dev.metalcraft.client.metal.MetalNative in an unnamed module (file:/Users/jackangione/Desktop/VULKAN%20SHADERS/build/classes/java/client/)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+2026-09-12 09:43:50.401 java[89439:4586930] Metal API Validation Enabled
+[09:43:50] [main/INFO]: Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 0 bytes
+Metal uniform tails passed: logical 12/56-byte blocks, padded allocation, exact member readback
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.joml.MemUtil$MemUtilUnsafe (file:/Users/jackangione/.gradle/caches/modules-2/files-2.1/org.joml/joml/1.10.8/fc0a71dad90a2cf41d82a76156a0e700af8e4f8d/joml-1.10.8.jar)
+WARNING: Please consider reporting this to the maintainers of class org.joml.MemUtil$MemUtilUnsafe
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+Distance lighting contracts passed: 648 legacy/HDR, debug, fog, unoccluded and threshold cases; max channel error=0.001953125
+[09:43:51] [main/INFO]: Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 0 bytes
+LOD world-queue timeline passed: active-pass reservations, deferred residency, empty borrows, 20 submissions
+[09:43:51] [main/INFO]: Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 0 bytes
+[09:43:51] [main/INFO]: Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 0 bytes
+[09:43:51] [main/INFO]: Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 65536 bytes
+[09:43:51] [main/INFO]: Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 65536 bytes
+[09:43:51] [main/WARN]: LOD terrain pipeline declined metalcraft:smoke/lod_world; ordinary geometry remains active
+java.lang.IllegalArgumentException: Unsupported linear world shader source: minecraft:core/terrain.fsh
+	at dev.metalcraft.client.metal.LinearWorldShaders.verify(LinearWorldShaders.java:70)
+	at dev.metalcraft.client.metal.LodShaderSources.fragment(LodShaderSources.java:27)
+	at dev.metalcraft.client.metal.MetalGpuDevice.lambda$lodPipeline$0(MetalGpuDevice.java:684)
+	at java.base/java.util.HashMap.computeIfAbsent(HashMap.java:1229)
+	at dev.metalcraft.client.metal.MetalGpuDevice.lodPipeline(MetalGpuDevice.java:658)
+	at dev.metalcraft.client.metal.MetalLodWorldSmoke.run(MetalLodWorldSmoke.java:57)
+	at dev.metalcraft.client.lod.LodMetalSmoke.main(LodMetalSmoke.java:19)
+LOD world Metal passed: original vs merged BLOCK, no pack/Standard legacy/HDR, atlas mips, depth, odd sizes and reload retirement
+LOD Metal prototype passed: tiers 1/4, repeated atlas texture, bounded mips, odd dimensions, reverse-Z coverage and in-flight retirement
+
+BUILD SUCCESSFUL in 2s
+7 actionable tasks: 4 executed, 3 up-to-date

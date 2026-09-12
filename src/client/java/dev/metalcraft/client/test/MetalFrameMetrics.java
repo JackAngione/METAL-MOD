@@ -1,6 +1,7 @@
 package dev.metalcraft.client.test;
 
 import dev.metalcraft.client.metal.MetalPassCensus;
+import dev.metalcraft.client.metal.MetalGpuFrameCapture;
 import dev.metalcraft.client.metal.MetalStallProbe;
 import dev.metalcraft.client.metal.MetalTaskCensus;
 import dev.metalcraft.client.lod.LodLoadedRenderer;
@@ -72,6 +73,7 @@ public final class MetalFrameMetrics {
 	public static synchronized void beginCapture(final int warmupFrames) {
 		size = 0;
 		capturing = true;
+		MetalGpuFrameCapture.beginCapture();
 		warmupFramesRemaining = Math.max(1, warmupFrames);
 		previousFrameEndNs = 0L;
 		frameStartNs = 0L;
@@ -87,6 +89,7 @@ public final class MetalFrameMetrics {
 	public static synchronized void recordFrameStart(final long startNs) {
 		if (capturing) {
 			frameStartNs = startNs;
+			if (warmupFramesRemaining == 0) MetalGpuFrameCapture.beginFrame();
 		}
 	}
 
@@ -94,6 +97,7 @@ public final class MetalFrameMetrics {
 		if (!capturing) {
 			return;
 		}
+		MetalGpuFrameCapture.endFrame();
 		int slots = MetalStallProbe.slots();
 		if (size == cpuFrameTimes.length) {
 			cpuFrameTimes = Arrays.copyOf(cpuFrameTimes, size * 2);
@@ -143,7 +147,7 @@ public final class MetalFrameMetrics {
 		MetalStallProbe.setEnabled(false);
 		return Phase.of(name, Arrays.copyOf(cpuFrameTimes, size), Arrays.copyOf(frameIntervals, size),
 			Arrays.copyOf(outsideLoopTimes, size), Arrays.copyOf(stalls, size * MetalStallProbe.slots()),
-			tasks, passes, lodStart, LodLoadedRenderer.sample());
+			tasks, passes, lodStart, LodLoadedRenderer.sample(), MetalGpuFrameCapture.endCapture());
 	}
 
 	/** One source's contribution to a set of frames. */
@@ -221,13 +225,15 @@ public final class MetalFrameMetrics {
 		List<FrameDetail> worstFrames,
 		List<MetalTaskCensus.TaskKind> taskKinds,
 		List<MetalPassCensus.PassKind> passKinds,
-		LodPhase lod
+		LodPhase lod,
+		MetalGpuFrameCapture.Result gpuFrame
 	) {
 		static Phase of(final String name, final long[] cpuFrameTimesNs, final long[] frameIntervalsNs,
 				final long[] outsideLoopNs, final long[] stallsNs,
 				final List<MetalTaskCensus.TaskKind> taskKinds,
 				final List<MetalPassCensus.PassKind> passKinds,
-				final LodLoadedRenderer.Stats lodStart, final LodLoadedRenderer.Stats lodEnd) {
+				final LodLoadedRenderer.Stats lodStart, final LodLoadedRenderer.Stats lodEnd,
+				final MetalGpuFrameCapture.Result gpuFrame) {
 			long[] prepare = column(stallsNs, cpuFrameTimesNs.length, MetalStallProbe.Source.LOD_PREPARE, MetalStallProbe.FIELD_NANOS);
 			Arrays.sort(prepare);
 			LodPhase lod = new LodPhase(lodStart, lodEnd,
@@ -236,7 +242,7 @@ public final class MetalFrameMetrics {
 				prepare.length == 0 ? 0 : percentile(prepare, .99) / 1_000_000.0);
 			if (cpuFrameTimesNs.length == 0) {
 				return new Phase(name, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-					List.of(), List.of(), List.of(), taskKinds, passKinds, lod);
+					List.of(), List.of(), List.of(), taskKinds, passKinds, lod, gpuFrame);
 			}
 			long total = 0L;
 			for (long interval : frameIntervalsNs) {
@@ -300,7 +306,8 @@ public final class MetalFrameMetrics {
 				List.copyOf(worstFrames),
 				taskKinds,
 				passKinds,
-				lod
+				lod,
+				gpuFrame
 			);
 		}
 
@@ -402,7 +409,7 @@ public final class MetalFrameMetrics {
 					+ "\"p50AcquireMs\":%.3f,\"p99AcquireMs\":%.3f,"
 					+ "\"p50OutsideLoopMs\":%.3f,\"p99OutsideLoopMs\":%.3f,"
 					+ "\"phaseStalls\":[%s],\"worstOnePercentStalls\":[%s],\"worstFrames\":[%s],"
-					+ "\"tasks\":[%s],\"gpuPassSpans\":[%s],\"lod\":%s}",
+					+ "\"tasks\":[%s],\"gpuPassSpans\":[%s],\"lod\":%s,\"gpuFrame\":%s}",
 				this.name, this.frames, this.durationSeconds, this.averageFps, this.onePercentLowFps,
 				this.pointOnePercentLowFps, this.p50CpuMs, this.p95CpuMs, this.p99CpuMs,
 				this.p50IntervalMs, this.p99IntervalMs, this.worstIntervalMs, this.p50AcquireMs, this.p99AcquireMs,
@@ -412,7 +419,7 @@ public final class MetalFrameMetrics {
 				String.join(",", this.worstFrames.stream().map(FrameDetail::toJson).toList()),
 				String.join(",", this.taskKinds.stream().map(MetalTaskCensus.TaskKind::toJson).toList()),
 				String.join(",", this.passKinds.stream().map(MetalPassCensus.PassKind::toJson).toList()),
-				new com.google.gson.Gson().toJson(this.lod));
+				new com.google.gson.Gson().toJson(this.lod), new com.google.gson.Gson().toJson(this.gpuFrame));
 		}
 	}
 }

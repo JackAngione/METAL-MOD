@@ -3,9 +3,13 @@
 #ifndef LOD_SCALE
 #define LOD_SCALE 2
 #endif
+#ifndef FIXTURE_COLOR_GAIN
+#define FIXTURE_COLOR_GAIN 1
+#endif
 struct Fixture {
     float2 size;
     float motion;
+    float depthOffset;
 };
 struct FixtureTargets {
     float4 scene [[color(0)]];
@@ -23,12 +27,13 @@ fragment FixtureTargets fixture_geometry(ResolveVaryings in [[stage_in]], consta
     bool foreground = p.x > fixture.size.x * .62 + p.y * .12 + fixture.motion
         && p.x < fixture.size.x * .68 + p.y * .12 + fixture.motion;
     if (thin || foreground) viewDepth = 24.0;
+    if (viewDepth >= 128.0) viewDepth += fixture.depthOffset;
     float3 color = ((uint(p.x + fixture.motion) / 16 + uint(p.y) / 16) & 1) == 0
         ? float3(.36, .51, .22) : float3(.55, .43, .27);
     if (foreground) color = float3(.75,.15,.08);
     uint packed = uint(round(viewDepth / 1024.0 * 16777215.0));
     float2 normal = mc_encode_normal(foreground ? normalize(float3(.5,0,1)) : float3(0,0,1));
-    return {float4(color,1), float4(color,1.0/255.0), float4(normal,.5,float((packed>>16)&255)/255.0),
+    return {float4(color * FIXTURE_COLOR_GAIN,1), float4(color,1.0/255.0), float4(normal,.5,float((packed>>16)&255)/255.0),
         float4(0,1,float((packed>>8)&255)/255.0,float(packed&255)/255.0), .1 / viewDepth};
 }
 

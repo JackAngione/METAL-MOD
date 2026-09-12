@@ -1,0 +1,135 @@
+{
+  "localArchive": "build/reports/lod-horizon-images",
+  "images": [
+    {
+      "name": "0000_metalcraft-lod-horizon-explored.png",
+      "sha256": "91064872d4d7b85f39841a72a9def8b844af46f7b463966a14d8c02b965ee785",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0001_metalcraft-lod-horizon-32.png",
+      "sha256": "85ace5f7c8eff528d8dd0081c85d9116ecb79eb237a0a4e2fdadd19efb039eab",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0002_metalcraft-lod-horizon-64.png",
+      "sha256": "5aedadd4c640f82dde09dd3334cd43218740e38cd7a13a5144373800683086db",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0003_metalcraft-lod-horizon-128.png",
+      "sha256": "ce0df12f44ba2c9275c867a2b34e4a48a83efcd8e01e6a813db61294fbbf84dd",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0004_horizon-128-metalcraft-standard-half-false-lod-false#1.png",
+      "sha256": "700681dd2dca30a3ac2df053d93f4ffb63249200182a051fe70037edd2001fb5",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0005_horizon-128-metalcraft-standard-half-false-lod-true#1.png",
+      "sha256": "d9825d2a92569439675adf085925da736dbfef0dd6eb9b32559f442cd710d7e6",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0006_horizon-128-metalcraft-standard-half-true-lod-false#1.png",
+      "sha256": "77be391e8000bace556bd5ded1cb3ea49b3801ca626dab5bbb6419e5fc05904f",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0007_horizon-128-metalcraft-standard-half-true-lod-true#1.png",
+      "sha256": "6f21e33e10510eef26c994ed7102431b3c9addeaa0baf8a99d173ca6be09232d",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0008_horizon-128-none-half-false-lod-false#1.png",
+      "sha256": "20eabf667b534077ba7eec336c041ecd93d4f3428d409b1c0a29bdb2e5725baa",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0009_horizon-128-none-half-false-lod-true#1.png",
+      "sha256": "baf63b527ca08d6b2804f8769ae18bc4fee19805413210cc968388f5aae3b041",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0010_horizon-128-none-half-true-lod-false#1.png",
+      "sha256": "daf9521793c12eb5e6aa66ea25271f8fb556cf12ca46c0a168b008f718286af8",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0011_horizon-128-none-half-true-lod-true#1.png",
+      "sha256": "5b732eb6b5931669b7aa3d8bae31ba5445c607dd8104ef77f8c3c76f1ce66df6",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0012_metalcraft-lod-horizon-256.png",
+      "sha256": "3c9789f8d246ad213ed1f5fb720a9ae103c6d3005f68d2fe0d3bc97680e2a0b8",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0013_horizon-256-metalcraft-standard-half-false-lod-false#1.png",
+      "sha256": "a140e933292c03f2c80fc7c0ec3326f2f984a196a94e81a47c1a0271e1470555",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0014_horizon-256-metalcraft-standard-half-false-lod-true#1.png",
+      "sha256": "c8006c8be0765c5853aa9676706a5ba66e2dc67ad81300d09b496661e40b8b6a",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0015_horizon-256-metalcraft-standard-half-true-lod-false#1.png",
+      "sha256": "1f508f54630c746e6116a47bcff5401deab644f7e71dc1d374f4526bd7267695",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0016_horizon-256-metalcraft-standard-half-true-lod-true#1.png",
+      "sha256": "819103b8879c3195d3238e98dca1d6e4fe7518d7eb21b8da4471dd6caf27ce5b",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0017_horizon-256-none-half-false-lod-false#1.png",
+      "sha256": "4004c1012af065f9b896ca775cb2de58deee043b162a2b29ad5c1ebb97d4b25f",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0018_horizon-256-none-half-false-lod-true#1.png",
+      "sha256": "66bd8388591f5f636bade4ea65e242b23b49e406dca8a3908be108840becfc07",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0019_horizon-256-none-half-true-lod-false#1.png",
+      "sha256": "9f1223c25cc8332d02327054d2ad5f0d66aa75db5f7a9ada4b9b06dee51fad63",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0020_horizon-256-none-half-true-lod-true#1.png",
+      "sha256": "37df37cf690cb92081ee2069670ccf8a3a349e4821e7c6ef459ac6e7ffc68b0c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0021_metalcraft-lod-horizon-none.png",
+      "sha256": "67ba2448bfa204f45402831b93c75bff96a4809d8f04889d395d5cd7d78a97fc",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0022_metalcraft-lod-horizon-edited.png",
+      "sha256": "f2e26cc290f9d266481af20cc39106e5392ddaa74a06cd6c22c62f633ba13342",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0023_metalcraft-lod-horizon-reloaded.png",
+      "sha256": "92735348b214c960187f1d11710433be8a3e90ea7442143ad99a3665c16a7a3c",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0024_metalcraft-lod-horizon-off.png",
+      "sha256": "78f5bb7a48826de6137c8ef4f543b087584591a409c9fdc6aac6e48f546862f6",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0025_metalcraft-lod-horizon-reopened.png",
+      "sha256": "5950c0ba33ad0704b44340662cc81c543bd8008650fb6967670cea762e2cabcb",
+      "retainedInEvidence": false
+    }
+  ]
+}

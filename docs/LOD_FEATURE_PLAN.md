@@ -1,8 +1,12 @@
 # LOD feature implementation plan
 
 Status: P1–P5 complete for conservative loaded geometry and composition compatibility.
-P6 feasibility evaluation is complete; its implementation remains unchecked and deferred.
+P6 is complete in the plan-authorized full-resolution reduced-lighting scope;
+half/quarter pixel-resolution shading remains deferred.
 P7 functional cache acceptance is complete; P8 release acceptance remains open.
+Current P8 blocker: the Mac is locked, presentation pacing is inconsistent, and the
+corrected fullscreen harness still needs a fresh live matrix. Geometry savings also
+remain far below the provisional shipping target.
 Geometry is available only with the experimental validation flag;
 release capability gates remain closed.
 
@@ -175,8 +179,14 @@ resources. Changing horizon never changes Minecraft render/simulation settings.
 Progress protocol: claim a task with owner/status before implementation; record
 partial progress or blockers beneath it; check it off only with validation evidence
 (commands, machine, scenario, and artifacts). Update this plan in the same change.
-P1–P5 and P7 are complete; `/root` owns P6 and P8 evaluation.
+P1–P7 are complete within their explicitly recorded scopes; Codex owns P8 qualification.
 Earlier partial-progress entries below are retained as dated evidence, not current blockers.
+
+Continuation claimed by Codex (2026-09-12): P6 implementation and P8 release
+qualification. Investigate a lower-overhead Metal shading design against the existing
+paired cost/image fixtures, repair steady-state benchmark qualification, and collect
+the missing release measurements. Both checkboxes stay open until their acceptance
+criteria pass; prior rejected prototypes are evidence, not a completed implementation.
 
 Continuation claimed by `/root` (2026-09-11): finish P7 cache ownership, global
 eviction, cancellation, visible scheduling and the generated-world horizon route;
@@ -368,12 +378,53 @@ Final live checks remain in progress at this checkpoint.
     Full-terrain triangle reductions were 0.508% merged and 0.511% split; these are
     composition coverage runs, not controlled performance A/B measurements.
     `./gradlew build` passed in 12s with CPU and production Metal GPU fixtures.
-- [ ] P6 — Distance-dependent shading resolution (implementation deferred).
+- [x] P6 — Reduced distant shading work (full-resolution fallback accepted, 2026-09-12).
+  - Scope revision follows the fallback in “Texture and shading resolution”: retain
+    full-resolution rasterization and skip identity lighting beyond short shadow
+    volumes. This is **not** half/quarter pixel-resolution LOD. It adds no targets,
+    history, band transitions or resource lifetime; depth and near shading stay exact.
+    Debug views and shadow distances >=128 compile/use the original path.
+  - Production acceptance: `./gradlew build lodShadingBenchmark` passes on M4 Max/64 GB.
+    Three paired repeats at 4K/default 96-block shadows reduce all-pass fixture GPU
+    time by **4.08%** (median of repeat changes). At 256-block shadows the branch is
+    compiled out; +0.15% is measurement noise, not a distinct long-shadow algorithm.
+    Moving ordinary fixtures retain exact color/depth. 648 additional threshold,
+    fog, debug and legacy/HDR cases retain exact depth and <=0.001953125 channel error.
+    Native API validation passes `metalFrameMetricsSmoke lodMetalSmoke` and the full
+    shading cost/image fixture. [Samples, images and validation](evidence/lod/shading-distance/metrics.json).
+  - Generated NORMAL-world acceptance at 16/16, Default/Metal, with native API
+    validation: loaded lifecycle (73s), merged water/cache (279s) and split water/cache
+    (276s) all pass. Motion, FOV/radius, edits, resize/fullscreen/half, reload,
+    dimensions/reopen, water depth/refraction/underwater/HDR and hand/HUD are covered.
+    Zero upload failures and zero charged GPU bytes on close. Representative loaded,
+    half-resolution, refraction and underwater images inspected. [Evidence](evidence/lod/fallback-validation/).
+  - The unrelated `shaderTranslationSmoke` texture-buffer/2D binding assertion under
+    `MTL_DEBUG_LAYER=1` reproduces with the original HEAD native library; normal build,
+    targeted native validation and live suites pass. It is a separate validation debt.
+  - Continuation owner: Codex (2026-09-12). A sixth, coordinate-verified direct
+    SIMD lookup removes the earlier ballot/search loop. The three-repeat paired
+    Standard Metal fixture still regresses at 4K: +13.12% with 96-block shadows,
+    +25.02% with 256-block shadows. The latter also fails the image budget
+    (maximum channel error 0.03564; 158,088 observations above 0.02).
+    Full-resolution depth is unchanged, with zero near-pixel errors above 0.02.
+    The probe remains outside runtime sources. `./gradlew lodShadingBenchmark`
+    passes execution in 21s on M4 Max/64 GB; this does not pass P6 acceptance.
+    [Raw paired samples and images](evidence/lod/shading-direct/metrics.json).
+  - Earlier fallback implementation claim (Codex, 2026-09-12): the plan explicitly
+    permits full-resolution rasterization with reduced distant material work when
+    reconstruction erases the savings. An identity-lighting fast path preserves
+    the existing scene seed beyond the shadow volume. An isolated probe saves
+    about 5% at 4K/default shadows with identical moving-fixture color and depth.
+    Compile it out for long shadow distances using the existing recompile option;
+    the runtime uniform-only guard costs 2% when no pixels qualify. Validate the
+    production specialization, fog/debug/color contracts and generated-world
+    lifecycle before closing this revised P6 scope. Half/quarter pixel shading
+    remains deferred and must not be advertised as implemented.
   - [x] Feasibility evaluation completed, 2026-09-12: retain full-resolution
     rasterization and the existing merged Standard resolve. Five measured approaches
     fail the all-pass GPU-cost gate; the half/quarter approaches also fail the
-    extended-shadow image budget. The implementation checkbox remains open because
-    those acceptance criteria have not passed.
+    extended-shadow image budget. Those failures keep pixel-resolution shading
+    deferred; the validated full-resolution fallback above closes the revised scope.
     Half/Quarter/Auto controls and the multiresolution capability remain unavailable.
     A future implementation must pass moving silhouettes, transparent intersections,
     near-detail preservation, band hysteresis and net GPU improvement including every
@@ -456,6 +507,83 @@ Final live checks remain in progress at this checkpoint.
   from evidence, document tradeoffs/limitations, and update README. Acceptance: all
   correctness gates pass and published targets are met or explicitly revised with
   measured results; do not market unmeasured extreme-distance performance.
+  - Continuation owner: Codex (2026-09-12). Implementation/instrumentation complete;
+    release qualification incomplete. Awaiting an unlocked display for a fresh matrix.
+    - Re-enable regression claimed: the new paired horizon route fails after
+      disabling and re-enabling in the same world (`cache=null`, enabled settings).
+      The renderer's reopen condition omits the absent-cache state when world,
+      atlas and device are unchanged. A focused live toggle assertion now tests
+      cache recreation and restored distant ownership before performance capture.
+      [Original failing route](evidence/lod/horizon-reenable-failure/lod-horizon.json).
+      The focused toggle fails before the fix and passes afterward (78s each,
+      NORMAL seed `metalcraft`, 16/16 Default/Metal, `MTL_DEBUG_LAYER=1`). Cache
+      absence now triggers reopening even when world/device/atlas are unchanged.
+      The four-tick reopen assertion and restored-draw assertion remain in the
+      full horizon route. [Before/after evidence](evidence/lod/horizon-reenable-failure/validation.txt).
+    - [x] Nonblocking GPU frame distributions: group render-thread submissions
+      by frame and report first-start/last-end spans, raw samples and p50/p95/p99.
+      Pending, invalid, empty and overflow frames are explicit; phase generations
+      reject late callbacks. Real native completion fixtures pass multi-buffer,
+      empty/incomplete-frame and phase-isolation checks. `./gradlew build` passes.
+    - [x] Worker build timing, CPU reservation/retention high-water charges, OS
+      resident/physical-footprint process peaks, and thermal-state provenance are
+      reported with their measurement scope. No sampled GPU allocation is called
+      an allocation peak.
+    - [ ] Correct the receive/render readiness contract, explicitly select
+      windowed/fullscreen dimensions, warm the full camera pan, and collect the
+      Standard/None × 1080p/native × full/half × off/on matrix with three repeats.
+      Initial readiness probe receives all 1,057 server-tracked chunks and drains
+      light/render queues. Its saved fullscreen state overrode the 1080p request;
+      actual 3840×2160 dimensions are retained, not mislabeled as 1080p. The first
+      windowed follow-up exposed insufficient behind-camera warm-up (444 visible
+      sections, below 600); that run is rejected. A full pan now primes rendering.
+      [Probe and rejected run](evidence/lod/release-readiness-probe/metrics.json).
+      Eight 1080p cases pass receive/render/GPU-sample capture checks. The eighth initially completed
+      its phases/world close but crashed in GLFW during Fabric's final window-size
+      reset; its nonzero exit rejects that attempt. Exact unchanged retry passes;
+      the cleanup crash's root cause remains unresolved.
+      [Crash, invocation and rejected timing data](evidence/lod/window-reset-failure/validation.txt).
+      Presentation/acquire pacing differs between several pairs despite identical
+      requested controls, so the large FPS/GPU-span changes are not release evidence.
+      Computer-use reports the Mac locked; phase-by-phase lock/focus state was not
+      recorded. [Eight diagnostic captures](evidence/lod/release-windowed-diagnostic/validation.txt).
+      The first native case is rejected: Fabric resizeWindow overrides fullscreen,
+      producing 3840×2104/windowed. Fullscreen now skips windowed resize and verifies
+      actual GLFW monitor attachment before capture. `./gradlew build` passes (15s);
+      live verification remains pending unlock. [Failure and correction](evidence/lod/window-mode-failure/validation.txt).
+    - [x] Paired warm-cache 128/256-chunk horizon measurements at 16/16, including
+      Standard/None and full/half rendering, with actual represented-section counts.
+      The new optional horizon benchmark rejects missing tracked chunks, unsettled
+      GPU residency, incomplete timing and lost/budget-exceeding distant draws.
+      Final 48 captures and lifecycle pass in 12m37s on M4 Max/64 GB at native
+      3840×2160, with Standard/None and full/half scenes, default 2 GiB disk budget.
+      Every repeat represents 1,007 sections at 128 chunks and 1,001 at 256;
+      these are explored patches, not dense circles. GPU coverage is >=99.76%,
+      thermal state is nominal, uploads never fail, and both closes/clear retain
+      zero distant GPU bytes. Peak OS process physical footprint is 5.39 GiB.
+      Median interval changes: 128 chunks +25.03%/+16.46% Standard full/half,
+      +28.02%/+17.34% None full/half; 256 chunks +21.38%/+15.14% Standard,
+      +5.20%/−1.97% None. All p99 changes are within +5.17%; apparent small
+      improvements are timing variability. 128/full Standard is borderline against
+      +25%, and 128/full None exceeds that provisional budget by 3 percentage points
+      (0.30 ms absolute cost). No dense-coverage or universal performance claim follows.
+      [Matched summaries and repeat changes](evidence/lod/release-horizon/summary.json).
+      Inspected 128 off/on, 256 on and repaired/reloaded images: the remembered patch
+      is visible, with unknown gaps and omitted distant fluids explicit. Lock/focus
+      was not sampled during this earlier run; repeat under verified presentation
+      conditions before using its frame-time figures for release acceptance.
+    - [ ] Remaining release qualification: fresh stable-presentation 16-case matrix;
+      pre-LOD disabled-overhead baseline; pass or explicitly revise loaded-geometry
+      targets with adequate evidence; dense horizon/repair-churn throughput and
+      transient GPU/disk peaks; lower-memory hardware when available; resolve the
+      native-validation sampler assertion and intermittent GLFW cleanup failure.
+      The eight diagnostic scenes save only about 0.13–0.23% of distant triangles;
+      preset tuning alone has not established the proposed 50% saving. Defaults stay
+      LOD off, Balanced, full shading, 16-chunk horizon; capability gates stay closed.
+      Final local checkpoint: normal `./gradlew build` passes in 15s after the
+      fullscreen correction, Python runners compile, and `git diff --check` passes.
+      No benchmark process remains active. Development options are reset to 16/16,
+      LOD off, a 16-chunk horizon and the default 2 GiB disk budget.
   - Owner: `/root`. Status: partially evaluated; release criteria unmet (2026-09-11). Added explicit
     LOD-on/off benchmark configuration, whole-terrain/distant triangle counters and
     per-frame LOD preparation percentiles. A three-repeat Standard near-4K A/B pair
@@ -491,7 +619,8 @@ Final live checks remain in progress at this checkpoint.
     broader release-performance matrix.
   - Final verification: `./gradlew build` passes in 11s on M4 Max after all runtime,
     native batching, smoke, and benchmark-report changes; `git diff --check` passes.
-    The development configuration is left with LOD disabled. P6–P8 remain unchecked.
+    At that earlier checkpoint the development configuration was left with LOD disabled
+    and P6–P8 were unchecked. See the current completion scopes and blockers above.
 
 Dependencies: P1 → P2/P3 → P4 → P5 → P6 evaluation; P7 builds on P4/P5 and does not require shading LOD.
 P8 requires P2–P7 correctness and the recorded P6 scope decision. A geometry/cache
@@ -529,6 +658,12 @@ counts by tier, build latency, upload bytes/time, GPU allocations, CPU heap/cach
 disk usage, and actual visible terrain coverage. Capture at least three repeats.
 
 Provisional shipping targets:
+
+User clarification (2026-09-12): a slight performance decrease is acceptable when
+large LOD horizons add visible terrain. Extended-horizon acceptance measures that
+tradeoff against the 16-chunk baseline; it does not require a speedup while drawing
+more terrain. Keep the provisional 25% median / 35% p99 comparison below as an
+explicit reporting budget, and retain image, bounded-resource and correctness gates.
 
 - LOD disabled: no more than 2% median or 5% p99 frame-time regression versus baseline.
 - Balanced at 4K, 16/16 in terrain-heavy scenes: at least 50% fewer distant terrain

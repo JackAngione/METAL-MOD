@@ -85,7 +85,9 @@ public final class LodDistantRenderer {
         if (!LodCapabilities.HORIZON_EXPERIMENTAL) return;
         Minecraft client=Minecraft.getInstance();
         boolean enabled=metal!=null && next.enabled() && next.diskCache() && next.horizonChunks()>16 && client.level!=null;
-        if (!enabled || client.level!=level || atlas!=LodAtlas.current() || device!=metal) {
+        // Disabling keeps the world/device identity but closes the cache. Re-enabling
+        // in that same world must recreate it, even when those identities are unchanged.
+        if (!enabled || cache==null || client.level!=level || atlas!=LodAtlas.current() || device!=metal) {
             if(cache!=null) cache.close();
             cache=null; selected=List.of(); owners.clear(); session++;
             residency.invalidate(key -> true);

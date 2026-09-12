@@ -46,16 +46,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	private static final int CAPTURE_WARMUP_FRAMES = 30;
 	/** Empty tasks submitted during the lifecycle capture to prove the task census records. */
 	private static final int CENSUS_PROBE_TASKS = 4;
-	private static final int CHUNK_LOAD_TIMEOUT_TICKS = 24000;
-	private static final double MINIMUM_LOADED_CHUNK_FRACTION = 0.75;
-	/**
-	 * The wait ends when the loaded fraction stops climbing rather than when it reaches a target.
-	 * The server tracks a slightly smaller region than the (2r+1)^2 square the fraction is measured
-	 * against, so the fraction plateaus below 1.0 at a value that depends on the version's chunk
-	 * tracking, and any fixed target would either stop early or spin until the deadline.
-	 */
-	private static final double SETTLE_PROGRESS_EPSILON = 0.005;
-	private static final int SETTLE_STALL_CHECKS = 8;
+	private static final int CHUNK_LOAD_TIMEOUT_TICKS = 2400;
 	/**
 	 * How much terrain must be loaded before the streaming capture starts.
 	 *
@@ -315,6 +306,7 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		private int drawableWidth;
 		private int drawableHeight;
 		private boolean chunkLoadAndRenderSettlePassed;
+		private final com.google.gson.JsonObject readiness = new com.google.gson.JsonObject();
 
 		private MetalRealWorldBenchmark(final ClientGameTestContext context, final String backend) {
 			this.context = context;
@@ -374,8 +366,16 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				int[] resolution = this.applyDisplaySettings();
 				this.reloadResourcePacks();
 				double loadedFraction = this.awaitLoadedTerrain(world);
+				// Receiving chunks and draining the current queue does not warm terrain behind
+				// the camera. Prime the entire pan route before any steady-state comparison.
+				for (int tick = 0; tick < 120; tick++) {
+					this.context.getInput().lookAt(site.yaw() + tick * 3.0F, this.pitch);
+					this.tick(world);
+				}
 				this.context.getInput().lookAt(site.yaw(), this.pitch);
-				this.context.waitTicks(5);
+				this.context.waitTicks(100);
+				world.getConnection().waitForChunksRender(false, 2400);
+				this.readiness.addProperty("panWarmupTicks", 120);
 				this.cameraSamples.add("initial", this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.camera()));
 				if (Math.abs(this.cameraSamples.getAsJsonObject("initial").get("pitch").getAsFloat() - this.pitch) > 0.01F) {
 					throw new AssertionError("Benchmark camera did not adopt requested pitch");
@@ -414,7 +414,18 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		/** @return the effective render resolution as {width, height} */
 		private int[] applyDisplaySettings() {
 			int[] requested = requestedResolution(this.context);
-			this.resizeToPixels(requested);
+			boolean fullscreen = Boolean.getBoolean("metalcraft.benchmarkFullscreen");
+			if (fullscreen) {
+				// Fabric resizeWindow forces windowed mode. Native fullscreen must retain
+				// the monitor's drawable and only apply the separate scene render scale.
+				this.context.runOnClient(client -> {
+					if (!client.getWindow().isFullscreen()) client.getWindow().toggleFullScreen();
+				});
+				this.context.waitFor(client -> GLFW.glfwGetWindowMonitor(client.getWindow().handle()) != 0L, 200);
+				this.context.runOnClient(MetalCraftRenderResolution::apply);
+			} else {
+				this.resizeToPixels(requested);
+			}
 			this.context.runOnClient(client -> {
 				// The preset rewrites the individual graphics options, so it has to be applied first.
 				client.options.graphicsPreset().set(GraphicsPreset.FANCY);
@@ -439,6 +450,11 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 				client.invalidateSurfaceConfiguration();
 			});
 			int[] achieved = this.awaitConfiguredDrawable(requested);
+			this.context.runOnClient(client -> {
+				if (client.getWindow().isFullscreen() != fullscreen
+						|| (GLFW.glfwGetWindowMonitor(client.getWindow().handle()) != 0L) != fullscreen)
+					throw new AssertionError("Benchmark window mode did not match its requested presentation mode");
+			});
 			LOGGER.info("Metal benchmark: rendering at {}x{}, {} chunks render distance, {} chunks simulation distance",
 				achieved[0], achieved[1], this.renderDistance, this.simulationDistance);
 			return achieved;
@@ -572,73 +588,44 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 					+ "and the benchmark would measure a world far smaller than it claims");
 			}
 
-			int expected = (2 * this.renderDistance + 1) * (2 * this.renderDistance + 1);
-			double fraction = 0.0;
-			double best = 0.0;
-			int stalledChecks = 0;
+			// The server's rounded tracking footprint is the authoritative receive contract.
+			// Fabric requireLoaded=true instead checks square corners the server need not send.
+			List<net.minecraft.world.level.ChunkPos> tracked = world.getServer().computeOnServer(server -> {
+				var positions = new ArrayList<net.minecraft.world.level.ChunkPos>();
+				server.getPlayerList().getPlayers().getFirst().getChunkTrackingView().forEach(positions::add);
+				return List.copyOf(positions);
+			});
+			if (tracked.isEmpty()) throw new AssertionError("Server tracking footprint is empty");
+			int missing = tracked.size();
 			int captureStartedTick = -1;
 			boolean captureTaken = false;
 			for (int tick = 0; tick < CHUNK_LOAD_TIMEOUT_TICKS; tick++) {
 				this.tick(world);
 				if (captureStartedTick >= 0 && tick - captureStartedTick >= this.phaseTicks) {
-					this.finishStreamingCapture();
-					captureStartedTick = -1;
-					captureTaken = true;
+					this.finishStreamingCapture(); captureStartedTick = -1; captureTaken = true;
 				}
-				if (tick % 100 != 0) {
-					continue;
-				}
-				fraction = this.loadedChunkFraction(expected);
-				if (tick % 1000 == 0) {
-					LOGGER.info("Metal benchmark: streaming terrain, {} of the render distance loaded",
-						format(fraction));
-				}
-				if (!captureTaken && captureStartedTick < 0 && fraction >= STREAMING_CAPTURE_START_FRACTION) {
+				if (tick % 20 != 0) continue;
+				missing = this.context.computeOnClient(client -> (int)tracked.stream()
+					.filter(pos -> !client.level.hasChunk(pos.x(), pos.z())).count());
+				if (missing == 0) break;
+				if (!captureTaken && captureStartedTick < 0 && 1.0 - (double)missing / tracked.size() >= STREAMING_CAPTURE_START_FRACTION) {
 					this.context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(CAPTURE_WARMUP_FRAMES));
 					captureStartedTick = tick;
 				}
-				if (fraction > best + SETTLE_PROGRESS_EPSILON) {
-					best = fraction;
-					stalledChecks = 0;
-				} else if (++stalledChecks >= SETTLE_STALL_CHECKS && fraction >= MINIMUM_LOADED_CHUNK_FRACTION) {
-					LOGGER.info("Metal benchmark: terrain settled at {} of the render distance", format(fraction));
-					break;
-				}
+				if (tick % 200 == 0) LOGGER.info("Metal benchmark: {} / {} server-tracked chunks missing", missing, tracked.size());
 			}
-			// The settle can end mid-window, and a world small enough to load before the start
-			// fraction is reached never opens one. Both leave the capture to be closed here.
-			if (captureStartedTick >= 0) {
-				this.finishStreamingCapture();
-			} else if (!captureTaken) {
-				LOGGER.warn("Metal benchmark: terrain settled before {} of the render distance was "
-					+ "loaded, so no streaming capture was taken", format(STREAMING_CAPTURE_START_FRACTION));
-			}
-
-			try {
-				// waitFor signals a deadline with AssertionError, which is an Error rather than an
-				// exception, so this has to catch the error branch explicitly.
-				world.getConnection().waitForChunksRender(true, 2400);
-				this.chunkLoadAndRenderSettlePassed = true;
-			} catch (AssertionError error) {
-				LOGGER.warn("Metal benchmark: combined chunk-load/render settle timed out; "
-					+ "steady-state readiness is unverified and these results are diagnostic only");
-			}
+			if (captureStartedTick >= 0) this.finishStreamingCapture();
+			this.readiness.addProperty("trackedChunks", tracked.size());
+			this.readiness.addProperty("missingTrackedChunks", missing);
+			this.readiness.addProperty("contract", "Every chunk in the server tracking footprint received; Fabric light queue and renderer compile queue drained");
+			if (missing != 0) throw new AssertionError("Benchmark has " + missing + " missing server-tracked chunks; refusing unqualified timings");
+			world.getConnection().waitForChunksRender(false, 2400);
+			this.chunkLoadAndRenderSettlePassed = true;
+			this.readiness.addProperty("lightAndRenderQueuesDrained", true);
+			LOGGER.info("Metal benchmark: all {} server-tracked chunks received, light/render queues drained", tracked.size());
 			this.context.waitTicks(100);
 
-			fraction = this.loadedChunkFraction(expected);
-			LOGGER.info("Metal benchmark: {} of the {} chunks inside the render distance are loaded",
-				format(fraction), expected);
-			if (fraction < MINIMUM_LOADED_CHUNK_FRACTION) {
-				throw new AssertionError("Only " + format(fraction) + " of the render distance is loaded, "
-					+ "below the " + MINIMUM_LOADED_CHUNK_FRACTION + " minimum; the frame would be mostly "
-					+ "empty world and the measurement would not describe real play");
-			}
-			return fraction;
-		}
-
-		private double loadedChunkFraction(final int expected) {
-			int loaded = this.context.computeOnClient(client -> client.level.getChunkSource().getLoadedChunksCount());
-			return Math.min(1.0, (double)loaded / expected);
+			return 1.0;
 		}
 
 		/**
@@ -780,7 +767,9 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			Path output = Path.of("benchmarks", "metalcraft-" + this.backend.toLowerCase(Locale.ROOT) + ".json");
 			var report = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
 			report.add("environment", this.context.computeOnClient(ignored -> MetalBenchmarkEnvironment.describe()));
-			report.addProperty("routeVersion", 2);
+			report.addProperty("routeVersion", 3);
+			report.add("readiness", this.readiness);
+			report.addProperty("gpuFrameContract", "First GPU start to last GPU end of buffers committed on the render thread inside each frame; includes gaps, never sums overlapping spans; pending/invalid/empty/overflow frames excluded and counted");
 			report.addProperty("worldPreset", "minecraft:normal");
 			report.addProperty("chunkLoadAndRenderSettlePassed", this.chunkLoadAndRenderSettlePassed);
 			report.addProperty("requestedPitchDegrees", this.pitch);

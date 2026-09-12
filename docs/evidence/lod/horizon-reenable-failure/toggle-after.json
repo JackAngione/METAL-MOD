@@ -1,0 +1,87 @@
+{
+  "explored": {
+    "cache": {
+      "ready": true,
+      "captured": 3590,
+      "saved": 1483,
+      "cacheReads": 404,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 126697,
+      "queuedNodes": 8,
+      "diskBytes": 536586858,
+      "corrupt": 0,
+      "evictions": 1141,
+      "indexedNodes": 1654
+    },
+    "draws": 7672,
+    "triangles": 89697188,
+    "uploads": 2,
+    "uploadBytes": 2618896,
+    "uploadFailures": 0,
+    "gpuBytes": 2618896,
+    "residentNodes": 2,
+    "frameDraws": 4,
+    "frameSections": 16,
+    "frameFarthestBlocks": 1547.6503753647562
+  },
+  "horizon32": {
+    "cache": {
+      "ready": true,
+      "captured": 3877,
+      "saved": 1697,
+      "cacheReads": 1691,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 0,
+      "queuedNodes": 0,
+      "diskBytes": 536654604,
+      "corrupt": 0,
+      "evictions": 1276,
+      "indexedNodes": 1953
+    },
+    "draws": 50455,
+    "triangles": 470524630,
+    "uploads": 125,
+    "uploadBytes": 71470224,
+    "uploadFailures": 0,
+    "gpuBytes": 71470224,
+    "residentNodes": 125,
+    "frameDraws": 106,
+    "frameSections": 723,
+    "frameFarthestBlocks": 467.2027985984771
+  },
+  "camera32": {
+    "x": -1535.5,
+    "y": 236.0,
+    "z": 256.5,
+    "yaw": -180.0,
+    "pitch": 3.0
+  },
+  "reenabled": {
+    "cache": {
+      "ready": true,
+      "captured": 284,
+      "saved": 16,
+      "cacheReads": 72,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 3485816,
+      "queuedNodes": 271,
+      "diskBytes": 536654604,
+      "corrupt": 0,
+      "evictions": 0,
+      "indexedNodes": 1953
+    },
+    "draws": 50796,
+    "triangles": 473951084,
+    "uploads": 133,
+    "uploadBytes": 79646336,
+    "uploadFailures": 0,
+    "gpuBytes": 8176112,
+    "residentNodes": 8,
+    "frameDraws": 15,
+    "frameSections": 143,
+    "frameFarthestBlocks": 360.433744768459
+  }
+}

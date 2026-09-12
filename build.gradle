@@ -97,6 +97,17 @@ tasks.named('check') {
 	dependsOn tasks.named('lodMetalSmoke')
 }
 
+tasks.register('metalFrameMetricsSmoke', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.metal.MetalGpuFrameCaptureSmoke'
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('metalFrameMetricsSmoke')
+}
+
 // Isolated P6 cost experiment; timings are evidence, never a machine-dependent build gate.
 tasks.register('lodShadingBenchmark', JavaExec) {
 	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
@@ -139,6 +150,9 @@ def benchmarkProperties = [
 	metalTestLodHorizon: 'metalcraft.testLodHorizon',
 	metalBenchmarkUnlocked: 'metalcraft.benchmarkUnlocked',
 	metalBenchmarkHalfResolution: 'metalcraft.benchmarkHalfResolution',
+	metalBenchmarkFullscreen: 'metalcraft.benchmarkFullscreen',
+	metalLodHorizonBenchmark: 'metalcraft.lodHorizonBenchmark',
+	metalLodHorizonToggleProbe: 'metalcraft.lodHorizonToggleProbe',
 	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
 	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',
 	metalBenchmarkResolution: 'metalcraft.benchmarkResolution',

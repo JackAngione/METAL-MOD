@@ -1,0 +1,6 @@
+Rejected native-fullscreen matrix capture, 2026-09-12.
+Requested fullscreen=true / 3840x2160; achieved fullscreen=false / 3840x2104.
+The renderer completed the route, but the matrix correctly rejected the requested-setting mismatch.
+Fabric's resizeWindow calls its setWindowedSize hook, which clears the fullscreen field.
+The benchmark now skips this windowed resize for native fullscreen, waits for an actual GLFW monitor attachment, applies scene scaling, and asserts the window mode before accepting capture.
+Live verification of the correction is pending an unlocked display. The Mac was reported locked by computer-use during qualification, and presentation pacing differed between earlier pairs.

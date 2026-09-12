@@ -8,6 +8,7 @@
 #import <stdatomic.h>
 #import <float.h>
 #import <math.h>
+#import <mach/mach.h>
 
 #define MC_EXPORT __attribute__((visibility("default")))
 
@@ -578,6 +579,49 @@ typedef struct {
  */
 static _Atomic uint64_t mc_gpu_nanos;
 static _Atomic uint64_t mc_gpu_command_buffers;
+
+// Benchmark-only frame aggregation. Slots are phase-owned; late callbacks cannot
+// contaminate the next capture. Disabled rendering allocates nothing and takes no lock.
+#define MC_GPU_CAPTURE_FRAMES 32768
+typedef struct {
+	uint64_t start, end, submitted, pending;
+	BOOL sealed, invalid;
+} MCGpuCaptureFrame;
+static MCGpuCaptureFrame mc_gpu_capture_frames[MC_GPU_CAPTURE_FRAMES];
+static os_unfair_lock mc_gpu_capture_lock = OS_UNFAIR_LOCK_INIT;
+static uint64_t mc_gpu_capture_epoch, mc_gpu_capture_count;
+static BOOL mc_gpu_capture_active;
+static _Thread_local uint64_t mc_gpu_thread_epoch, mc_gpu_thread_frame;
+
+static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
+	if (mc_gpu_thread_frame == 0) return;
+	uint64_t epoch = mc_gpu_thread_epoch, index = mc_gpu_thread_frame - 1;
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	BOOL admitted = mc_gpu_capture_active && epoch == mc_gpu_capture_epoch && index < MC_GPU_CAPTURE_FRAMES;
+	if (admitted) {
+		mc_gpu_capture_frames[index].submitted++;
+		mc_gpu_capture_frames[index].pending++;
+	}
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+	if (!admitted) return;
+	[buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+		CFTimeInterval start = completed.GPUStartTime, end = completed.GPUEndTime;
+		BOOL valid = completed.status == MTLCommandBufferStatusCompleted
+			&& isfinite(start) && isfinite(end) && start > 0 && end > start;
+		os_unfair_lock_lock(&mc_gpu_capture_lock);
+		if (mc_gpu_capture_active && epoch == mc_gpu_capture_epoch) {
+			MCGpuCaptureFrame *frame = &mc_gpu_capture_frames[index];
+			frame->pending--;
+			if (!valid) frame->invalid = YES;
+			else {
+				uint64_t startNs = (uint64_t)(start * 1e9), endNs = (uint64_t)(end * 1e9);
+				frame->start = frame->start == 0 ? startNs : MIN(frame->start, startNs);
+				frame->end = MAX(frame->end, endNs);
+			}
+		}
+		os_unfair_lock_unlock(&mc_gpu_capture_lock);
+	}];
+}
 
 @implementation MCMetalCommandBuffer {
 	MCInFlightResources *_resources;
@@ -1736,6 +1780,82 @@ Java_dev_metalcraft_client_metal_MetalNative_nTakeGpuWork(JNIEnv *env, jclass ty
 }
 
 MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nBeginGpuFrameCapture(JNIEnv *env, jclass type) {
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	mc_gpu_capture_epoch++;
+	mc_gpu_capture_count = 0;
+	memset(mc_gpu_capture_frames, 0, sizeof(mc_gpu_capture_frames));
+	mc_gpu_capture_active = YES;
+	mc_gpu_thread_epoch = mc_gpu_capture_epoch;
+	mc_gpu_thread_frame = 0;
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+}
+
+MC_EXPORT JNIEXPORT jlongArray JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nProcessMemoryAndThermalState(JNIEnv *env, jclass type) {
+	task_vm_info_data_t info;
+	mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+	jlong values[5] = {-1, -1, -1, -1, (jlong)NSProcessInfo.processInfo.thermalState};
+	if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+		values[0] = (jlong)info.resident_size;
+		values[1] = (jlong)info.resident_size_peak;
+		if (count >= TASK_VM_INFO_REV1_COUNT) values[2] = (jlong)info.phys_footprint;
+		if (count >= TASK_VM_INFO_REV3_COUNT) values[3] = (jlong)info.ledger_phys_footprint_peak;
+	}
+	jlongArray result = (*env)->NewLongArray(env, 5);
+	if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, 5, values);
+	return result;
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nBeginGpuCaptureFrame(JNIEnv *env, jclass type) {
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	if (mc_gpu_capture_active && mc_gpu_thread_epoch == mc_gpu_capture_epoch) {
+		mc_gpu_thread_frame = ++mc_gpu_capture_count;
+	}
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nEndGpuCaptureFrame(JNIEnv *env, jclass type) {
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	if (mc_gpu_capture_active && mc_gpu_thread_epoch == mc_gpu_capture_epoch
+		&& mc_gpu_thread_frame > 0 && mc_gpu_thread_frame <= MC_GPU_CAPTURE_FRAMES) {
+		mc_gpu_capture_frames[mc_gpu_thread_frame - 1].sealed = YES;
+	}
+	mc_gpu_thread_frame = 0;
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+}
+
+MC_EXPORT JNIEXPORT jlongArray JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nEndGpuFrameCapture(JNIEnv *env, jclass type) {
+	// Bounded temporary allocation occurs only when the benchmark stops, outside its samples.
+	jlong *values = calloc(5 + MC_GPU_CAPTURE_FRAMES * 2, sizeof(jlong));
+	if (values == NULL) { mc_throw_state(env, @"Cannot allocate GPU capture report"); return NULL; }
+	jsize length = 5;
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	mc_gpu_capture_active = NO;
+	mc_gpu_thread_frame = 0;
+	values[0] = (jlong)mc_gpu_capture_count;
+	values[4] = (jlong)(mc_gpu_capture_count > MC_GPU_CAPTURE_FRAMES ? mc_gpu_capture_count - MC_GPU_CAPTURE_FRAMES : 0);
+	for (uint64_t i = 0; i < MIN(mc_gpu_capture_count, MC_GPU_CAPTURE_FRAMES); i++) {
+		MCGpuCaptureFrame *frame = &mc_gpu_capture_frames[i];
+		if (!frame->sealed || frame->pending > 0) values[1]++;
+		else if (frame->invalid) values[2]++;
+		else if (frame->submitted == 0 || frame->end <= frame->start) values[3]++;
+		else {
+			values[length++] = (jlong)(frame->end - frame->start);
+			values[length++] = (jlong)frame->submitted;
+		}
+	}
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+	jlongArray result = (*env)->NewLongArray(env, length);
+	if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, length, values);
+	free(values);
+	return result;
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nTakeGpuPassWork(JNIEnv *env, jclass type, jlongArray destination) {
 	jsize expected = MC_GPU_PASS_KINDS * 2;
 	if (destination == NULL || (*env)->GetArrayLength(env, destination) < expected) {
@@ -1771,6 +1891,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCommitCommandBuffer(JNIEnv *env, j
 	@autoreleasepool {
 		MCMetalCommandBuffer *commandBuffer = (MCMetalCommandBuffer *)mc_get_object(env, handle, MCObjectTypeCommandBuffer);
 		[commandBuffer endBlitEncoding];
+		mc_capture_command_buffer(commandBuffer.commandBuffer);
 		[commandBuffer.commandBuffer commit];
 	}
 }

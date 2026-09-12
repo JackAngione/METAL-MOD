@@ -2447,6 +2447,26 @@ All WU acceptance criteria are complete. Existing W8 release gate remains open.
 
 ## LOD composition regression progress (2026-09-11)
 
+2026-09-12 continuation claimed by Codex for the P6 full-resolution distant-lighting
+fallback and P8 benchmark instrumentation. Preserve opaque color/depth ownership and
+the water forward ABI; rerun the generated-world merged/split water regression after
+the opaque resolve optimization. W8 remains in progress for its broader release
+requirements. Results and inspected artifacts will be recorded below before handoff.
+
+P6/P8 continuation validation passed (2026-09-12), M4 Max/64 GB, NORMAL
+seed 12345, 16/16, Default/Metal, `MTL_DEBUG_LAYER=1`. The full water identity
+route passes with the 64-chunk explored cache in both merged and split passes,
+including depth/identity, HDR, refraction/absorption, foam, reflections, underwater,
+hand/HUD, half resolution, resize and resource reload. Both close with zero
+distant GPU bytes and zero distant upload failures. Inspected the merged
+refraction/absorption comparison and split underwater-entry image: water/foreground
+boundaries and underwater depth remain intact. Commands, counters, representative
+images and full image hash manifests are retained in [fallback validation](evidence/lod/fallback-validation/);
+the remaining screenshots are archived locally under `build/reports/lod-fallback-images`.
+The 648 production-resolve fixtures also preserve exact depth and stay within
+0.002 color error across shadow thresholds, fog, debug views and legacy/HDR.
+W8 remains open for its independent water release-performance requirements.
+
 P7 completion continuation claimed by `/root`: validate persistent distant opaque
 nodes with the existing forward water and full-resolution opaque-depth snapshot.
 The cache/scheduler and resident-buffer fixes do not change the water ABI. The

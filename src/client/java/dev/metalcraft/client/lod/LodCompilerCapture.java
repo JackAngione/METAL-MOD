@@ -29,6 +29,8 @@ public final class LodCompilerCapture {
     private static final LongAdder input = new LongAdder(), output = new LongAdder(), bounded = new LongAdder();
     private static final LongAdder allInput = new LongAdder(), materialRejects = new LongAdder(), geometryRejects = new LongAdder();
     private static final LongAdder mixedSupported = new LongAdder();
+    private static final LongAdder buildAttempts = new LongAdder(), buildNanos = new LongAdder();
+    private static final AtomicLong maxBuildNanos = new AtomicLong(), peakReserved = new AtomicLong(), peakRetained = new AtomicLong();
     private record Watch(long section, AtomicLong count, java.util.concurrent.atomic.AtomicReference<LodRevisionTracker.Ticket> ticket) { }
     private static volatile Watch watched;
 
@@ -73,6 +75,8 @@ public final class LodCompilerCapture {
             bytes = reserved.get();
             if (RESERVATION > buildBudget - bytes) { bounded.increment(); return null; }
         } while (!reserved.compareAndSet(bytes, bytes + RESERVATION));
+        peakReserved.accumulateAndGet(bytes + RESERVATION, Math::max);
+        long started = System.nanoTime();
         try {
             LodAtlas atlas = LodAtlas.current();
             var format = state.format();
@@ -124,6 +128,7 @@ public final class LodCompilerCapture {
                 used = retained.get();
                 if (retainedBytes > BUDGET - used) { retentionMisses.increment(); return null; }
             } while (!retained.compareAndSet(used, used + retainedBytes));
+            peakRetained.accumulateAndGet(used + retainedBytes, Math::max);
             retainedCount.increment();
             try {
                 var candidate = new LodCapturedMesh(ticket, tiers, atlas, () -> {
@@ -137,17 +142,25 @@ public final class LodCompilerCapture {
                 retainedCount.decrement();
                 throw error;
             }
-        } finally { reserved.addAndGet(-RESERVATION); }
+        } finally {
+            long elapsed = System.nanoTime() - started;
+            buildAttempts.increment();
+            buildNanos.add(elapsed);
+            maxBuildNanos.accumulateAndGet(elapsed, Math::max);
+            reserved.addAndGet(-RESERVATION);
+        }
     }
 
     public record Stats(long sections, long supportedSections, long rejectedSections, long originalQuads,
                         long simplifiedQuads, long budgetMisses, long reservedBytes, long allSolidQuads,
                         long materialRejects, long geometryRejects, long retainedBytes, long retainedCandidates,
                         long transferredCandidates, long closedCandidates, long staleCandidates, long retentionMisses,
-                        int trackedSections, long mixedSupportedSections) { }
+                        int trackedSections, long mixedSupportedSections, long buildAttempts, long buildNanos,
+                        long maxBuildNanos, long peakReservedBytes, long peakRetainedBytes) { }
     public static Stats stats() {
         return new Stats(captured.sum(), supported.sum(), rejected.sum(), input.sum(), output.sum(), bounded.sum(), reserved.get(), allInput.sum(),
                 materialRejects.sum(), geometryRejects.sum(), retained.get(), retainedCount.sum(), transferred.sum(), closed.sum(),
-                stale.sum(), retentionMisses.sum(), REVISIONS.trackedSections(), mixedSupported.sum());
+                stale.sum(), retentionMisses.sum(), REVISIONS.trackedSections(), mixedSupported.sum(),
+                buildAttempts.sum(), buildNanos.sum(), maxBuildNanos.get(), peakReserved.get(), peakRetained.get());
     }
 }

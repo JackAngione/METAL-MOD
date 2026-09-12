@@ -74,6 +74,11 @@ public final class MetalNative {
 
 	/** Drains GPU busy time from completed command buffers into {@code destination} as {nanos, count}. */
 	static native void nTakeGpuWork(long[] destination);
+	static native void nBeginGpuFrameCapture();
+	static native void nBeginGpuCaptureFrame();
+	static native void nEndGpuCaptureFrame();
+	static native long[] nEndGpuFrameCapture();
+	static native long[] nProcessMemoryAndThermalState();
 
 	/**
 	 * Drains per-pass GPU time into {@code destination} as {nanos, count} for each pass kind.

@@ -1,0 +1,3 @@
+2026-09-12 readiness-qualified 1080p Standard off/on pair, before the final P6 identity-lighting implementation.
+NORMAL seed metalcraft, 16/16 Default/Metal, three repeat routes. Every server-tracked chunk received; renderer/light queues drained; full pan warmed.
+This is retained intermediate evidence, not the final release matrix. See invocation.json in each case for source identity and exact command.

@@ -13,6 +13,8 @@ import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 /** Explores received NORMAL terrain, then observes it beyond the ordinary 16-chunk client horizon. */
 final class MetalLodHorizonGameTest {
     static void run(ClientGameTestContext context) {
+        boolean benchmark=Boolean.getBoolean("metalcraft.lodHorizonBenchmark");
+        int diskBudget=benchmark ? LodSettings.defaults().diskBudgetMiB() : 512;
         var saved=MetalCraftConfig.lod();
         String pack=context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
         var report=new LinkedHashMap<String,Object>();
@@ -24,10 +26,14 @@ final class MetalLodHorizonGameTest {
             settings.setSeed("metalcraft");
             settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
             settings.setAllowCommands(true);
+            if (benchmark) {
+                settings.getGameRules().set(net.minecraft.world.level.gamerules.GameRules.ADVANCE_TIME, false, null);
+                settings.getGameRules().set(net.minecraft.world.level.gamerules.GameRules.ADVANCE_WEATHER, false, null);
+            }
         });
-        try {
+        try (var environment=benchmark ? new MetalBenchmarkEnvironment(context) : null) {
             context.runOnClient(c -> {
-                MetalCraftConfig.setLod(LodSettings.defaults().withEnabled(true).withHorizon(256,true,512));
+                MetalCraftConfig.setLod(LodSettings.defaults().withEnabled(true).withHorizon(256,true,diskBudget));
                 ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);
             });
             net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave save;
@@ -49,7 +55,7 @@ final class MetalLodHorizonGameTest {
                 context.takeScreenshot("metalcraft-lod-horizon-explored");
                 for(int horizon:new int[]{32,64,128,256}) {
                     int distance=horizon*12;
-                    context.runOnClient(c -> MetalCraftConfig.setLod(MetalCraftConfig.lod().withHorizon(horizon,true,512)));
+                    context.runOnClient(c -> MetalCraftConfig.setLod(MetalCraftConfig.lod().withHorizon(horizon,true,diskBudget)));
                     world.getServer().runCommand("tp @a -1535.5 236 "+(-127.5+distance)+" 180 3");
                     context.getInput().lookAt(180,3);
                     context.waitTicks(120);
@@ -62,7 +68,7 @@ final class MetalLodHorizonGameTest {
                     var stats=LodDistantRenderer.stats();
                     if(stats.uploadFailures()!=0 || stats.gpuBytes()>LodDistantRenderer.MAX_GPU_BYTES || stats.frameDraws()>256
                             || stats.frameFarthestBlocks()>=horizon*16
-                            || stats.cache().queuedBytes()>(16L<<20) || stats.cache().diskBytes()>(512L<<20))
+                            || stats.cache().queuedBytes()>(16L<<20) || stats.cache().diskBytes()>((long)diskBudget<<20))
                         throw new AssertionError("Distant budget/Metal failure: "+stats);
                     context.runOnClient(c -> {
                         if(c.options.renderDistance().get()!=16 || c.options.simulationDistance().get()!=16)
@@ -72,6 +78,12 @@ final class MetalLodHorizonGameTest {
                     report.put("horizon"+horizon,stats);
                     System.out.println("LOD horizon "+horizon+": "+stats);
                     report.put("camera"+horizon,context.computeOnClient(c -> MetalBenchmarkEnvironment.camera()));
+                    if (horizon==32) {
+                        verifyReenable(context, report);
+                        if (Boolean.getBoolean("metalcraft.lodHorizonToggleProbe")) return;
+                    }
+                    if (benchmark && horizon>=128) report.put("benchmark"+horizon,
+                            MetalLodHorizonBenchmark.measure(context,world,horizon));
                 }
                 context.runOnClient(c -> ShaderPackRuntime.active().selectPack(ShaderPackRuntime.NONE_ID));
                 context.waitTicks(40);
@@ -94,7 +106,7 @@ final class MetalLodHorizonGameTest {
                         && LodDistantRenderer.stats().cache().queuedNodes()==0);
                 context.waitTicks(100);
                 report.put("revisitRecaptures",LodDistantRenderer.recaptures());
-                context.runOnClient(c -> MetalCraftConfig.setLod(MetalCraftConfig.lod().withHorizon(32,true,512)));
+                context.runOnClient(c -> MetalCraftConfig.setLod(MetalCraftConfig.lod().withHorizon(32,true,diskBudget)));
                 world.getServer().runCommand("tp @a -1535.5 236 256.5 180 3");
                 context.getInput().lookAt(180,3);
                 context.waitTicks(120);
@@ -146,7 +158,7 @@ final class MetalLodHorizonGameTest {
                 context.runOnClient(c -> MetalCraftConfig.setLod(MetalCraftConfig.lod().withEnabled(false)));
                 context.waitFor(c -> LodDistantRenderer.stats().cache()==null && LodDistantRenderer.stats().gpuBytes()==0,2400);
                 Path cacheRoot=context.computeOnClient(c -> c.gameDirectory.toPath().resolve("build/lod-test-cache"));
-                var clearing=dev.metalcraft.client.lod.LodDistantCache.clearRoot(cacheRoot,512L<<20);
+                var clearing=dev.metalcraft.client.lod.LodDistantCache.clearRoot(cacheRoot,(long)diskBudget<<20);
                 context.waitFor(c -> clearing.isDone(),2400);
                 if(clearing.isCompletedExceptionally()) throw new AssertionError("Inactive global cache clear failed");
                 try(var files=Files.walk(cacheRoot)) {
@@ -163,7 +175,21 @@ final class MetalLodHorizonGameTest {
             } catch(java.io.IOException error) { throw new AssertionError(error); }
             context.runOnClient(c -> { MetalCraftConfig.setLod(saved); ShaderPackRuntime.active().selectPack(pack); });
         }
-        System.out.println("LOD horizon live passed: "+report);
+        System.out.println("LOD horizon live passed: stages="+report.keySet()+"; complete samples in build/lod-horizon.json");
+    }
+    private static void verifyReenable(ClientGameTestContext context, java.util.Map<String,Object> report) {
+        var saved=MetalCraftConfig.lod();
+        context.runOnClient(c -> MetalCraftConfig.setLod(saved.withEnabled(false)));
+        context.waitFor(c -> LodDistantRenderer.stats().cache()==null && LodDistantRenderer.stats().gpuBytes()==0,200);
+        long before=LodDistantRenderer.stats().draws();
+        context.runOnClient(c -> MetalCraftConfig.setLod(saved.withEnabled(true)));
+        context.waitTicks(4);
+        if (LodDistantRenderer.stats().cache()==null)
+            throw new AssertionError("Re-enabling LOD in the same world did not reopen its cache; requested="+MetalCraftConfig.lod());
+        await(context,"re-enabled distant ownership",() -> LodDistantRenderer.stats().draws()>before+10
+                && LodDistantRenderer.stats().frameFarthestBlocks()>320);
+        report.put("reenabled",LodDistantRenderer.stats());
+        System.out.println("LOD horizon re-enable passed: same world/cache recovered valid distant draws");
     }
     static void await(ClientGameTestContext context,String stage,java.util.function.BooleanSupplier ready) {
         long[] logged={System.nanoTime()};

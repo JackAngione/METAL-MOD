@@ -1,0 +1,58 @@
+{
+  "scope" : "Isolated tile-stage feasibility; not runtime acceptance",
+  "device" : "Apple M4 Max",
+  "results" : [
+    {
+      "mergedMs" : [
+        0.25245833967346698,
+        0.26195832469966263,
+        0.26670833176467568
+      ],
+      "tileMs" : [
+        0.33137499121949077,
+        0.38499999209307134,
+        0.38766667421441525
+      ],
+      "medianChangePercent" : 31.259276935788961,
+      "width" : 1279,
+      "height" : 719,
+      "quality" : {
+        "nearPixelsOver002" : 0,
+        "depthBitDifferences" : 0,
+        "pixelsOver002" : 745570,
+        "motionSteps" : 16,
+        "maximumChannelError" : 0.0526123046875
+      }
+    },
+    {
+      "mergedMs" : [
+        0.26554166106507182,
+        0.26724999770522118,
+        0.26812500436790287
+      ],
+      "tileMs" : [
+        0.38874999154359102,
+        0.39708333497401327,
+        0.3982499911217019
+      ],
+      "medianChangePercent" : 46.398870137491002,
+      "width" : 1920,
+      "height" : 1080
+    },
+    {
+      "mergedMs" : [
+        0.98691666789818555,
+        0.98887500644195825,
+        0.99016666354145855
+      ],
+      "tileMs" : [
+        1.4758750039618462,
+        1.4875000051688403,
+        1.4902499970048666
+      ],
+      "medianChangePercent" : 49.544034665559387,
+      "width" : 3840,
+      "height" : 2160
+    }
+  ]
+}

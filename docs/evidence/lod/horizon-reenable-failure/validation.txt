@@ -1,0 +1,7 @@
+Same-world LOD toggle regression, 2026-09-12.
+NORMAL generated seed metalcraft; 16/16 Default/Metal, M4 Max/64 GB, MTL_DEBUG_LAYER=1.
+Command: ./gradlew runClient -PmetalLifecycleTest -PmetalLodHorizonTest=true -PmetalLodHorizonToggleProbe=true --args="--graphicsBackend default"
+Before fix: FAILED in 78s, enabled=true but cache=null after four ticks.
+Fix: recreate an absent cache when the world, atlas and device identities are unchanged.
+After fix: PASS in 78s, reopened cache and valid distant ownership; zero upload failures.
+World preparation dominates runtime; the actual off/on assertion takes four ticks. Full horizon benchmark repeats this transition in all pack/resolution combinations.

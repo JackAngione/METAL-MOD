@@ -1,0 +1,16 @@
+{
+  "command": [
+    "./gradlew",
+    "runClient",
+    "-PmetalLifecycleTest",
+    "-PmetalWaterIdentityTest=true",
+    "-PmetalLodHorizonExperimental=true",
+    "-PmetalTestLod=true",
+    "-PmetalTestLodHorizon=64",
+    "-PmetalPassMerging=false",
+    "--args=--graphicsBackend default"
+  ],
+  "MTL_DEBUG_LAYER": "1",
+  "elapsedSeconds": 275.619863986969,
+  "exitCode": 0
+}

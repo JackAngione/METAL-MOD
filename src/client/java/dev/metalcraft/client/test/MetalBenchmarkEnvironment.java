@@ -21,9 +21,11 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
     private final boolean unlocked = MetalCraftConfig.unlockedFrameRate();
     private final LodSettings lod = MetalCraftConfig.lod();
     private final String pack;
+    private final boolean fullscreen;
 
     MetalBenchmarkEnvironment(ClientGameTestContext context) {
         this.context = context;
+        fullscreen = context.computeOnClient(c -> c.getWindow().isFullscreen());
         String requestedPack = System.getProperty("metalcraft.benchmarkPack");
         if (requestedPack != null && !requestedPack.equals("none") && !requestedPack.equals("standard")) {
             throw new IllegalArgumentException("Benchmark pack must be none or standard");
@@ -31,10 +33,12 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         boolean requestedHalf = booleanProperty("metalcraft.benchmarkHalfResolution", half);
         boolean requestedUnlocked = booleanProperty("metalcraft.benchmarkUnlocked", unlocked);
         boolean requestedLod = booleanProperty("metalcraft.benchmarkLod", false);
+        boolean requestedFullscreen = booleanProperty("metalcraft.benchmarkFullscreen", false);
         if (requestedLod && !LodCapabilities.EXPERIMENTAL) throw new IllegalArgumentException("LOD benchmark requires -PmetalLodExperimental=true");
         pack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
         try {
             context.runOnClient(c -> {
+                if (c.getWindow().isFullscreen() != requestedFullscreen) c.getWindow().toggleFullScreen();
                 if (requestedPack != null) ShaderPackRuntime.active().selectPack(requestedPack.equals("none") ? ShaderPackRuntime.NONE_ID : ShaderPackRuntime.BUILTIN_ID);
                 MetalCraftConfig.setHalfResolution(requestedHalf);
                 MetalCraftConfig.setUnlockedFrameRate(requestedUnlocked);
@@ -62,6 +66,12 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         value.addProperty("heapCommittedBytes", runtime.totalMemory());
         value.add("lodRenderer", new Gson().toJsonTree(LodLoadedRenderer.stats()));
         value.add("lodCapture", new Gson().toJsonTree(LodCompilerCapture.stats()));
+        long[] process = dev.metalcraft.client.metal.MetalGpuFrameCapture.processMemoryAndThermalState();
+        value.addProperty("processResidentBytes", process[0]);
+        value.addProperty("processPeakResidentBytes", process[1]);
+        value.addProperty("processPhysicalFootprintBytes", process[2]);
+        value.addProperty("processPeakPhysicalFootprintBytes", process[3]);
+        value.addProperty("thermalState", process[4]);
         var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).metalcraft$backend();
         if (backend instanceof MetalGpuDevice metal) {
             value.addProperty("metalAllocatedBytes", metal.metal().currentAllocatedBytes());
@@ -77,17 +87,29 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         value.addProperty("osVersion", System.getProperty("os.version"));
         value.addProperty("javaVersion", System.getProperty("java.version"));
         value.addProperty("pack", ShaderPackRuntime.active().selectedPackId());
+        JsonObject shaderOptions = new JsonObject();
+        for (var option : ShaderPackRuntime.active().options()) {
+            shaderOptions.add(option.id(), new Gson().toJsonTree(ShaderPackRuntime.active().optionValue(option.id())));
+        }
+        value.add("shaderOptions", shaderOptions);
         value.addProperty("halfResolution", MetalCraftConfig.halfResolution());
         value.addProperty("unlockedFrameRate", MetalCraftConfig.unlockedFrameRate());
         value.addProperty("vsync", client.options.enableVsync().get());
         value.addProperty("frameLimit", client.options.framerateLimit().get());
         value.addProperty("fov", client.options.fov().get());
+        value.addProperty("fullscreen", client.getWindow().isFullscreen());
+        value.addProperty("sceneWidth", client.getWindow().getWidth());
+        value.addProperty("sceneHeight", client.getWindow().getHeight());
+        value.addProperty("renderDistance", client.options.renderDistance().get());
+        value.addProperty("simulationDistance", client.options.simulationDistance().get());
         value.addProperty("passMerging", Boolean.parseBoolean(System.getProperty("metalcraft.passMerging", "true")));
         value.addProperty("commandBatching", Boolean.parseBoolean(System.getProperty("metalcraft.commandBatching", "true")));
         value.add("lodRequested", new Gson().toJsonTree(MetalCraftConfig.lod()));
         value.addProperty("lodGeometryAvailable", LodCapabilities.EXPERIMENTAL);
         value.addProperty("lodCounterMeaning", "Cumulative encoded main-world terrain, distant subset, replacements and shadows are separate; subtract phase endpoints. Memory samples are not peaks.");
-        value.addProperty("memorySampling", "Point-in-time after each phase; not a peak or resident-set measurement");
+        value.addProperty("memorySampling", "Heap/Metal snapshots after each phase; OS process-lifetime resident/physical-footprint peaks include startup; LOD CPU charge peaks cover all worker admissions");
+        value.addProperty("thermalStateMeaning", "0 nominal, 1 fair, 2 serious, 3 critical; -1 unavailable");
+        value.addProperty("buildLatencyMeaning", "Cumulative admitted worker capture/validation/simplification attempts, nanoseconds total and maximum; includes rejected attempts, excludes queue wait and GPU upload");
         return value;
     }
 
@@ -104,6 +126,7 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
 
     @Override public void close() {
         context.runOnClient(c -> {
+            if (c.getWindow().isFullscreen() != fullscreen) c.getWindow().toggleFullScreen();
             MetalCraftConfig.setHalfResolution(half);
             MetalCraftConfig.setUnlockedFrameRate(unlocked);
             MetalCraftConfig.setLod(lod);

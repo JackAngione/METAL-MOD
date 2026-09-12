@@ -22,7 +22,7 @@ public final class LodShadingBenchmark {
     private static final Path OUTPUT = Path.of("build", "reports", "lod-shading");
     private static final int SAMPLES = 180;
     private static final int REPEATS = 3;
-    private enum Variant { MERGED, BANDS, FUSED, QUAD }
+    private enum Variant { MERGED, BANDS, FUSED, QUAD, DIRECT, DISTANCE }
     private static final MetalTexture.Format HDR = MetalTexture.Format.RGBA16_FLOAT;
     private static final MetalTexture.Format BYTE = MetalTexture.Format.RGBA8_UNORM;
     private static final MetalTexture.Format DEPTH = MetalTexture.Format.DEPTH32_FLOAT;
@@ -32,25 +32,8 @@ public final class LodShadingBenchmark {
 
     public static void main(String[] args) throws Exception {
         Files.createDirectories(OUTPUT);
-        var pack = ShaderPackLoader.loadBundled(LodShadingBenchmark.class.getClassLoader(),
-                ShaderPackRuntime.BUILTIN_ID, "assets/metalcraft/shaderpacks/standard");
-        var declaration = pack.manifest().passes().stream().filter(p -> p.id().equals("resolve")).findFirst().orElseThrow();
-        String source = ShaderPassCompiler.source(pack, declaration, Map.of())
-                .replace("#define MC_SCENE_LINEAR_HDR 0\n", "#define MC_SCENE_LINEAR_HDR 1\n");
-        source = "#define MC_TARGET_GBUFFER_ALBEDO 1\n#define MC_TARGET_GBUFFER_NORMAL 2\n#define MC_TARGET_GBUFFER_LIGHT 3\n" + source;
-        // Keep the production function and extract its body for sampled-input calls.
-        int body = source.indexOf("    ResolveTargets out = previous;");
-        int end = source.indexOf("\n}\n", body);
-        if (body < 0 || end < 0 || source.indexOf("    ResolveTargets out = previous;", body + 1) >= 0)
-            throw new AssertionError("Standard resolve changed; review this prototype's adapter");
-        String helper = """
-                ResolveTargets shade(ResolveVaryings in, ResolveTargets previous, constant PackOptions &options,
-                    constant MCShadowFrame &shadowFrame, constant MCResolveCamera &camera, constant McFog &fog,
-                    depth2d_array<float> shadowMap, sampler shadowSampler) {
-                """ + source.substring(body, end) + "\n}\n";
-        source += helper + Files.readString(Path.of("src/smoke/resources/lod-shading-prototype.metal"))
-                + Files.readString(Path.of("src/smoke/resources/lod-shading-fused.metal"));
-        Files.writeString(OUTPUT.resolve("fixture.metal"), source);
+        String source = productionSource();
+        Files.writeString(OUTPUT.resolve("fixture.metal"), "#define MC_REDUCE_DISTANT_LIGHTING 0\n" + source);
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("scope", "Synthetic Standard resolve cost experiment; not world/frame performance or a shipped capability");
         report.put("bands", "near <64 blocks full resolution, middle 64..128 half linear, far >=128 quarter linear");
@@ -60,6 +43,7 @@ public final class LodShadingBenchmark {
         report.put("repeats", REPEATS);
         report.put("warmupSubmissionsPerRepeat", 80);
         report.put("quantileOrder", List.of("median", "p95", "p99"));
+        report.put("distanceScope", "Production full-resolution identity-lighting fallback; no reduced targets, sharing, history, approximation or new resources. Specialization removed at shadow_distance >=128.");
         report.put("quadScope", "Half-linear shading only; diagnostic simpler alternative, never quarter-linear");
         report.put("acceptance", "Experimental cost/quality report only; failed gates do not enable runtime capabilities");
         report.put("java", System.getProperty("java.version"));
@@ -69,13 +53,13 @@ public final class LodShadingBenchmark {
         try (var device = MetalNative.openDefaultDevice().orElseThrow()) {
             report.put("device", device.name());
             for (int shadowDistance : new int[]{96, 256}) for (int[] size : new int[][]{{1279,719}, {1920,1080}, {3840,2160}}) {
-                try (var scene = new Scene(device, source, size[0], size[1], shadowDistance)) {
+                try (var scene = new Scene(device, source.replace("#define MC_OPTION_SHADOW_DISTANCE 96\n", "#define MC_OPTION_SHADOW_DISTANCE " + shadowDistance + "\n"), size[0], size[1], shadowDistance)) {
                     for (int repeat = 0; repeat < REPEATS; repeat++) {
-                        for (int i = 0; i < 80; i++) scene.draw(Variant.values()[i % 4], 0);
+                        for (int i = 0; i < 80; i++) scene.draw(Variant.values()[i % Variant.values().length], 0);
                         double[][] timings = new double[Variant.values().length][SAMPLES];
-                        // Rotate all variant positions, including the reference, within each quartet.
-                        for (int sample = 0; sample < SAMPLES; sample++) for (int order = 0; order < 4; order++) {
-                            int variant = (order + sample + repeat) % 4;
+                        // Rotate all variant positions, including the reference, within each sample.
+                        for (int sample = 0; sample < SAMPLES; sample++) for (int order = 0; order < Variant.values().length; order++) {
+                            int variant = (order + sample + repeat) % Variant.values().length;
                             timings[variant][sample] = scene.draw(Variant.values()[variant], sample % 16);
                         }
                         var row = new LinkedHashMap<String, Object>();
@@ -93,15 +77,84 @@ public final class LodShadingBenchmark {
                         }
                         row.put("allocatedBytes", device.currentAllocatedBytes());
                         results.add(row);
-                        System.out.printf("P6 shadows=%d %dx%d repeat=%d GPU medians: merged=%.4f bands=%.4f fused=%.4f quad=%.4f ms%n",
+                        System.out.printf("P6 shadows=%d %dx%d repeat=%d GPU medians: merged=%.4f bands=%.4f fused=%.4f quad=%.4f direct=%.4f distance=%.4f ms%n",
                                 shadowDistance, size[0], size[1], repeat + 1, median(timings[0]), median(timings[1]),
-                                median(timings[2]), median(timings[3]));
+                                median(timings[2]), median(timings[3]), median(timings[4]), median(timings[5]));
                     }
                 }
             }
         } finally { MetalStallProbe.setEnabled(false); }
         report.put("results", results);
         Files.writeString(OUTPUT.resolve("metrics.json"), new GsonBuilder().setPrettyPrinting().create().toJson(report) + "\n");
+    }
+
+    private static String productionSource() throws Exception {
+        var pack = ShaderPackLoader.loadBundled(LodShadingBenchmark.class.getClassLoader(),
+                ShaderPackRuntime.BUILTIN_ID, "assets/metalcraft/shaderpacks/standard");
+        var declaration = pack.manifest().passes().stream().filter(p -> p.id().equals("resolve")).findFirst().orElseThrow();
+        String source = ShaderPassCompiler.source(pack, declaration, Map.of())
+                .replace("#define MC_SCENE_LINEAR_HDR 0\n", "#define MC_SCENE_LINEAR_HDR 1\n");
+        source = "#define MC_TARGET_GBUFFER_ALBEDO 1\n#define MC_TARGET_GBUFFER_NORMAL 2\n#define MC_TARGET_GBUFFER_LIGHT 3\n" + source;
+        // Keep the production function and extract its body for sampled-input calls.
+        int body = source.indexOf("    ResolveTargets out = previous;");
+        int end = source.indexOf("\n}\n", body);
+        if (body < 0 || end < 0 || source.indexOf("    ResolveTargets out = previous;", body + 1) >= 0)
+            throw new AssertionError("Standard resolve changed; review this prototype's adapter");
+        String helper = """
+                ResolveTargets shade(ResolveVaryings in, ResolveTargets previous, constant PackOptions &options,
+                    constant MCShadowFrame &shadowFrame, constant MCResolveCamera &camera, constant McFog &fog,
+                    depth2d_array<float> shadowMap, sampler shadowSampler) {
+                """ + source.substring(body, end) + "\n}\n";
+        source += helper + Files.readString(Path.of("src/smoke/resources/lod-shading-prototype.metal"))
+                + Files.readString(Path.of("src/smoke/resources/lod-shading-fused.metal"))
+                + Files.readString(Path.of("src/smoke/resources/lod-shading-direct.metal"));
+        return source;
+    }
+
+    /** Correctness gate for the production specialization, independent of timing noise. */
+    public static void verifyDistanceLighting() throws Exception {
+        Files.createDirectories(OUTPUT);
+        String source = productionSource();
+        MetalStallProbe.setEnabled(true);
+        int cases = 0;
+        double maximum = 0;
+        try (var device = MetalNative.openDefaultDevice().orElseThrow()) {
+            for (boolean hdr : new boolean[]{false, true}) for (int shadowDistance : new int[]{32, 96, 128, 256}) {
+                String selected = source.replace("#define MC_OPTION_SHADOW_DISTANCE 96\n", "#define MC_OPTION_SHADOW_DISTANCE " + shadowDistance + "\n")
+                        .replace("#define MC_SCENE_LINEAR_HDR 1\n", "#define MC_SCENE_LINEAR_HDR " + (hdr ? 1 : 0) + "\n");
+                selected = "#define FIXTURE_COLOR_GAIN " + (hdr ? 4 : 1) + "\n" + selected;
+                try (var scene = new Scene(device, selected, 127, 73, shadowDistance)) {
+                    for (int debug = 0; debug <= 8; debug++) for (int fog = 0; fog < 3; fog++) for (int boundary = -1; boundary <= 1; boundary++) {
+                        try (var mapped = scene.options.map()) { mapped.bytes().putInt(8, debug); }
+                        try (var mapped = scene.fog.map()) {
+                            var bytes = mapped.bytes();
+                            bytes.putFloat(0, .12f).putFloat(4, .31f).putFloat(8, .47f).putFloat(12, 1);
+                            bytes.putFloat(16, fog == 0 ? 10000 : 0).putFloat(20, fog == 0 ? 10000 : fog == 1 ? 300 : 1);
+                        }
+                        try (var mapped = scene.parameters.map()) { mapped.bytes().putFloat(12, shadowDistance - 200 + boundary * .02f); }
+                        // Also cover the defined unoccluded night/dimension frame.
+                        try (var mapped = scene.frame.map()) { mapped.bytes().putInt(416, fog == 2 ? 0 : 4); }
+                        scene.draw(Variant.MERGED, 7);
+                        var reference = scene.scene.readback(scene.queue, 0).order(ByteOrder.nativeOrder());
+                        var depth = scene.depth.readback(scene.queue, 0).order(ByteOrder.nativeOrder());
+                        scene.draw(Variant.DISTANCE, 7);
+                        var actual = scene.scene.readback(scene.queue, 0).order(ByteOrder.nativeOrder());
+                        var actualDepth = scene.depth.readback(scene.queue, 0).order(ByteOrder.nativeOrder());
+                        for (int p = 0; p < scene.width * scene.height; p++) {
+                            if (depth.getInt(p * 4) != actualDepth.getInt(p * 4)) throw new AssertionError("Distance lighting changed depth");
+                            for (int c = 0; c < 4; c++) {
+                                float error = Math.abs(Float.float16ToFloat(reference.getShort(p * 8 + c * 2))
+                                        - Float.float16ToFloat(actual.getShort(p * 8 + c * 2)));
+                                if (!Float.isFinite(error) || error > .002f) throw new AssertionError("Distance lighting changed color: " + error);
+                                maximum = Math.max(maximum, error);
+                            }
+                        }
+                        cases++;
+                    }
+                }
+            }
+        } finally { MetalStallProbe.setEnabled(false); }
+        System.out.println("Distance lighting contracts passed: " + cases + " legacy/HDR, debug, fog, unoccluded and threshold cases; max channel error=" + maximum);
     }
 
     private static List<Double> quantiles(double[] input) {
@@ -120,7 +173,7 @@ public final class LodShadingBenchmark {
         final MetalTextureView sceneView, albedoView, normalView, lightView, halfView, quarterView, shadowView;
         final MetalSampler sampler;
         final MetalBuffer options, frame, camera, fog, parameters;
-        final MetalRenderPipeline geometry, resolve, fused, quad, halfPipeline, quarterPipeline, reconstruct, overlay, shadowFixture;
+        final MetalRenderPipeline geometry, resolve, fused, quad, direct, distance, halfPipeline, quarterPipeline, reconstruct, overlay, shadowFixture;
 
         Scene(MetalDevice device, String source, int width, int height, int shadowDistance) {
             this.device = device; this.width = width; this.height = height; this.shadowDistance = shadowDistance;
@@ -159,16 +212,19 @@ public final class LodShadingBenchmark {
                 } catch (java.io.IOException error) { throw new java.io.UncheckedIOException(error); }
             }
             var depthWrite = new MetalRenderPipeline.DepthState(true,true,MetalRenderPipeline.CompareFunction.GREATER,0,0);
-            geometry = pipeline(source,"fixture_geometry",GBUFFER,DEPTH,depthWrite);
-            resolve = pipeline(source,"resolve_fragment",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
-            quad = pipeline(source,"fixture_quad",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
-            fused = pipeline(source,"fixture_fused",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
-            halfPipeline = pipeline("#define LOD_SCALE 2\n"+source,"fixture_band",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),null,MetalRenderPipeline.DepthState.DISABLED);
-            quarterPipeline = pipeline("#define LOD_SCALE 4\n"+source,"fixture_band",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),null,MetalRenderPipeline.DepthState.DISABLED);
-            reconstruct = pipeline(source,"fixture_reconstruct",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),DEPTH,MetalRenderPipeline.DepthState.DISABLED);
-            overlay = pipeline(source,"fixture_overlay",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),DEPTH,
+            String referenceSource = "#define MC_REDUCE_DISTANT_LIGHTING 0\n" + source;
+            distance = pipeline(source,"resolve_fragment",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
+            geometry = pipeline(referenceSource,"fixture_geometry",GBUFFER,DEPTH,depthWrite);
+            resolve = pipeline(referenceSource,"resolve_fragment",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
+            quad = pipeline(referenceSource,"fixture_quad",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
+            direct = pipeline(referenceSource,"fixture_direct",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
+            fused = pipeline(referenceSource,"fixture_fused",GBUFFER,DEPTH,MetalRenderPipeline.DepthState.DISABLED);
+            halfPipeline = pipeline("#define LOD_SCALE 2\n"+referenceSource,"fixture_band",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),null,MetalRenderPipeline.DepthState.DISABLED);
+            quarterPipeline = pipeline("#define LOD_SCALE 4\n"+referenceSource,"fixture_band",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),null,MetalRenderPipeline.DepthState.DISABLED);
+            reconstruct = pipeline(referenceSource,"fixture_reconstruct",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),DEPTH,MetalRenderPipeline.DepthState.DISABLED);
+            overlay = pipeline(referenceSource,"fixture_overlay",List.of(MetalRenderPipeline.ColorTarget.opaque(HDR)),DEPTH,
                     new MetalRenderPipeline.DepthState(true,false,MetalRenderPipeline.CompareFunction.GREATER,0,0));
-            shadowFixture = pipeline(source,"fixture_shadow",List.of(MetalRenderPipeline.ColorTarget.unused()),DEPTH,
+            shadowFixture = pipeline(referenceSource,"fixture_shadow",List.of(MetalRenderPipeline.ColorTarget.unused()),DEPTH,
                     new MetalRenderPipeline.DepthState(true,true,MetalRenderPipeline.CompareFunction.ALWAYS,0,0));
             // Alternating occluder depths exercise moving shadow edges, not only constant visibility.
             try (var commands = queue.createCommandBuffer()) {
@@ -220,7 +276,7 @@ public final class LodShadingBenchmark {
                 try(var pass=commands.beginRenderPass(new MetalRenderPass.Descriptor(List.of(clear(scene,true),clear(albedo,bands),
                         clear(normal,bands),clear(light,bands)),depth(true),0))) {
                     fullscreen(pass,geometry);
-                    if(!bands) fullscreen(pass, variant == Variant.QUAD ? quad : variant == Variant.FUSED ? fused : resolve);
+                    if(!bands) fullscreen(pass, variant == Variant.DISTANCE ? distance : variant == Variant.DIRECT ? direct : variant == Variant.QUAD ? quad : variant == Variant.FUSED ? fused : resolve);
                 }
                 if(bands) {
                     for(int level=0;level<2;level++) try(var pass=commands.beginRenderPass(new MetalRenderPass.Descriptor(
@@ -267,7 +323,7 @@ public final class LodShadingBenchmark {
                     if(originalDepth.getInt(p*4)!=bandDepth.getInt(p*4)) depthDiffering++;
                     maxError=Math.max(maxError,error); sumError+=error; pixels++;
                 }
-                if(motion==7) { image(reference,"merged.png"); image(actual,variant == Variant.BANDS ? "bands.png" : variant == Variant.FUSED ? "fused.png" : "quad.png"); }
+                if(motion==7) { image(reference,"merged.png"); image(actual,variant.name().toLowerCase(java.util.Locale.ROOT) + ".png"); }
             }
             if(depthDiffering!=0||nearDiffering!=0) throw new AssertionError("Full-resolution depth/near ownership changed");
             return Map.of("motionSteps",16,"pixels",pixels,"pixelsOver002",differing,"nearPixelsOver002",nearDiffering,
