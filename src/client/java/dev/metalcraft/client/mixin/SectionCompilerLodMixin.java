@@ -22,6 +22,8 @@ abstract class SectionCompilerLodMixin {
         SectionCompiler.Results results = original.call(section, region, sorting, builders);
         if (LodCompilerCapture.capturing()) {
             try {
+                dev.metalcraft.client.lod.LodDistantRenderer.capture(section, results,
+                        ((LodRegionSource)region).metalcraft$lodTicket());
                 var candidate = LodCompilerCapture.capture(section.asLong(), results.renderedLayers.get(ChunkSectionLayer.SOLID),
                         results.renderedLayers.keySet().stream().allMatch(layer -> layer == ChunkSectionLayer.SOLID),
                         ((LodRegionSource)region).metalcraft$lodTicket());

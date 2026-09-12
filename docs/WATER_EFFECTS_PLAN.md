@@ -2447,6 +2447,14 @@ All WU acceptance criteria are complete. Existing W8 release gate remains open.
 
 ## LOD composition regression progress (2026-09-11)
 
+P7 continuation claimed by `/root` (2026-09-11): validate distant opaque/cutout
+parent meshes entering the existing terrain pass before water snapshots and forward
+translucency. Extend atmospheric distance fog only; keep fluid/status-effect fog
+and the water identity ABI. W8 remains open; live regression evidence will follow.
+P7 progress checkpoint: `./gradlew build` passes in 13 s on M4 Max, including
+existing water GPU checks. The distant path requires a separate horizon experiment
+flag. No live distant-water composition acceptance is claimed; that remains pending.
+
 W8 remains in progress. The full generated NORMAL-world water matrix at 16/16,
 Default/Metal passed in 3m38s on M4 Max with loaded LOD and resident shadow LOD active.
 `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true

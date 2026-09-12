@@ -1,7 +1,7 @@
 # LOD feature implementation plan
 
 Status: P1–P5 complete for conservative loaded geometry and composition compatibility.
-P6–P8 remain open. Geometry is available only with the experimental validation flag;
+P6–P8 remain open; P7 implementation is in progress. Geometry is available only with the experimental validation flag;
 release capability gates remain closed.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
@@ -173,7 +173,7 @@ resources. Changing horizon never changes Minecraft render/simulation settings.
 Progress protocol: claim a task with owner/status before implementation; record
 partial progress or blockers beneath it; check it off only with validation evidence
 (commands, machine, scenario, and artifacts). Update this plan in the same change.
-P1–P5 are complete; `/root` owns P6 and P8 evaluation. P7 has no implementation.
+P1–P5 are complete; `/root` owns P6 and P8 evaluation and P7 implementation.
 Earlier partial-progress entries below are retained as dated evidence, not current blockers.
 
 - [x] P0 — Inspect terrain/render/settings seams, create branch from water effects,
@@ -385,6 +385,34 @@ Earlier partial-progress entries below are retained as dated evidence, not curre
   eviction, and visible-region scheduling. Acceptance: explored standard terrain at
   32/64/128/256 LOD chunks while Minecraft remains 16/16; bounded memory/draw counts,
   correct world isolation, and graceful missing/corrupt/stale data behavior.
+  - Owner: `/root`. Status: in progress (2026-09-11). Implementing bounded persistent
+    opaque terrain nodes, hierarchy selection and direct Metal composition. Unknown
+    terrain stays absent; runtime and standard-world acceptance will be recorded here.
+  - Progress checkpoint (2026-09-11): added immutable emitted SOLID/CUTOUT leaf data,
+    exact-surface parent batching through eight octree levels, compressed versioned
+    files with checksums and atomic replacement, ancestor invalidation, per-namespace
+    eviction, a bounded background queue/result set, and Metal residency/draw hooks.
+    The renderer uses existing opaque pipelines and full-resolution world depth.
+    Translucent terrain is excluded. Parent batching does **not** yet simplify the
+    full-resolution emitted surfaces; dense coverage and stage-3 scaling remain unproven.
+  - Unvalidated UI/camera/fog integration and the NORMAL-world 32/64/128/256 test
+    harness are isolated behind `-PmetalLodHorizonExperimental=true` or the explicit
+    `-PmetalLodHorizonTest=true` lifecycle test. The ordinary loaded-geometry
+    experimental flag does not enable this work. P7's checkbox and release gates
+    remain closed.
+  - Next work: add deterministic cache/scheduler correctness fixtures; enforce a
+    total disk budget across world/resource namespaces and serialize concurrent
+    process access; prioritize visible requests before spending the CPU result budget;
+    audit cancellation/clear/reload races and invalidate unsupported recaptures;
+    validate resident-buffer shutdown and clear-cache behavior. Then run and inspect
+    the generated-world horizon/revisit/edit/reload/reopen route, corruption and
+    isolation checks, and water composition regression at 16/16 Default/Metal.
+    The first live launch was stopped at environment permission handling; no horizon
+    runtime or screenshot acceptance is claimed at this checkpoint.
+  - Checkpoint validation: `./gradlew build` passed in 13 s on Apple M4 Max,
+    including the existing `lodSmoke`, `lodMetalSmoke` and shader translation/GPU
+    checks. The new live harness compiles. `git diff --check` passed. These checks
+    establish build/regression health, not the outstanding P7 cache or live criteria.
 - [ ] P8 — Tune presets and release gates. Complete the matrix below, set defaults
   from evidence, document tradeoffs/limitations, and update README. Acceptance: all
   correctness gates pass and published targets are met or explicitly revised with

@@ -27,6 +27,7 @@ abstract class MinecraftFrameMetricsMixin {
 			if (client.level != null) client.levelExtractor.allChanged();
 		}
 		dev.metalcraft.client.lod.LodLoadedRenderer.beginFrame(metal, settings);
+		dev.metalcraft.client.lod.LodDistantRenderer.beginFrame(metal, settings);
 		MetalFrameMetrics.recordFrameStart(System.nanoTime());
 	}
 

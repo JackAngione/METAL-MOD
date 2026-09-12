@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 abstract class LevelExtractorLodMixin {
     @Inject(method = "setLevel", at = @At("HEAD"))
     private void metalcraft$worldLod(@Nullable ClientLevel level, CallbackInfo ci) {
+        dev.metalcraft.client.lod.LodDistantRenderer.worldChanged();
         if (LodCompilerCapture.ENABLED)
             LodCompilerCapture.REVISIONS.world(level == null ? "disconnected" : level.dimension().identifier().toString());
     }
@@ -24,6 +25,7 @@ abstract class LevelExtractorLodMixin {
 
     @Inject(method = "setSectionDirty(IIIZ)V", at = @At("HEAD"))
     private void metalcraft$dirtyLod(int x, int y, int z, boolean playerChanged, CallbackInfo ci) {
+        dev.metalcraft.client.lod.LodDistantRenderer.dirty(x, y, z);
         if (LodCompilerCapture.capturing()) LodCompilerCapture.REVISIONS.dirty(x, y, z);
     }
 }

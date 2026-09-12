@@ -157,6 +157,8 @@ def benchmarkProperties = [
 tasks.named('runClient') {
 	def experimentalLod = providers.gradleProperty('metalLodExperimental')
 	if (experimentalLod.isPresent()) systemProperty 'metalcraft.lodExperimental', experimentalLod.get()
+	def experimentalHorizon = providers.gradleProperty('metalLodHorizonExperimental')
+	if (experimentalHorizon.isPresent()) systemProperty 'metalcraft.lodHorizonExperimental', experimentalHorizon.get()
 	// Lets a benchmark vary the JVM it measures. Heap pressure shows up in the frame-time tail as
 	// collection pauses, so a run that cannot state its heap size cannot be compared with another.
 	def extraJvmArgs = providers.gradleProperty('metalJvmArgs')
@@ -171,6 +173,7 @@ tasks.named('runClient') {
 		systemProperty 'metalcraft.lodSettingsTest', providers.gradleProperty('metalLodSettingsTest').getOrElse('false')
 		systemProperty 'metalcraft.lodCompilerTest', providers.gradleProperty('metalLodCompilerTest').getOrElse('false')
 		systemProperty 'metalcraft.lodRenderTest', providers.gradleProperty('metalLodRenderTest').getOrElse('false')
+		systemProperty 'metalcraft.lodHorizonTest', providers.gradleProperty('metalLodHorizonTest').getOrElse('false')
 		systemProperty 'metalcraft.lodExpectedRadius', providers.gradleProperty('metalLodExpectedRadius').getOrElse('-1')
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')

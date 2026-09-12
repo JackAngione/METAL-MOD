@@ -46,6 +46,11 @@ public record LodSettings(boolean enabled, Preset preset, int fullDetailChunks, 
                 smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics);
     }
 
+    public LodSettings withHorizon(int chunks, boolean cache, int diskMiB) {
+        return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, chunks,
+                smoothTransitions, meshBudgetMiB, backgroundWork, cache, diskMiB, diagnostics);
+    }
+
     public LodSettings withRuntimeLimits(boolean smoothing, int memoryMiB, Work work) {
         return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
                 smoothing, memoryMiB, work, diskCache, diskBudgetMiB, diagnostics);

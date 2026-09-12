@@ -3,6 +3,8 @@
   "package": "dev.metalcraft.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "CameraLodHorizonMixin",
+    "FogLodHorizonMixin",
     "BlockableEventLoopDrainMixin",
     "ChunkSectionsToRenderMixin",
     "BlockableEventLoopTaskCensusMixin",

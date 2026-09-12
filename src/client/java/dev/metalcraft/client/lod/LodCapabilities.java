@@ -2,9 +2,11 @@ package dev.metalcraft.client.lod;
 
 /** Availability is deliberately separate from saved preferences and shader-pack selection. */
 public record LodCapabilities(boolean metal, boolean geometry, boolean multiresolution, boolean extendedHorizon) {
+    public static final boolean HORIZON_EXPERIMENTAL = Boolean.getBoolean("metalcraft.lodHorizonTest")
+            || Boolean.getBoolean("metalcraft.lodHorizonExperimental");
     public static final boolean EXPERIMENTAL = Boolean.getBoolean("metalcraft.lodRenderTest")
-            || Boolean.getBoolean("metalcraft.lodExperimental");
-    private static final LodCapabilities METAL = new LodCapabilities(true, EXPERIMENTAL, false, false);
+            || Boolean.getBoolean("metalcraft.lodExperimental") || HORIZON_EXPERIMENTAL;
+    private static final LodCapabilities METAL = new LodCapabilities(true, EXPERIMENTAL, false, HORIZON_EXPERIMENTAL);
     private static final LodCapabilities METAL_UNSUPPORTED = new LodCapabilities(true, false, false, false);
     private static final LodCapabilities UNAVAILABLE = new LodCapabilities(false, false, false, false);
     public static LodCapabilities current(boolean metal) {

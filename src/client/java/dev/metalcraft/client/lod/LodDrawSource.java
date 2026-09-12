@@ -9,4 +9,6 @@ public interface LodDrawSource {
     void metalcraft$terrain(boolean distant);
     boolean metalcraft$isTerrain();
     boolean metalcraft$isDistant();
+    void metalcraft$extended();
+    boolean metalcraft$isExtended();
 }

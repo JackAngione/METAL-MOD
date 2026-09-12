@@ -336,6 +336,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 					this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
 				}
 				if (dev.metalcraft.client.lod.LodLoadedRenderer.AVAILABLE
+					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source && source.metalcraft$isExtended())
+					dev.metalcraft.client.lod.LodDistantRenderer.encoded(draw.indexCount());
+				if (dev.metalcraft.client.lod.LodLoadedRenderer.AVAILABLE
 					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source && source.metalcraft$isTerrain())
 					dev.metalcraft.client.lod.LodLoadedRenderer.encodedTerrain(draw.indexCount(), draw.indexCount(), source.metalcraft$isDistant());
 			}

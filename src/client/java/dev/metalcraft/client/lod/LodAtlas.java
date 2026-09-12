@@ -9,8 +9,11 @@ public final class LodAtlas {
     private static final int GRID = 64;
     private static volatile LodAtlas current = new LodAtlas(List.of());
     private final List<List<LodBakedMesh.Sprite>> buckets;
+    private final String fingerprint;
 
     public LodAtlas(List<LodBakedMesh.Sprite> sprites) {
+        fingerprint = LodDistantStore.digest(sprites.stream().sorted(java.util.Comparator.comparing(LodBakedMesh.Sprite::name))
+                .map(Object::toString).collect(java.util.stream.Collectors.joining("\n")));
         if (sprites.size() > 65536) throw new IllegalArgumentException("LOD atlas sprite limit exceeded");
         var cells = new ArrayList<List<LodBakedMesh.Sprite>>(GRID * GRID);
         for (int i = 0; i < GRID * GRID; i++) cells.add(new ArrayList<>());
@@ -30,6 +33,7 @@ public final class LodAtlas {
     public static LodAtlas current() { return current; }
     public static void publish(LodAtlas atlas) { current = java.util.Objects.requireNonNull(atlas); }
     public static void clear() { current = new LodAtlas(List.of()); }
+    public String fingerprint() { return fingerprint; }
 
     /** Require one real sprite containing the entire emitted footprint; ambiguous/custom UVs decline. */
     public LodBakedMesh.@Nullable Sprite resolve(float u0, float v0, float u1, float v1) {

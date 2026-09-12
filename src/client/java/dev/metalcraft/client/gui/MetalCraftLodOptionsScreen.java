@@ -91,6 +91,24 @@ public final class MetalCraftLodOptionsScreen extends Screen {
                         MetalCraftConfig.setLod(current.withRuntimeLimits(current.smoothTransitions(), current.meshBudgetMiB(), v));
                     }));
         }
+        if (capabilities.extendedHorizon()) {
+            rows.addChild(new MultiLineTextWidget(text("horizon.tooltip"), font).setMaxWidth(width).setCentered(true));
+            rows.addChild(CycleButton.<Integer>builder(v -> Component.translatable("metalcraft.lod.chunks",v),settings.horizonChunks())
+                    .withValues(16,32,64,128,256)
+                    .create(0,0,width,20,text("horizon"),(b,v) -> {
+                        var s=MetalCraftConfig.lod(); MetalCraftConfig.setLod(s.withHorizon(v,s.diskCache(),s.diskBudgetMiB()));
+                    }));
+            rows.addChild(CycleButton.onOffBuilder(settings.diskCache())
+                    .create(0,0,width,20,text("disk_cache"),(b,v) -> {
+                        var s=MetalCraftConfig.lod(); MetalCraftConfig.setLod(s.withHorizon(s.horizonChunks(),v,s.diskBudgetMiB()));
+                    }));
+            rows.addChild(CycleButton.<Integer>builder(v -> Component.translatable("metalcraft.lod.memory_mib",v),settings.diskBudgetMiB())
+                    .withValues(512,1024,2048,4096,8192)
+                    .create(0,0,width,20,text("disk_budget"),(b,v) -> {
+                        var s=MetalCraftConfig.lod(); MetalCraftConfig.setLod(s.withHorizon(s.horizonChunks(),s.diskCache(),v));
+                    }));
+            rows.addChild(Button.builder(text("clear_cache"),b -> dev.metalcraft.client.lod.LodDistantRenderer.clearCache()).width(width).build());
+        }
         rows.addChild(new MultiLineTextWidget(text("pending_stages"), font).setMaxWidth(width).setCentered(true));
         rows.addChild(Button.builder(text("reset"), b -> {
             MetalCraftConfig.setLod(LodSettings.defaults());

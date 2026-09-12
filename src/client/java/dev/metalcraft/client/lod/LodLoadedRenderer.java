@@ -60,6 +60,7 @@ public final class LodLoadedRenderer {
             active.residency.beginFrame(device.completedResourceSubmission());
             long workingSet = device.metal().recommendedWorkingSetBytes();
             long budget = settings.meshBudgetBytes(workingSet, device.metal().currentAllocatedBytes(), active.residency.chargedBytes());
+            if (settings.enabled() && settings.diskCache() && settings.horizonChunks() > 16) budget = Math.max(1, budget / 2);
             active.residency.setBudget(budget);
             active.residency.invalidate(key -> !settings.enabled() || active.owners.get(key) == null
                     || active.owners.get(key).currentMesh() == null);

@@ -33,6 +33,11 @@ abstract class LevelRendererLodDrawMixin {
         LodLoadedRenderer.prepare(((LevelRenderer)(Object)this).visibleSections(), levelRenderState.cameraRenderState);
     }
 
+    @Inject(method = "prepareChunkRenders", at = @At("RETURN"), cancellable = true)
+    private void metalcraft$distantLod(Matrix4fc view, CallbackInfoReturnable<ChunkSectionsToRender> cir) {
+        cir.setReturnValue(dev.metalcraft.client.lod.LodDistantRenderer.append(cir.getReturnValue(),levelRenderState.cameraRenderState));
+    }
+
     @WrapOperation(method = "prepareChunkRenders", at = @At(value = "NEW", target = "com/mojang/blaze3d/systems/RenderPass$Draw"))
     private RenderPass.Draw<GpuBufferSlice[]> metalcraft$attachLod(int slot, GpuBuffer vertices,
             GpuBuffer indices, IndexType indexType, int firstIndex, int indexCount, int baseVertex,

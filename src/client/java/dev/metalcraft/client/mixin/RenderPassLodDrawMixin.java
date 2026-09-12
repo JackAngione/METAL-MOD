@@ -11,6 +11,9 @@ import org.spongepowered.asm.mixin.Unique;
 abstract class RenderPassLodDrawMixin implements LodDrawSource {
     @Unique private LodLoadedRenderer.@Nullable Draw metalcraft$lod;
     @Unique private boolean metalcraft$terrain, metalcraft$distant;
+    @Unique private boolean metalcraft$extended;
+    @Override public void metalcraft$extended() { metalcraft$extended = true; }
+    @Override public boolean metalcraft$isExtended() { return metalcraft$extended; }
     @Override public LodLoadedRenderer.@Nullable Draw metalcraft$lodDraw() { return metalcraft$lod; }
     @Override public void metalcraft$lodDraw(LodLoadedRenderer.@Nullable Draw draw) { metalcraft$lod = draw; }
     @Override public void metalcraft$terrain(boolean distant) { metalcraft$terrain = true; metalcraft$distant = distant; }
