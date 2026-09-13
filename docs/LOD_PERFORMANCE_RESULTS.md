@@ -2,17 +2,19 @@
 
 Loaded-terrain geometry and composition validation pass. P6 implements the
 plan-authorized full-resolution reduced-lighting fallback; half/quarter pixel
-resolution remains deferred. P8 is being finalized as an **opt-in explored-terrain
-preview**, following the user's acceptance of modest large-horizon costs and request
-to complete the phase. The former loaded-geometry speedup targets remain future
+resolution remains deferred. P8 is complete as an **opt-in explored-terrain preview**, following the user's
+acceptance of modest large-horizon costs and explicit instruction to skip the
+remaining long tests (2026-09-12). The former loaded-geometry speedup targets remain future
 optimization objectives, not claims for this preview.
 
-The candidate exposes geometry and the 32–256-chunk horizon in Metal settings
+The preview exposes geometry and the 32–256-chunk horizon in Metal settings
 without a development flag. LOD stays off by default, with Balanced, full shading,
 a 16-chunk horizon, automatic mesh limits and a 2 GiB disk budget. Standard and
 no shader pack are supported; other packs retain ordinary rendering. Dense circles,
 lower-memory devices and true reduced-resolution shading are outside this preview's
-qualified coverage. Two of eight disabled-overhead pairs pass. Remaining captures and the final idle-path horizon regression require foreground availability.
+qualified coverage. Two of eight disabled-overhead pairs pass. The remaining six pairs
+and final idle-path horizon rerun were waived by the user; they are unmeasured,
+not passing results.
 
 ## P8 qualified explored-horizon preview
 
@@ -526,7 +528,7 @@ binds a texture buffer to a 2D vertex texture slot and aborts. This reproduces u
 the original HEAD native library with unchanged smoke source; it is not a passing
 validation command. [Baseline reproduction](evidence/lod/shading-distance/p6-baseline-metal-validation.txt).
 The regular build, targeted new native checks and live validation pass.
-P8 still owns performance qualification and release activation.
+P8 completion and its explicit validation scope are recorded at the top of this document.
 
 ## Persistent horizon implementation
 
@@ -642,24 +644,26 @@ cutoff. The assertion now tests magenta chroma over at least 500 samples and kee
 the <=10 baseline/restored leakage limit. Renderer appearance is unchanged.
 [Failed capture and analysis](evidence/lod/water-identity-threshold/validation.txt).
 
-## Remaining acceptance
+## Completion and remaining follow-ups
 
 P6's full-resolution reduced-lighting fallback is complete. Actual half/quarter
 pixel-resolution shading remains a deferred follow-up with its original cost,
 image and transition gates.
 
-P8 remains open for six of eight disabled-versus-pre-LOD pairs and a final full
-horizon/enable-disable regression after the idle-path refinement. The initial
-native/None/full pilot exceeded the 2% median target. Skipping idle maintenance and
-per-draw census now yields two passing native None/full and None/half pairs, with
-zero LOD capture, upload, draw bookkeeping and preparation work while off. The
-Standard/full baseline exhausts three foreground-loss retries; a read-only
-NSWorkspace check identifies Chrome foreground. An unlocked display alone does not
-qualify these timings. [Partial comparison](evidence/lod/p8-release/disabled-comparison/README.md)
-and [rejected attempts](evidence/lod/p8-release/disabled-focus-rejected/README.md).
-The final horizon rerun is necessary because the refinement changes the off-side
-cost and disable/retirement path. The earlier full route, repair/preparation probes,
-settings UI and native build pass; they are retained with their exact source identities.
+P8 is complete under the user-directed validation scope. On 2026-09-12 the user
+instructed us to skip the remaining long tests: six disabled-versus-pre-LOD pairs
+and the final full horizon/enable-disable regression after the idle refinement.
+Neither skipped check is represented as a pass. The earlier full route,
+repair/preparation probes, settings UI and native build remain the recorded evidence.
+
+The initial native/None/full pilot exceeded the 2% median target. Skipping idle
+maintenance and per-draw census then yielded two passing native None/full and
+None/half pairs, with zero LOD capture, upload, draw bookkeeping and preparation
+work while off. The full eight-case disabled target and the final refinement's
+horizon cost remain unestablished. These are documented measurement limits, not
+outstanding P8 completion requirements. [Partial comparison and waiver](evidence/lod/p8-release/disabled-comparison/README.md).
+The rejected foreground-loss attempts remain historical evidence in
+[the rejection record](evidence/lod/p8-release/disabled-focus-rejected/README.md).
 
 Separate follow-ups outside the opt-in explored-terrain preview are:
 

@@ -3,14 +3,17 @@
 Status: P1–P5 complete for conservative loaded geometry and composition compatibility.
 P6 is complete in the plan-authorized full-resolution reduced-lighting scope;
 half/quarter pixel-resolution shading remains deferred.
-P7 functional cache acceptance is complete. P8 final qualification is in progress.
+P7 functional cache acceptance is complete. P8 is complete for the opt-in explored-terrain preview.
 The loaded 16-case matrix and full 48-capture explored-horizon matrix pass execution.
 The explored horizon stays within the provisional median/p99 budgets; loaded
 geometry does not meet its former speedup objective. Following the user's request,
 P8 now qualifies an opt-in explored-terrain preview with explicit costs and limits.
-The candidate exposes the preview in Metal settings without a development flag,
+The preview is available in Metal settings without a development flag,
 keeps LOD off by default, and leaves reduced-resolution shading unavailable.
-The complete preparation-cost probe passes. Two of eight disabled-overhead pairs pass; the remaining captures and final idle-path horizon regression await foreground availability.
+The complete preparation-cost probe and two disabled-overhead pairs pass. On
+2026-09-12 the user explicitly waived the remaining six long baseline pairs and
+the final idle-path horizon rerun. These are skipped checks, not passing measurements;
+no further long runs are required to close P8.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
 `e0c116931908dc6747117348bce88998971b8752`. Existing uncommitted water work was
@@ -181,7 +184,8 @@ resources. Changing horizon never changes Minecraft render/simulation settings.
 Progress protocol: claim a task with owner/status before implementation; record
 partial progress or blockers beneath it; check it off only with validation evidence
 (commands, machine, scenario, and artifacts). Update this plan in the same change.
-P1–P7 are complete within their explicitly recorded scopes; Codex owns P8 qualification.
+P1–P8 are complete within their explicitly recorded scopes, including the user-directed
+P8 validation waiver below.
 Earlier partial-progress entries below are retained as dated evidence, not current blockers.
 
 Continuation claimed by Codex (2026-09-12): P6 implementation and P8 release
@@ -505,16 +509,18 @@ Final live checks remain in progress at this checkpoint.
     General shader lifecycle (42s) and the separate creative-search route (20s)
     also pass under native API validation, NORMAL terrain, 16/16 Default/Metal.
     [Final commands and logs](evidence/lod/horizon-final/validation.txt).
-- [ ] P8 — Tune presets and release gates. Complete the matrix below, set defaults
-  from evidence, document tradeoffs/limitations, and update README. Acceptance: all
-  correctness gates pass and published targets are met or explicitly revised with
-  measured results; do not market unmeasured extreme-distance performance.
-  - Final qualification claimed by Codex (2026-09-12, evening). The user requested
-    completion after the opt-in horizon scope was explained. Qualify explored terrain
-    with documented costs, preserve disabled/full-shading defaults, and treat loaded
-    geometry speedup as a deferred optimization objective. Geometry and horizon
-    controls now work without a development flag; final disabled-overhead validation
-    remains in progress. [Results](LOD_PERFORMANCE_RESULTS.md).
+- [x] P8 — Tune presets and release gates. Complete for the opt-in explored-terrain
+  preview (Codex, 2026-09-12), using the recorded measurements and the user-directed
+  waiver of the remaining long runs. Defaults, tradeoffs and limitations are documented
+  in README and the results. Skipped checks do not establish their performance targets;
+  do not market unmeasured extreme-distance performance.
+  - Closure: the user instructed "skip the long tests. they are unnecesary" after
+    the six remaining baseline pairs and final horizon rerun were identified. Those
+    requirements are waived for this completion. Existing native/UI, 48-capture horizon,
+    preparation-cost and two disabled-pair results are retained with their source identities.
+    Geometry and horizon controls work without a development flag; LOD remains off
+    by default. Loaded-geometry speedup remains a deferred objective.
+    [Results and remaining follow-ups](LOD_PERFORMANCE_RESULTS.md).
     - [x] Native API-validation build. The texel-buffer translator mismatch and shadow
       filtering test fixture are corrected. The complete build passes in 19s after
       final preparation instrumentation and 18s after the disabled-idle refinement.
@@ -546,17 +552,17 @@ Final live checks remain in progress at this checkpoint.
       selection, uniforms and CPU uploads. Median-of-repeat p95 is 0.165/0.161 ms for
       128/256; the largest enabled phase is 0.166 ms, below 1 ms.
       [Probe](evidence/lod/p8-release/horizon-cost/README.md).
-    - [ ] Pre-LOD disabled-overhead target (<=2% median / <=5% p99). The initial
-      native/None/full pilot misses the median target. Idle maintenance and per-draw
-      census are now skipped when disabled, with nonblocking retirement preserved.
-      Both native None/full and None/half pairs now pass all phase limits against
-      `f48460d`, with zero idle LOD work. Six pairs remain; Standard/full exhausts
-      three foreground-loss retries; Chrome is foreground at the subsequent check. Keep
-      Minecraft foreground for qualified timing. A clean preparation-script compile
-      passes in 1s. [Partial comparison](evidence/lod/p8-release/disabled-comparison/README.md). [Initial failed pilot](evidence/lod/p8-release/disabled-initial-pilot/README.md).
-    - [ ] Final horizon/enable-disable regression on the idle refinement. The earlier
-      48-capture route and complete preparation probe pass, but skipping disabled
-      bookkeeping changes the off-side cost; repeat the full route before closure.
+    - [x] Resolve disabled-overhead validation scope: two native None/full and None/half
+      pairs pass <=2% median / <=5% p99 in every measured phase after skipping idle
+      maintenance and per-draw census. The remaining six long pairs are **skipped at
+      the user's direction**, not recorded as passes. The complete eight-case target
+      remains unestablished. The initial failed pilot and foreground-rejected attempts
+      remain archived; reproduction setup compiles in 1s.
+      [Partial comparison](evidence/lod/p8-release/disabled-comparison/README.md).
+    - [x] Resolve final idle-path horizon regression: the user **waived this long rerun**.
+      The earlier 48-capture route and complete preparation probe pass on their recorded
+      sources; the idle refinement passes the native build and two disabled comparisons.
+      No new full horizon or enable-disable result is claimed for that refinement.
     - [x] Explicitly revised loaded-geometry objective: confirmed distant-triangle
       savings are 0.127–0.250%; no median speedup or 20% exclusive terrain-GPU saving
       is established. The preview offers explored scenery with stated cost. The former
@@ -654,7 +660,10 @@ tradeoff against the 16-chunk baseline; it does not require a speedup while draw
 more terrain. Keep the provisional 25% median / 35% p99 comparison below as an
 explicit reporting budget, and retain image, bounded-resource and correctness gates.
 
-- LOD disabled: no more than 2% median or 5% p99 frame-time regression versus baseline.
+- LOD disabled reporting target: no more than 2% median or 5% p99 frame-time regression
+  versus baseline. Two native None pairs pass. The user waived the remaining six long
+  pairs and final idle-path horizon rerun for P8 completion (2026-09-12); full matrix
+  confirmation is not claimed and is no longer a completion prerequisite.
 - Revised P8 scope (2026-09-12): an opt-in explored-terrain horizon with explicit
   measured cost and bounded resources. The former 50% distant-triangle / 20% terrain
   GPU improvement at 4K, 16/16 is a deferred optimization objective, not a release
