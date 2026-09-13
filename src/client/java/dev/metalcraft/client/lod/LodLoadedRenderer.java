@@ -149,7 +149,8 @@ public final class LodLoadedRenderer {
             }
             neighbors[index] = java.util.Arrays.copyOf(adjacent, length);
         }
-        int[] usefulTiers = LodSelector.balance(desired, neighbors);
+        var adjacency = LodSelector.adjacency(neighbors);
+        int[] usefulTiers = LodSelector.balance(desired, adjacency);
         candidates.sort(Comparator.comparingDouble(Candidate::distance));
         long allowance = switch (settings.backgroundWork()) { case LOW -> 256L << 10; case BALANCED -> 1L << 20; case HIGH -> 2L << 20; };
         int remaining = switch (settings.backgroundWork()) { case LOW -> 2; case BALANCED -> 4; case HIGH -> 8; };
@@ -177,7 +178,7 @@ public final class LodLoadedRenderer {
             if (residency.contains(new LodMeshResidency.Key(candidate.capture().key(), tier)))
                 available[candidate.index()] |= 1 << tier;
         }
-        int[] resolved = LodSelector.resolveLoaded(desired, before, available, neighbors, settings.smoothTransitions());
+        int[] resolved = LodSelector.resolveLoaded(desired, before, available, adjacency, settings.smoothTransitions());
         for (int index = 0; index < count; index++) {
             if (resolved[index] > desired[index] || (available[index] & (1 << resolved[index])) == 0)
                 throw new IllegalStateException("LOD selection exceeded available/error-safe tiers");

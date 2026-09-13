@@ -6,6 +6,10 @@ public final class LodSelector {
 
     /** Loaded-section adjacency relaxation, applied after transition limits. Fine decisions win. */
     public static int[] balance(int[] selected, int[][] neighbors) {
+        return balance(selected, adjacency(neighbors));
+    }
+
+    static int[] balance(int[] selected, Adjacency neighbors) {
         int[] available = new int[selected.length];
         java.util.Arrays.fill(available, 31);
         return resolveLoaded(selected, selected, available, neighbors, false);
@@ -19,42 +23,73 @@ public final class LodSelector {
      */
     public static int[] resolveLoaded(int[] candidates, int[] previous, int[] available,
             int[][] neighbors, boolean smoothing) {
-        int count = candidates.length;
-        if (previous.length != count || available.length != count || neighbors.length != count)
-            throw new IllegalArgumentException("Mismatched selection inputs");
-        // Make edges reciprocal: a refinement must wake all dependents even if the
-        // caller supplied each shared boundary only once.
+        return resolveLoaded(candidates, previous, available, adjacency(neighbors), smoothing);
+    }
+
+    /** Immutable reciprocal graph, shared by admission and final resolution within one frame. */
+    static final class Adjacency {
+        private final int[] offsets;
+        private final int[] nodes;
+
+        private Adjacency(int[] offsets, int[] nodes) {
+            this.offsets = offsets;
+            this.nodes = nodes;
+        }
+    }
+
+    static Adjacency adjacency(int[][] neighbors) {
+        int count = neighbors.length;
         int[] degree = new int[count];
         for (int node = 0; node < count; node++) for (int neighbor : neighbors[node]) {
             if (neighbor < 0 || neighbor >= count) throw new IllegalArgumentException("Invalid neighbor index");
             degree[node]++;
             degree[neighbor]++;
         }
-        int[][] adjacent = new int[count][];
-        for (int node = 0; node < count; node++) adjacent[node] = new int[degree[node]];
+        int[] offsets = new int[count + 1];
+        for (int node = 0; node < count; node++) offsets[node + 1] = Math.addExact(offsets[node], degree[node]);
+        int[] nodes = new int[offsets[count]];
         java.util.Arrays.fill(degree, 0);
         for (int node = 0; node < count; node++) for (int neighbor : neighbors[node]) {
-            adjacent[node][degree[node]++] = neighbor;
-            adjacent[neighbor][degree[neighbor]++] = node;
+            nodes[offsets[node] + degree[node]++] = neighbor;
+            nodes[offsets[neighbor] + degree[neighbor]++] = node;
         }
+        return new Adjacency(offsets, nodes);
+    }
+
+    static int[] resolveLoaded(int[] candidates, int[] previous, int[] available,
+            Adjacency adjacent, boolean smoothing) {
+        int count = candidates.length;
+        if (previous.length != count || available.length != count || adjacent.offsets.length != count + 1)
+            throw new IllegalArgumentException("Mismatched selection inputs");
         int[] result = new int[count];
         boolean[] queued = new boolean[count];
-        java.util.ArrayDeque<Integer> changed = new java.util.ArrayDeque<>();
+        // At most one queued entry per node. A fixed ring avoids per-frame boxing
+        // and retains FIFO propagation even when a processed node is refined again.
+        int[] changed = new int[count];
+        int head = 0, tail = 0, pending = count;
         for (int node = 0; node < count; node++) {
             if ((available[node] & 1) == 0 || (available[node] & ~31) != 0)
                 throw new IllegalArgumentException("Loaded sections require ordinary fallback and valid tier bits");
             result[node] = availableAtMost(transition(previous[node], candidates[node], smoothing), available[node]);
-            changed.add(node);
+            changed[node] = node;
             queued[node] = true;
         }
-        while (!changed.isEmpty()) {
-            int node = changed.removeFirst();
+        while (pending > 0) {
+            int node = changed[head];
+            if (++head == count) head = 0;
+            pending--;
             queued[node] = false;
             if (result[node] < 0) continue;
-            for (int neighbor : adjacent[node]) {
+            for (int edge = adjacent.offsets[node]; edge < adjacent.offsets[node + 1]; edge++) {
+                int neighbor = adjacent.nodes[edge];
                 if (result[neighbor] <= result[node] + 1) continue;
                 result[neighbor] = availableAtMost(result[node] + 1, available[neighbor]);
-                if (!queued[neighbor]) { changed.add(neighbor); queued[neighbor] = true; }
+                if (!queued[neighbor]) {
+                    changed[tail] = neighbor;
+                    if (++tail == count) tail = 0;
+                    pending++;
+                    queued[neighbor] = true;
+                }
             }
         }
         return result;

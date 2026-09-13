@@ -637,6 +637,17 @@ milestone must explicitly exclude multiresolution shading and its unpassed gates
 - [ ] P9.2 — Improve loaded geometry enough to demonstrate a net frame-time benefit.
   P9.1 reduces construction overhead only; the original triangle/GPU objectives
   remain unestablished.
+  - [x] P9.2a — Reduce per-frame loaded selection allocation. Owner: Codex
+    (2026-09-12), status: complete. Reciprocal adjacency is built once per visible
+    section set and shared between admission and final availability resolution;
+    a bounded integer ring replaces boxed queue entries.
+    `MTL_DEBUG_LAYER=1 ./gradlew build` passes in 19s on M4 Max/macOS 27.0,
+    including 1,000 random-graph comparisons against an independent solver and
+    empty/late-refinement/graph-ownership fixtures. A paired 256/4,096-node CPU
+    probe matches the previous selector and reduces median sample time 34–49%
+    and allocated bytes 68–71%, including both passes and graph preparation.
+    These are synthetic selection savings; P9.2's game frame-time objective stays
+    open. [Evidence and reproduction](evidence/lod/shared-selection/README.md).
 - [ ] P9.3 — Qualify dense explored coverage and sustained repair churn, including
   actual driver allocation peaks and base/lower-memory Apple Silicon when available.
 - [ ] P9.4 — Implement actual half/quarter pixel-resolution shading that passes

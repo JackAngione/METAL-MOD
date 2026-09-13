@@ -680,3 +680,14 @@ fixtures match the pre-change tier output and reduce median sample construction
 cost by 28–69% and allocated bytes by 61–63% on M4 Max. The native validation build
 passes. These synthetic worker measurements do not establish game frame-time gains
 or change the measured triangle savings above. [Evidence and reproduction](evidence/lod/shared-classification/README.md).
+
+
+### Loaded selection follow-up (2026-09-12)
+
+P9.2a builds reciprocal adjacency once for the two loaded-selection passes and
+uses a bounded integer work queue. A short paired probe, including graph
+construction, matches prior selector outputs and reduces median sample CPU time
+34–49% and allocated bytes 68–71% across four 256/4,096-node fixtures. Independent
+randomized solver checks and the native validation build pass. This is synthetic
+selection evidence, not a game frame-time or GPU claim; P9.2 remains open.
+[Evidence and reproduction](evidence/lod/shared-selection/README.md).

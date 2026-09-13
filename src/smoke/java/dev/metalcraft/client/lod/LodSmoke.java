@@ -280,6 +280,19 @@ public final class LodSmoke {
                 "smoothing cannot jump over a missing uploaded tier");
         check(LodSelector.resolveLoaded(new int[]{2}, new int[]{4}, new int[]{17}, new int[][]{{}}, false)[0] == 0,
                 "availability fallback never exceeds screen-error tier");
+        check(LodSelector.resolveLoaded(new int[0], new int[0], new int[0],
+                LodSelector.adjacency(new int[0][]), true).length == 0, "empty graph has no queue work");
+        int[][] chain = new int[1024][];
+        int[] coarse = new int[1024], allTiers = new int[1024];
+        java.util.Arrays.fill(coarse, 4);
+        java.util.Arrays.fill(allTiers, 31);
+        coarse[1023] = 0;
+        for (int i = 0; i < chain.length; i++) chain[i] = i + 1 < chain.length ? new int[]{i + 1} : new int[0];
+        var graph = LodSelector.adjacency(chain);
+        var expected = referenceSelection(coarse, coarse, allTiers, chain, false);
+        for (int[] edge : chain) java.util.Arrays.fill(edge, 0);
+        check(java.util.Arrays.equals(LodSelector.resolveLoaded(coarse, coarse, allTiers, graph, false), expected),
+                "queue wraps for late refinement and graph owns its input copy");
         // Random sparse availability and one-way boundary graphs catch cascade/order failures.
         var random = new java.util.Random(431);
         for (int fixture = 0; fixture < 1000; fixture++) {
@@ -291,7 +304,14 @@ public final class LodSmoke {
                 available[i] = random.nextInt(16) * 2 + 1;
                 edges[i] = new int[]{random.nextInt(20), random.nextInt(20)};
             }
-            int[] result = LodSelector.resolveLoaded(candidate, previous, available, edges, true);
+            var adjacency = LodSelector.adjacency(edges);
+            LodSelector.balance(candidate, adjacency);
+            int[] result = LodSelector.resolveLoaded(candidate, previous, available, adjacency, true);
+            check(java.util.Arrays.equals(result, referenceSelection(candidate, previous, available, edges, true)),
+                    "shared graph and ring queue match fixed-point reference");
+            check(java.util.Arrays.equals(LodSelector.resolveLoaded(candidate, previous, available, adjacency, false),
+                    referenceSelection(candidate, previous, available, edges, false)),
+                    "reused graph preserves unsmoothed availability cascades");
             for (int i = 0; i < 20; i++) {
                 check(result[i] <= candidate[i], "resolved tier never coarser than error decision");
                 check(result[i] < 0 || (available[i] & (1 << result[i])) != 0, "every selected mesh is available");
@@ -300,6 +320,28 @@ public final class LodSmoke {
                         || Math.abs(result[i] - result[neighbor]) <= 1, "every visible boundary balanced after fallback");
             }
         }
+    }
+
+    /** Deliberately simple repeated edge scans, independent of the production FIFO/CSR graph. */
+    private static int[] referenceSelection(int[] candidate, int[] previous, int[] available,
+            int[][] edges, boolean smoothing) {
+        int[] result = new int[candidate.length];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = LodSelector.transition(previous[i], candidate[i], smoothing);
+            while (result[i] > 0 && (available[i] & (1 << result[i])) == 0) result[i]--;
+        }
+        boolean changed;
+        do {
+            changed = false;
+            for (int i = 0; i < result.length; i++) for (int j : edges[i]) {
+                if (result[i] < 0 || result[j] < 0 || Math.abs(result[i] - result[j]) <= 1) continue;
+                int coarse = result[i] > result[j] ? i : j;
+                result[coarse] = Math.min(result[i], result[j]) + 1;
+                while (result[coarse] > 0 && (available[coarse] & (1 << result[coarse])) == 0) result[coarse]--;
+                changed = true;
+            }
+        } while (changed);
+        return result;
     }
 
     private static void scheduling() {
