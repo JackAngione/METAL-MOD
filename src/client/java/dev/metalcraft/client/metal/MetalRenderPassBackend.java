@@ -302,11 +302,12 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			&& draws.stream().anyMatch(draw -> ((Object)draw) instanceof WaterDrawSource source && source.metalcraft$waterMesh() != null);
 		// Per-draw immutable uniforms are retired after encoding; don't defer their native binds.
 		MetalCommandStream batch = BATCHING && !waterEligible ? this.beginRecording() : null;
+		boolean lodDraws = dev.metalcraft.client.lod.LodLoadedRenderer.trackingDraws();
 		try {
 			for (RenderPass.Draw<T> draw : draws) {
 				BiConsumer<T, RenderPass.UniformUploader> uploader = draw.uniformUploaderConsumer();
 				if (uploader != null) uploader.accept(uniformArgument, this::setUniform);
-				if (dev.metalcraft.client.lod.LodLoadedRenderer.AVAILABLE
+				if (lodDraws
 					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source
 					&& source.metalcraft$lodDraw() != null
 					&& this.tryLodDraw(source.metalcraft$lodDraw(), baseline, defaultIndexBuffer, defaultIndexType)) continue;
@@ -335,10 +336,10 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 				} else {
 					this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
 				}
-				if (dev.metalcraft.client.lod.LodLoadedRenderer.AVAILABLE
+				if (lodDraws
 					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source && source.metalcraft$isExtended())
 					dev.metalcraft.client.lod.LodDistantRenderer.encoded(draw.indexCount());
-				if (dev.metalcraft.client.lod.LodLoadedRenderer.AVAILABLE
+				if (lodDraws
 					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source && source.metalcraft$isTerrain())
 					dev.metalcraft.client.lod.LodLoadedRenderer.encodedTerrain(draw.indexCount(), draw.indexCount(), source.metalcraft$isDistant());
 			}

@@ -1,0 +1,158 @@
+[
+  {
+    "name": "0000_metalcraft-lod-horizon-explored.png",
+    "sha256": "e1c0f272549b7b50aac01aa23d467ab4fc1f6daee1f91cda0b7ac1195f62d9b6",
+    "bytes": 506858,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0000_metalcraft-lod-horizon-explored.png"
+  },
+  {
+    "name": "0001_metalcraft-lod-horizon-32.png",
+    "sha256": "117212f800108e7786d63e97ccf18824afb98e25060cde6344ad5f22a8c3b56c",
+    "bytes": 222801,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0001_metalcraft-lod-horizon-32.png"
+  },
+  {
+    "name": "0002_metalcraft-lod-horizon-64.png",
+    "sha256": "1100048c9c29114af0489feb465e7aef20e5aa78b8e4bb9ac7ccbf84427278f5",
+    "bytes": 64779,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0002_metalcraft-lod-horizon-64.png"
+  },
+  {
+    "name": "0003_metalcraft-lod-horizon-128.png",
+    "sha256": "7ceba8282e44fc53cf8a45b8fc66e973d8cc4a4c13a918a485fa8ead3565c6fc",
+    "bytes": 28882,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0003_metalcraft-lod-horizon-128.png"
+  },
+  {
+    "name": "0004_horizon-128-metalcraft-standard-half-false-lod-false#1.png",
+    "sha256": "be65b72f167ec2738304126782f3f52d4a83417c614984e6a1b032bcf2df166b",
+    "bytes": 657824,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0004_horizon-128-metalcraft-standard-half-false-lod-false#1.png"
+  },
+  {
+    "name": "0005_horizon-128-metalcraft-standard-half-false-lod-true#1.png",
+    "sha256": "684d8864a0763b5ea504bb9490d04d00ec9f4119acb06a7cf45a292da3bcf6dd",
+    "bytes": 1586697,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0005_horizon-128-metalcraft-standard-half-false-lod-true#1.png"
+  },
+  {
+    "name": "0006_horizon-128-metalcraft-standard-half-true-lod-false#1.png",
+    "sha256": "114596206e70d64d20bca3bc44dbb235fb1c937d4da82bdae7108c198851e778",
+    "bytes": 291257,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0006_horizon-128-metalcraft-standard-half-true-lod-false#1.png"
+  },
+  {
+    "name": "0007_horizon-128-metalcraft-standard-half-true-lod-true#1.png",
+    "sha256": "1d44564dbef42dcd7bd273a7f067ce2d6e03e716d45010e0d75c4226ed531ce8",
+    "bytes": 395592,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0007_horizon-128-metalcraft-standard-half-true-lod-true#1.png"
+  },
+  {
+    "name": "0008_horizon-128-none-half-false-lod-false#1.png",
+    "sha256": "1d09caca33af19114a79cb2b993d442fc8a32a885366bad18b8280a032acc6ac",
+    "bytes": 1295002,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0008_horizon-128-none-half-false-lod-false#1.png"
+  },
+  {
+    "name": "0009_horizon-128-none-half-false-lod-true#1.png",
+    "sha256": "597960efa04626e547e8d4c213a0c8eae8ab449b8d7ad4ce7f48fd79e02ba9f4",
+    "bytes": 1726073,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0009_horizon-128-none-half-false-lod-true#1.png"
+  },
+  {
+    "name": "0010_horizon-128-none-half-true-lod-false#1.png",
+    "sha256": "da35a4a7759edc053a60ed0e1024c28cd1e3ecee73819549336703f708494b2b",
+    "bytes": 338748,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0010_horizon-128-none-half-true-lod-false#1.png"
+  },
+  {
+    "name": "0011_horizon-128-none-half-true-lod-true#1.png",
+    "sha256": "b55e7b023edf1a87d0657324d6c12a7966a3923dbeb8ac5fc699328ba83fe10e",
+    "bytes": 427121,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0011_horizon-128-none-half-true-lod-true#1.png"
+  },
+  {
+    "name": "0012_metalcraft-lod-horizon-256.png",
+    "sha256": "d07ecece0f0999bc401b3bdfaf3152959fa133bc3e0f4dfcb111570b74eb0d95",
+    "bytes": 98716,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0012_metalcraft-lod-horizon-256.png"
+  },
+  {
+    "name": "0013_horizon-256-metalcraft-standard-half-false-lod-false#1.png",
+    "sha256": "e295a1afe7afc565254d51e07d4b22522b7e8f717b3c1e5d539c72f6279dcb2a",
+    "bytes": 413836,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0013_horizon-256-metalcraft-standard-half-false-lod-false#1.png"
+  },
+  {
+    "name": "0014_horizon-256-metalcraft-standard-half-false-lod-true#1.png",
+    "sha256": "432e14ec32373859d24622b59153d3262a179e78e4936294742226a8887e26ea",
+    "bytes": 1436757,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0014_horizon-256-metalcraft-standard-half-false-lod-true#1.png"
+  },
+  {
+    "name": "0015_horizon-256-metalcraft-standard-half-true-lod-false#1.png",
+    "sha256": "5014748308f8147714563015010f7587697758e6afb503d59a06e3b89f999064",
+    "bytes": 264290,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0015_horizon-256-metalcraft-standard-half-true-lod-false#1.png"
+  },
+  {
+    "name": "0016_horizon-256-metalcraft-standard-half-true-lod-true#1.png",
+    "sha256": "9e8330b59e1e3aea0c97d7e7b50a06809e11824ddedf116b667c051e1c80543b",
+    "bytes": 360377,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0016_horizon-256-metalcraft-standard-half-true-lod-true#1.png"
+  },
+  {
+    "name": "0017_horizon-256-none-half-false-lod-false#1.png",
+    "sha256": "8b7662913359a239c293de981f0e0aa9c840e0eed5ba78d05879d3000676bb0e",
+    "bytes": 1137641,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0017_horizon-256-none-half-false-lod-false#1.png"
+  },
+  {
+    "name": "0018_horizon-256-none-half-false-lod-true#1.png",
+    "sha256": "fddbb6ed25f4ddbf4b75ae27ef54696e87c11738063bfe1226cc5716fa6ac78a",
+    "bytes": 1511137,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0018_horizon-256-none-half-false-lod-true#1.png"
+  },
+  {
+    "name": "0019_horizon-256-none-half-true-lod-false#1.png",
+    "sha256": "69c39eef8ed1e4a0097e613b9dcae5457b7b4515c3fc1e40d99500f68f7e43b6",
+    "bytes": 311729,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0019_horizon-256-none-half-true-lod-false#1.png"
+  },
+  {
+    "name": "0020_horizon-256-none-half-true-lod-true#1.png",
+    "sha256": "691bfccb643649a383865f75504f6fc254a48927a264b577ef6830ebd58e8140",
+    "bytes": 374467,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0020_horizon-256-none-half-true-lod-true#1.png"
+  },
+  {
+    "name": "0021_metalcraft-lod-horizon-none.png",
+    "sha256": "10706224893ec8e8a23cbc827b22f46ffc72c4deeb93e2b59f90ed60ed84006a",
+    "bytes": 380805,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0021_metalcraft-lod-horizon-none.png"
+  },
+  {
+    "name": "0022_metalcraft-lod-horizon-edited.png",
+    "sha256": "c9274a3b8c2adde20b53a55705bb26f67d082500179a50996f410b2de20bf98b",
+    "bytes": 1017763,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0022_metalcraft-lod-horizon-edited.png"
+  },
+  {
+    "name": "0023_metalcraft-lod-horizon-reloaded.png",
+    "sha256": "f181c141129b7a489306039ff5b2b561e5228c84e2661de05eb04bdff68a1f7a",
+    "bytes": 1016938,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0023_metalcraft-lod-horizon-reloaded.png"
+  },
+  {
+    "name": "0024_metalcraft-lod-horizon-off.png",
+    "sha256": "7adffa2d4525e6e1153b927306bb047905b07b7fd8e369ecbb7f3667e665bbff",
+    "bytes": 279944,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0024_metalcraft-lod-horizon-off.png"
+  },
+  {
+    "name": "0025_metalcraft-lod-horizon-reopened.png",
+    "sha256": "5c0ca59719e7cb6241ab6a8c225a0c16bed69aa1e8340c1505321dbf51a1ab69",
+    "bytes": 491633,
+    "localPath": "/Users/jackangione/Desktop/VULKAN SHADERS/build/reports/lod-horizon-preview/0025_metalcraft-lod-horizon-reopened.png"
+  }
+]

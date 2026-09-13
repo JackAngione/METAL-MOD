@@ -37,8 +37,9 @@ final class MetalLodHorizonBenchmark {
                 }
             }
             if (!loaded) throw new AssertionError("Missing server-tracked terrain in horizon benchmark");
-            for (String selectedPack : List.of(ShaderPackRuntime.BUILTIN_ID, ShaderPackRuntime.NONE_ID)) {
-                for (boolean selectedHalf : new boolean[]{false, true}) {
+            boolean costProbe = Boolean.getBoolean("metalcraft.lodHorizonCostProbe");
+            for (String selectedPack : costProbe ? List.of(ShaderPackRuntime.BUILTIN_ID) : List.of(ShaderPackRuntime.BUILTIN_ID, ShaderPackRuntime.NONE_ID)) {
+                for (boolean selectedHalf : costProbe ? new boolean[]{false} : new boolean[]{false, true}) {
                     context.runOnClient(c -> {
                         ShaderPackRuntime.active().selectPack(selectedPack);
                         MetalCraftConfig.setHalfResolution(selectedHalf);
@@ -69,17 +70,11 @@ final class MetalLodHorizonBenchmark {
                             lastUploads = uploads;
                         }
                         if (stable < 20) throw new AssertionError("Horizon GPU residency did not stabilize");
-                        var before = LodDistantRenderer.stats();
                         String name = "horizon-" + horizon + "-" + selectedPack + "-half-" + selectedHalf + "-lod-" + enabled + "#" + (repeat + 1);
-                        MetalBenchmarkEnvironment.focus(context);
-                        var presentation = context.computeOnClient(c -> new MetalBenchmarkEnvironment.Presentation());
-                        context.runOnClient(c -> MetalFrameMetrics.beginCapture(30));
-                        for (int tick = 0; tick < 80; tick++) {
-                            context.waitTick();
-                            context.runOnClient(c -> presentation.check());
-                        }
-                        var phase = context.computeOnClient(c -> MetalFrameMetrics.endCapture(name));
-                        var after = LodDistantRenderer.stats();
+                        var capture = capture(context, name);
+                        var phase = capture.phase();
+                        var before = capture.before();
+                        var after = capture.after();
                         if (phase.frames() < 120 || phase.gpuFrame().samplesMs().length < phase.frames() * .95
                                 || phase.gpuFrame().invalidFrames() != 0 || phase.gpuFrame().overflowFrames() != 0)
                             throw new AssertionError("Incomplete horizon frame timing: " + name);
@@ -88,7 +83,8 @@ final class MetalLodHorizonBenchmark {
                             throw new AssertionError("Horizon benchmark lost valid bounded terrain ownership");
                         var row = new LinkedHashMap<String, Object>();
                         row.put("phase", com.google.gson.JsonParser.parseString(phase.toJson()));
-                        row.put("presentation", context.computeOnClient(c -> presentation.describe()));
+                        row.put("presentation", capture.presentation());
+                        row.put("discardedPresentationAttempts", capture.discarded());
                         row.put("horizon", horizon); row.put("enabled", enabled); row.put("repeat", repeat + 1);
                         row.put("environment", context.computeOnClient(c -> MetalBenchmarkEnvironment.describe()));
                         row.put("camera", context.computeOnClient(c -> MetalBenchmarkEnvironment.camera()));
@@ -112,5 +108,37 @@ final class MetalLodHorizonBenchmark {
                 c.invalidateSurfaceConfiguration();
             });
         }
+    }
+
+    private record Capture(MetalFrameMetrics.Phase phase, com.google.gson.JsonObject presentation,
+                           LodDistantRenderer.Stats before, LodDistantRenderer.Stats after,
+                           List<Map<String, Object>> discarded) { }
+
+    /** A focus interruption rejects the entire phase; only a fresh, fully checked retry is retained. */
+    private static Capture capture(ClientGameTestContext context, String name) {
+        var discarded = new ArrayList<Map<String, Object>>();
+        for (int attempt = 0; attempt < 3; attempt++) {
+            MetalBenchmarkEnvironment.focus(context);
+            context.waitTicks(20);
+            try {
+                var presentation = context.computeOnClient(c -> new MetalBenchmarkEnvironment.Presentation());
+                var before = LodDistantRenderer.stats();
+                context.runOnClient(c -> MetalFrameMetrics.beginCapture(30));
+                System.out.println("LOD horizon capturing: " + name + " attempt=" + (attempt + 1));
+                for (int tick = 0; tick < 80; tick++) {
+                    context.waitTick();
+                    context.runOnClient(c -> presentation.check());
+                }
+                var phase = context.computeOnClient(c -> MetalFrameMetrics.endCapture(name));
+                var checked = context.computeOnClient(c -> presentation.describe());
+                return new Capture(phase, checked, before, LodDistantRenderer.stats(), List.copyOf(discarded));
+            } catch (MetalBenchmarkEnvironment.PresentationInterrupted interrupted) {
+                int frames = context.computeOnClient(c -> MetalFrameMetrics.discardCapture());
+                discarded.add(Map.of("reason", interrupted.getMessage(), "discardedFrames", frames));
+                System.out.println("LOD horizon discarded interrupted phase: " + name + ", frames=" + frames);
+                if (attempt == 2) throw interrupted;
+            }
+        }
+        throw new AssertionError("Unreachable capture retry state");
     }
 }

@@ -19,6 +19,7 @@ final class MetalLodHorizonGameTest {
         var saved=MetalCraftConfig.lod();
         String pack=context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
         var report=new LinkedHashMap<String,Object>();
+        report.put("costProbe",Boolean.getBoolean("metalcraft.lodHorizonCostProbe"));
         var waits=new LinkedHashMap<String,java.util.List<Long>>();
         WAITS.set(waits);
         report.put("readinessWaitNanos",waits);

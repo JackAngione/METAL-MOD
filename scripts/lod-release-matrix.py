@@ -71,7 +71,7 @@ def main():
                     name = f"{label}-{pack}-half-{str(half).lower()}-lod-{str(enabled).lower()}"
                     folder = args.output / name
                     command = ["./gradlew", "runClient", "-PmetalLifecycleTest", "-PmetalLifecycleBenchmark=true",
-                               "-PmetalLodExperimental=true", f"-PmetalBenchmarkLod={str(enabled).lower()}",
+                               "-PmetalLodTerrainCensus=true", f"-PmetalBenchmarkLod={str(enabled).lower()}",
                                f"-PmetalBenchmarkPack={pack}", "-PmetalBenchmarkRenderDistance=16",
                                "-PmetalBenchmarkSimulationDistance=16", f"-PmetalBenchmarkResolution={resolution[0]}x{resolution[1]}",
                                f"-PmetalBenchmarkFullscreen={str(fullscreen).lower()}",

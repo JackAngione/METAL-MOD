@@ -22,9 +22,9 @@ final class MetalLodTestScope implements AutoCloseable {
         this.context = context;
         saved = MetalCraftConfig.lod();
         if (enabled) {
-            if (!LodCapabilities.EXPERIMENTAL) throw new IllegalArgumentException("LOD validation requires -PmetalLodExperimental=true");
-            if (HORIZON>16 && !LodCapabilities.HORIZON_EXPERIMENTAL)
-                throw new IllegalArgumentException("Extended composition validation requires -PmetalLodHorizonExperimental=true");
+            if (!LodCapabilities.GEOMETRY_AVAILABLE) throw new IllegalArgumentException("LOD geometry is unavailable");
+            if (HORIZON>16 && !LodCapabilities.HORIZON_AVAILABLE)
+                throw new IllegalArgumentException("Extended horizon is unavailable");
             context.runOnClient(client -> MetalCraftConfig.setLod(LodSettings.defaults().withGeometry(2, 2)
                     .withEnabled(true).withHorizon(HORIZON,true,512)));
         }

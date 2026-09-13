@@ -152,6 +152,8 @@ def benchmarkProperties = [
 	metalBenchmarkHalfResolution: 'metalcraft.benchmarkHalfResolution',
 	metalBenchmarkFullscreen: 'metalcraft.benchmarkFullscreen',
 	metalLodHorizonBenchmark: 'metalcraft.lodHorizonBenchmark',
+	metalLodHorizonCostProbe: 'metalcraft.lodHorizonCostProbe',
+	metalLodTerrainCensus: 'metalcraft.lodTerrainCensus',
 	metalLodHorizonToggleProbe: 'metalcraft.lodHorizonToggleProbe',
 	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
 	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',

@@ -3,14 +3,14 @@
 Status: P1–P5 complete for conservative loaded geometry and composition compatibility.
 P6 is complete in the plan-authorized full-resolution reduced-lighting scope;
 half/quarter pixel-resolution shading remains deferred.
-P7 functional cache acceptance is complete; P8 release acceptance remains open.
-P8 continuation (2026-09-12): the full 16-case matrix and native API-validation build
-pass execution, including continuous presentation checks and verified 4K fullscreen.
-Loaded geometry misses its performance targets. The subsequent horizon attempt was
-rejected before timing after the Mac locked again; horizon and pre-LOD baseline
-qualification await an unlocked display. Defaults and release gates stay conservative.
-Geometry is available only with the experimental validation flag;
-release capability gates remain closed.
+P7 functional cache acceptance is complete. P8 final qualification is in progress.
+The loaded 16-case matrix and full 48-capture explored-horizon matrix pass execution.
+The explored horizon stays within the provisional median/p99 budgets; loaded
+geometry does not meet its former speedup objective. Following the user's request,
+P8 now qualifies an opt-in explored-terrain preview with explicit costs and limits.
+The candidate exposes the preview in Metal settings without a development flag,
+keeps LOD off by default, and leaves reduced-resolution shading unavailable.
+The complete preparation-cost probe passes. Two of eight disabled-overhead pairs pass; the remaining captures and final idle-path horizon regression await foreground availability.
 
 Branch: `codex/LOD-feature`, created from `codex/water-effects` at
 `e0c116931908dc6747117348bce88998971b8752`. Existing uncommitted water work was
@@ -509,80 +509,70 @@ Final live checks remain in progress at this checkpoint.
   from evidence, document tradeoffs/limitations, and update README. Acceptance: all
   correctness gates pass and published targets are met or explicitly revised with
   measured results; do not market unmeasured extreme-distance performance.
-  - Continuation owner: Codex (2026-09-12). Measurement implementation is complete;
-    release criteria remain unmet. [Current results and remaining work](LOD_PERFORMANCE_RESULTS.md).
-    - [x] Full native-validation build. The texel-buffer assertion was a translator
-      ABI mismatch; SPIRV-Cross now emits native Metal texture buffers. A shader-schema
-      regression fails before the fix; real texel sampling passes after. The newly
-      reachable shadow-filtering fixture now uses separate layered-depth and ordinary
-      color vertex entry points. `MTL_DEBUG_LAYER=1 ./gradlew build` passes in 17s,
-      then 16s after horizon diagnostics. [Evidence](evidence/lod/p8-release/validation/README.md).
-    - [x] Nonblocking GPU frame distributions, loaded-worker total/max build timing,
-      CPU reservation/retention high-water charges, OS resident/physical-footprint
-      process peaks, and thermal provenance. Native multi-buffer, empty/incomplete,
-      phase-isolation and delayed-completion fixtures pass. GPU spans include gaps
-      and are not exclusive terrain timings; sampled allocations are not peaks.
-    - [x] Receive/render readiness, full-pan warm-up and actual fullscreen selection.
-      The 16-case Standard/None × 1080p/native × full/half × off/on matrix completes
-      on M4 Max/64 GB, NORMAL seed `metalcraft`, 16/16 Default/Metal. All 144 phases
-      receive all 1,057 tracked chunks and pass continuous AppKit/GLFW foreground,
-      visibility, monitor-attachment and drawable checks (11,808 checks total).
-      Native drawable is 3840×2160. GPU coverage is >=99.656%, sampled thermal state
-      is nominal, uploads never fail, and all 16 clients exit cleanly. Source state
-      is frozen across the matrix and saved with each invocation's digest.
-      [Raw cases and source patch](evidence/lod/p8-release/matrix/README.md).
-      Capture qualification does not establish image parity or unpaced presentation:
-      input triangle counts vary about −4.13% to +2.02% between matched phase summaries,
-      and some None-pack cases have substantial acquire/presentation variability.
-      Earlier locked-display/window-mode attempts remain diagnostic history only:
-      [window-mode rejection](evidence/lod/window-mode-failure/validation.txt),
-      [earlier windowed captures](evidence/lod/release-windowed-diagnostic/validation.txt).
-    - [x] Same-world distant-cache re-enable regression. Missing cache state now
-      triggers reopening even when world/device/atlas are unchanged. The focused
-      assertion fails before the fix and passes afterward (78s, native API validation,
-      NORMAL, 16/16 Default/Metal); the full horizon route retains this assertion.
-      [Before/after evidence](evidence/lod/horizon-reenable-failure/validation.txt).
-    - [ ] Fresh 128/256-chunk timing qualification. The earlier 48-capture explored
-      patch route passes lifecycle in 12m37s, but did not record lock/focus state.
-      Its 1,007/1,001 represented sections are sparse patches, not dense circles.
-      [Earlier provisional timing](evidence/lod/release-horizon/summary.json).
-      The new route checks presentation continuously and records exploration/warm-up
-      waits, three repeated edit-to-persist latencies, worker update latency, compressed
-      queue high-water, charged GPU mesh payload (including retired resources), and
-      owned disk payload before atomic rename/trim. Native build passes. The first
-      new run fails before timing at focus acquisition after the Mac locks again;
-      it is rejected and retained. [Failure](evidence/lod/p8-release/horizon-focus-rejected/README.md).
-      Run `python3 scripts/lod-run-horizon.py` after unlock. Payload counters exclude
-      driver allocation overhead and filesystem metadata/rounding.
-    - [ ] Pre-LOD disabled-overhead gate (<=2% median / <=5% p99). The detached
-      `f48460d` baseline with an auditable measurement-only backport compiles.
-      `scripts/lod-run-baseline.py` runs the eight counterparts of the current matrix;
-      `scripts/lod-disabled-summary.py` checks source/command/capture identity.
-      Live measurement remains pending unlock. Current matrix pairs are experimental
-      capability off/on, not evidence for this separate disabled-overhead gate.
-      [Prepared baseline patch and provenance](evidence/lod/p8-release/baseline-prepared/README.md).
-    - [ ] Loaded-geometry targets. The confirmed matrix saves only **0.127–0.250%**
-      of distant triangles, versus the proposed 50%. Median intervals increase in
-      every tested configuration; 4K Standard/full increases 11.69–14.24% across
-      phases. LOD preparation p95 stays below 0.234 ms, but no 20% exclusive terrain-GPU
-      saving is established. Improve the approach or explicitly revise the release
-      scope with measured evidence; the user accepts modest large-horizon cost,
-      not an unmeasured loaded-geometry speedup.
-    - [ ] Dense horizon/repair-churn throughput, actual driver GPU allocation peaks,
-      and base/lower-memory Apple Silicon. Current evidence is M4 Max explored
-      patches only; logical payload high-water instrumentation does not close these gates.
-    - [ ] Intermittent GLFW final-window-reset fault. Symbolication locates a null
-      monitor in GLFW's Cocoa video-mode path. The callback sequence that creates
-      that state is unknown. Sixteen clean matrix exits do not prove it fixed.
-      [Local binary disassembly and analysis](evidence/lod/p8-release/validation/glfw-analysis.md).
-    - [x] Evidence-based defaults and documentation: LOD off, Balanced, full shading,
-      16-chunk horizon and the default 2 GiB disk budget. All three release capability
-      gates stay closed. README documents capture tools, scope and remaining limits;
-      no measured optimization or dense extreme-distance claim is promoted.
-    - Final checkpoint: native build passes in 16s; all seven Python runners/summaries
-      compile; the archived matrix regenerates identically; `git diff --check` passes.
-      No benchmark process remains active. Development render/simulation distances
-      are restored to 16/16, with LOD off and full shading.
+  - Final qualification claimed by Codex (2026-09-12, evening). The user requested
+    completion after the opt-in horizon scope was explained. Qualify explored terrain
+    with documented costs, preserve disabled/full-shading defaults, and treat loaded
+    geometry speedup as a deferred optimization objective. Geometry and horizon
+    controls now work without a development flag; final disabled-overhead validation
+    remains in progress. [Results](LOD_PERFORMANCE_RESULTS.md).
+    - [x] Native API-validation build. The texel-buffer translator mismatch and shadow
+      filtering test fixture are corrected. The complete build passes in 19s after
+      final preparation instrumentation and 18s after the disabled-idle refinement.
+      [Evidence](evidence/lod/p8-release/validation/README.md).
+    - [x] GPU frame distributions, loaded-worker total/max build time, CPU reservation
+      and retention charges, OS resident/physical-footprint peaks, and thermal provenance.
+      Real native capture isolation, delayed completion and multi-buffer fixtures pass.
+      GPU spans include gaps; they are not exclusive terrain timings.
+    - [x] Loaded performance matrix: 16 Standard/None × 1080p/native × full/half × off/on
+      cases, 144 phases, NORMAL seed `metalcraft`, 16/16 Default/Metal, M4 Max/64 GB.
+      All 1,057 tracked chunks arrive and rendering settles; continuous presentation
+      checks and >=99.656% GPU coverage pass. [Matrix](evidence/lod/p8-release/matrix/README.md).
+    - [x] Fresh cold-test-cache 128/256 horizon route: all 48 captures and same-world
+      re-enable, three repeated repairs, reload, dimension isolation/return, persisted
+      reopen, active/inactive clear and both closes pass in 13m13s. All eight frame
+      comparisons meet +25% median / +35% p99; maximum median cost is 21.83%.
+      The enabled scenes represent 1,002/995 explored sections, not dense circles.
+      A controlled foreground interruption discards all 220 disturbed frames, then
+      passes a fresh attempt; rendering/mode errors are never retried as focus loss.
+      [Qualified route and inspected images](evidence/lod/p8-release/horizon-preview/README.md).
+    - [x] Cold readiness, repair and bounded-resource diagnostics: 47.85s designated
+      exploration including its settle (excluding world creation), three edits persisted
+      in 800.3/646.0/399.8 ms, maximum recorded GPU payload high-water 116.70 MiB,
+      cold compressed queue 9.18 MiB. Recorded per-store write high-water is 103.48 MiB;
+      a later disk snapshot reaches 114.17 MiB. Limits pass and closes/clears reach
+      zero distant GPU bytes. Driver/filesystem allocation overhead is outside this scope.
+    - [x] Complete render-thread preparation cost: a 12-capture Standard/full focused
+      probe retains all repair/lifecycle checks and includes loaded+distant maintenance,
+      selection, uniforms and CPU uploads. Median-of-repeat p95 is 0.165/0.161 ms for
+      128/256; the largest enabled phase is 0.166 ms, below 1 ms.
+      [Probe](evidence/lod/p8-release/horizon-cost/README.md).
+    - [ ] Pre-LOD disabled-overhead target (<=2% median / <=5% p99). The initial
+      native/None/full pilot misses the median target. Idle maintenance and per-draw
+      census are now skipped when disabled, with nonblocking retirement preserved.
+      Both native None/full and None/half pairs now pass all phase limits against
+      `f48460d`, with zero idle LOD work. Six pairs remain; Standard/full exhausts
+      three foreground-loss retries; Chrome is foreground at the subsequent check. Keep
+      Minecraft foreground for qualified timing. A clean preparation-script compile
+      passes in 1s. [Partial comparison](evidence/lod/p8-release/disabled-comparison/README.md). [Initial failed pilot](evidence/lod/p8-release/disabled-initial-pilot/README.md).
+    - [ ] Final horizon/enable-disable regression on the idle refinement. The earlier
+      48-capture route and complete preparation probe pass, but skipping disabled
+      bookkeeping changes the off-side cost; repeat the full route before closure.
+    - [x] Explicitly revised loaded-geometry objective: confirmed distant-triangle
+      savings are 0.127–0.250%; no median speedup or 20% exclusive terrain-GPU saving
+      is established. The preview offers explored scenery with stated cost. The former
+      50% triangle / 20% GPU targets remain optimization follow-ups, not achieved claims.
+    - [x] Settings/defaults: no development flag required, LOD off, Balanced, full
+      shading, 16-chunk horizon, automatic mesh limits, default 2 GiB disk cache.
+      Standard/None supported; other packs fall back. Actual keyboard enable/reset,
+      small-window layout, persistence/recovery and pack-independent preferences pass
+      in 16s. [UI evidence](evidence/lod/p8-release/settings-preview/README.md).
+      README records enabling, measured tradeoffs, reproduction and unsupported coverage.
+  - Follow-ups outside this preview's qualified scope (not completed by these tests):
+    dense horizon/repair-churn throughput; actual driver allocation peaks; base and
+    lower-memory Apple Silicon; true half/quarter shading; profitable loaded geometry.
+    The intermittent GLFW final-window-reset null-monitor fault also remains an
+    independent investigation. Its triggering callback is unknown; clean exits do not
+    prove it fixed. [Crash analysis](evidence/lod/p8-release/validation/glfw-analysis.md).
   - Owner: `/root`. Status: partially evaluated; release criteria unmet (2026-09-11). Added explicit
     LOD-on/off benchmark configuration, whole-terrain/distant triangle counters and
     per-frame LOD preparation percentiles. A three-repeat Standard near-4K A/B pair
@@ -656,7 +646,7 @@ Record median/p95/p99 CPU and GPU frame time, 1% lows, terrain triangles and dra
 counts by tier, build latency, upload bytes/time, GPU allocations, CPU heap/cache,
 disk usage, and actual visible terrain coverage. Capture at least three repeats.
 
-Provisional shipping targets:
+Release criteria and retained optimization objectives:
 
 User clarification (2026-09-12): a slight performance decrease is acceptable when
 large LOD horizons add visible terrain. Extended-horizon acceptance measures that
@@ -665,8 +655,11 @@ more terrain. Keep the provisional 25% median / 35% p99 comparison below as an
 explicit reporting budget, and retain image, bounded-resource and correctness gates.
 
 - LOD disabled: no more than 2% median or 5% p99 frame-time regression versus baseline.
-- Balanced at 4K, 16/16 in terrain-heavy scenes: at least 50% fewer distant terrain
-  triangles and 20% lower terrain GPU time, with total median/p99 frame time no worse.
+- Revised P8 scope (2026-09-12): an opt-in explored-terrain horizon with explicit
+  measured cost and bounded resources. The former 50% distant-triangle / 20% terrain
+  GPU improvement at 4K, 16/16 is a deferred optimization objective, not a release
+  claim or a prerequisite for this scoped feature. The completed matrix misses it;
+  do not present conservative loaded replacements as an FPS optimization.
 - Cached 128-chunk LOD horizon: target total median frame time within 25% of the
   16-chunk LOD-off baseline at the same resolution; p99 within 35%, with measured
   coverage and fixed budgets. Report 256 chunks separately as a stress target.

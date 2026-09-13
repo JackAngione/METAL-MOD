@@ -81,8 +81,25 @@ public final class LodDistantRenderer {
     }
 
     public static void beginFrame(@Nullable MetalGpuDevice metal,LodSettings next) {
+        if (!next.enabled() && cache==null && residency.chargedBytes()==0) {
+            settings=next;
+            // The last retirement snapshot must not retain a stale visible draw count.
+            if(published.gpuBytes()!=0 || published.frameDraws()!=0 || published.cache()!=null)
+                published=new Stats(null,draws,triangles,uploads,uploadBytes,failures,0,0,0,0,0);
+            frameDraws=0; frameSections=0; frameFarthestBlocks=0;
+            return;
+        }
+        long started=System.nanoTime();
+        try { beginFrameOwned(metal,next); }
+        finally {
+            dev.metalcraft.client.metal.MetalStallProbe.record(
+                    dev.metalcraft.client.metal.MetalStallProbe.Source.LOD_PREPARE,
+                    System.nanoTime()-started,1,0);
+        }
+    }
+    private static void beginFrameOwned(@Nullable MetalGpuDevice metal,LodSettings next) {
         settings=next;
-        if (!LodCapabilities.HORIZON_EXPERIMENTAL) return;
+        if (!LodCapabilities.HORIZON_AVAILABLE) return;
         Minecraft client=Minecraft.getInstance();
         boolean enabled=metal!=null && next.enabled() && next.diskCache() && next.horizonChunks()>16 && client.level!=null;
         // Disabling keeps the world/device identity but closes the cache. Re-enabling
@@ -168,6 +185,15 @@ public final class LodDistantRenderer {
     public static ChunkSectionsToRender append(ChunkSectionsToRender original,CameraRenderState camera) {
         var current=cache;
         if(current==null || device==null || !settings.enabled()) return original;
+        long started=System.nanoTime(), beforeUpload=uploadBytes;
+        try { return appendOwned(current,original,camera); }
+        finally {
+            dev.metalcraft.client.metal.MetalStallProbe.record(
+                    dev.metalcraft.client.metal.MetalStallProbe.Source.LOD_PREPARE,
+                    System.nanoTime()-started,1,uploadBytes-beforeUpload);
+        }
+    }
+    private static ChunkSectionsToRender appendOwned(LodDistantCache current,ChunkSectionsToRender original,CameraRenderState camera) {
         int loaded=Minecraft.getInstance().options.getEffectiveRenderDistance();
         long diskBudget = (long)settings.diskBudgetMiB()<<20;
         float projectionX=camera.projectionMatrix.m00(), projectionY=camera.projectionMatrix.m11();

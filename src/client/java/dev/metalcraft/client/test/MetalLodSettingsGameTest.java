@@ -23,7 +23,7 @@ final class MetalLodSettingsGameTest {
         boolean originalHalf = MetalCraftConfig.halfResolution();
         String pack = context.computeOnClient(c -> ShaderPackRuntime.active() == null ? "" : ShaderPackRuntime.active().selectedPackId());
         try {
-            LodSettings custom = original.withGeometry(9, 1.5);
+            LodSettings custom = original.withGeometry(9, 1.5).withEnabled(false);
             MetalCraftConfig.setLod(custom);
             MetalCraftConfig.reload();
             check(MetalCraftConfig.lod().equals(custom), "disk reload round trip");
@@ -48,12 +48,19 @@ final class MetalLodSettingsGameTest {
             context.runOnClient(c -> {
                 var screen = c.gui.screen();
                 boolean available = dev.metalcraft.client.lod.LodCapabilities.current(true).geometry();
-                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == (available ? 7 : 4),
+                boolean horizon = dev.metalcraft.client.lod.LodCapabilities.current(true).extendedHorizon();
+                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 4 + (available ? 3 : 0) + (horizon ? 3 : 0),
                         "resize does not duplicate option widgets");
                 boolean disabled = widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).map(e -> (CycleButton<?>)e)
                         .anyMatch(b -> !b.active && b.getMessage().getString().contains("Enable terrain LOD"));
                 check(disabled != available, "rendering control matches current capability");
             });
+            if (context.computeOnClient(c -> dev.metalcraft.client.lod.LodCapabilities.current(true).geometry())) {
+                focusButton(context, "Enable terrain LOD");
+                context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
+                context.waitTicks(2);
+                check(MetalCraftConfig.lod().enabled(), "keyboard enables the opt-in preview without a development flag");
+            }
             focusButton(context, "Reset to Defaults");
             context.takeScreenshot("metalcraft-lod-settings-keyboard-reset");
             context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
@@ -96,7 +103,7 @@ final class MetalLodSettingsGameTest {
             context.getInput().pressKey(GLFW.GLFW_KEY_TAB);
             context.waitTick();
             boolean focused = context.computeOnClient(c -> widgets(c.gui.screen()).stream()
-                    .anyMatch(w -> w instanceof Button && w.isFocused() && w.getMessage().getString().equals(label)));
+                    .anyMatch(w -> w.isFocused() && w.getMessage().getString().startsWith(label)));
             if (focused) return;
         }
         throw new AssertionError("Keyboard could not reach " + label);

@@ -22,6 +22,8 @@ def main(baseline, current):
         if (any(i["exitCode"] != 0 for i in invocations) or old["baseCommit"] != "f48460d"
                 or old["currentSourceSha256"] != new["sourceSha256"] or old["command"] != new["command"]):
             raise ValueError("Mismatched or unsuccessful baseline provenance")
+        if "pairStartedAtUnix" in new and old.get("pairStartedAtUnix") != new["pairStartedAtUnix"]:
+            raise ValueError("Disabled captures were not run as one matched pair")
         baseline_identities.add(old["measurementPatchSha256"])
         current_identities.add(new["sourceSha256"])
         for report in (a, b):
@@ -39,6 +41,13 @@ def main(baseline, current):
         for report in (a,b):
             if report["environment"]["lodRequested"]["enabled"] or not report["chunkLoadAndRenderSettlePassed"]:
                 raise ValueError("Not a settled LOD-disabled capture")
+        if b["environment"].get("lodTerrainCensus") is False:
+            for phase in b["phases"]:
+                if any(phase["lod"][edge][key] for edge in ("start", "end")
+                       for key in ("uploads", "draws", "chargedBytes", "terrainDraws", "prepareNanos")):
+                    raise ValueError("Ordinary disabled path retained LOD work")
+            if b["environment"]["lodCapture"]["sections"]:
+                raise ValueError("Ordinary disabled path captured terrain meshes")
         phases = {}
         for name in ("stationary", "pan", "traversal"):
             selected = [[p for p in j["phases"] if p["phase"].split("#")[0] == name] for j in (a,b)]
@@ -59,7 +68,7 @@ def main(baseline, current):
         raise ValueError("Expected eight pre-LOD/disabled pairs")
     if len(baseline_identities) != 1 or len(current_identities) != 1:
         raise ValueError("Baseline comparison mixes source revisions")
-    print(json.dumps(dict(scope="f48460d renderer with measurement-only backport and shared texel-buffer correctness fix versus current experimental-capability LOD off; median of three repeat percentiles",
+    print(json.dumps(dict(scope="f48460d renderer with measurement-only backport and shared texel-buffer correctness fix versus current LOD off; median of three repeat percentiles; invocation commands state capability flags",
                           measurementPatchSha256=baseline_identities.pop(), currentSourceSha256=current_identities.pop(),
                           cases=cases), indent=2))
 

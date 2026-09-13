@@ -45,8 +45,8 @@ abstract class LevelRendererLodDrawMixin {
             Operation<RenderPass.Draw<GpuBufferSlice[]>> original, @Local SectionMesh sectionMesh,
             @Local ChunkSectionLayer layer, @Local RenderSection section) {
         var draw = original.call(slot, vertices, indices, indexType, firstIndex, indexCount, baseVertex, uploader);
-        if (LodLoadedRenderer.AVAILABLE)
-            ((LodDrawSource)(Object)draw).metalcraft$terrain(LodLoadedRenderer.distant(section, levelRenderState.cameraRenderState));
+        if (!LodLoadedRenderer.trackingDraws()) return draw;
+        ((LodDrawSource)(Object)draw).metalcraft$terrain(LodLoadedRenderer.distant(section, levelRenderState.cameraRenderState));
         if (layer == ChunkSectionLayer.SOLID && indices == null && firstIndex == 0)
             ((LodDrawSource)(Object)draw).metalcraft$lodDraw(LodLoadedRenderer.selected(section, sectionMesh));
         return draw;

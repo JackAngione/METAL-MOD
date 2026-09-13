@@ -13,9 +13,11 @@ import net.minecraft.client.renderer.chunk.SectionRenderDispatcher.RenderSection
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.jspecify.annotations.Nullable;
 
-/** Render-thread owner of loaded solid replacements. Experimental pending performance acceptance. */
+/** Render-thread owner of opt-in loaded solid replacements. */
 public final class LodLoadedRenderer {
-    public static final boolean AVAILABLE = LodCapabilities.EXPERIMENTAL;
+    public static final boolean AVAILABLE = LodCapabilities.GEOMETRY_AVAILABLE;
+    /** Explicit measurement overhead; ordinary disabled play does not census every terrain draw. */
+    public static final boolean TERRAIN_CENSUS = Boolean.getBoolean("metalcraft.lodTerrainCensus");
     private static final double[] EXACT_SURFACE_ERRORS = {0, 0, 0, 0, 0};
     private static @Nullable LodLoadedRenderer active;
     private final MetalGpuDevice device;
@@ -44,6 +46,21 @@ public final class LodLoadedRenderer {
 
     public static void beginFrame(@Nullable MetalGpuDevice device, LodSettings settings) {
         if (!AVAILABLE) return;
+        if (!settings.enabled() && !TERRAIN_CENSUS) {
+            if (active == null) return;
+            if (active.device != device) {
+                active.residency.close(); published = active.snapshot(); active = null;
+            } else if (active.settings.enabled() || active.residency.chargedBytes() != 0) {
+                // Revoke draw ownership immediately, then keep polling in-flight retirements.
+                active.settings = settings;
+                active.selected.clear(); active.previous.clear(); active.owners.clear();
+                active.frameUploadBytes = 0; active.frameSelected = 0; active.prepareNanos = 0;
+                active.residency.beginFrame(device.completedResourceSubmission());
+                active.residency.invalidate(key -> true);
+                published = active.snapshot();
+            }
+            return;
+        }
         long started = System.nanoTime();
         try {
             if (active != null && active.device != device) { active.residency.close(); active = null; }
@@ -184,6 +201,10 @@ public final class LodLoadedRenderer {
         if (active == null) return null;
         Draw draw = active.selected.get(section);
         return draw != null && draw.owner == mesh ? draw : null;
+    }
+
+    public static boolean trackingDraws() {
+        return active != null && (active.settings.enabled() || TERRAIN_CENSUS);
     }
 
     public static boolean distant(RenderSection section, CameraRenderState camera) {

@@ -12,7 +12,7 @@ import org.jspecify.annotations.Nullable;
 
 /** Bounded final-mesh capture for experimental LOD and diagnostics, including Fabric renderer output. */
 public final class LodCompilerCapture {
-    public static final boolean ENABLED = Boolean.getBoolean("metalcraft.lodCompilerTest") || LodCapabilities.EXPERIMENTAL;
+    public static final boolean ENABLED = Boolean.getBoolean("metalcraft.lodCompilerTest") || LodCapabilities.GEOMETRY_AVAILABLE;
     private static final boolean DIAGNOSTIC = Boolean.getBoolean("metalcraft.lodCompilerTest");
     private static volatile boolean activeCapture = DIAGNOSTIC;
     public static final LodRevisionTracker REVISIONS = new LodRevisionTracker(32768);
@@ -46,7 +46,7 @@ public final class LodCompilerCapture {
     /** Frame-boundary adoption. Revocation also releases results from workers admitted before disable. */
     public static boolean configure(LodSettings settings) {
         buildBudget = RESERVATION * switch (settings.backgroundWork()) { case LOW -> 1; case BALANCED -> 2; case HIGH -> 4; };
-        boolean next = DIAGNOSTIC || LodCapabilities.EXPERIMENTAL && settings.enabled();
+        boolean next = DIAGNOSTIC || LodCapabilities.GEOMETRY_AVAILABLE && settings.enabled();
         if (activeCapture == next) return false;
         activeCapture = next;
         REVISIONS.resources();
@@ -115,7 +115,7 @@ public final class LodCompilerCapture {
             }
             // All construction stays on the admitted compiler worker. Uploading and
             // selection never rerun simplification while the renderer holds a lock.
-            var tiers = LodCapabilities.EXPERIMENTAL
+            var tiers = LodCapabilities.GEOMETRY_AVAILABLE
                     ? List.of(baked.simplify(1), baked.simplify(2), baked.simplify(3), simplified)
                     : java.util.Collections.nCopies(4, simplified);
             // Retained graph: four source vertices/quad, immutable quad/list, at most

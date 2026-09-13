@@ -1,0 +1,39 @@
+{
+  "command": [
+    "./gradlew",
+    "runClient",
+    "-PmetalLifecycleTest",
+    "-PmetalLifecycleBenchmark=true",
+    "-PmetalBenchmarkLod=false",
+    "-PmetalBenchmarkPack=standard",
+    "-PmetalBenchmarkRenderDistance=16",
+    "-PmetalBenchmarkSimulationDistance=16",
+    "-PmetalBenchmarkResolution=3840x2160",
+    "-PmetalBenchmarkFullscreen=true",
+    "-PmetalBenchmarkHalfResolution=false",
+    "-PmetalBenchmarkUnlocked=true",
+    "-PmetalBenchmarkPitch=30",
+    "-PmetalBenchmarkRepeats=3",
+    "-PmetalBenchmarkPhaseTicks=80",
+    "--args=--graphicsBackend default"
+  ],
+  "baseCommit": "f48460d",
+  "measurementPatchSha256": "8b9564a43b726d914f6de74215c0bdd9f4af1dac44284ab02fd1447d5d691eb3",
+  "currentSourceSha256": "619599fbfa9f646e93dc762867ad576d873587bd2b72aeb056f885c4cc890ab3",
+  "pairStartedAtUnix": 1789259243.6166668,
+  "exitCode": 1,
+  "startedAtUnix": 1789259426.885681,
+  "elapsedSeconds": 83.30191612243652,
+  "rejectedPresentationAttempts": [
+    {
+      "exitCode": 1,
+      "elapsedSeconds": 101.06149935722351,
+      "reason": "Lost or unavailable foreground presentation; entire process capture discarded"
+    },
+    {
+      "exitCode": 1,
+      "elapsedSeconds": 82.17993187904358,
+      "reason": "Lost or unavailable foreground presentation; entire process capture discarded"
+    }
+  ]
+}

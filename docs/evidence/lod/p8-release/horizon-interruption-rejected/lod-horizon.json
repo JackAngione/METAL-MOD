@@ -1,0 +1,196 @@
+{
+  "readinessWaitNanos": {
+    "explore": [
+      41735857208
+    ],
+    "horizon 32": [
+      50010250
+    ],
+    "re-enabled distant ownership": [
+      399780333
+    ],
+    "horizon 64": [
+      50193792
+    ],
+    "horizon 128": [
+      50038500
+    ],
+    "benchmark warm cache": [
+      10700456750,
+      249751041,
+      10249847875,
+      10800895042,
+      200006042,
+      10449818833,
+      10906522167,
+      22291,
+      11601818875,
+      11599202709,
+      22792
+    ]
+  },
+  "explored": {
+    "cache": {
+      "ready": true,
+      "captured": 3620,
+      "saved": 1533,
+      "cacheReads": 386,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 0,
+      "queuedNodes": 0,
+      "diskBytes": 124950439,
+      "corrupt": 0,
+      "evictions": 0,
+      "indexedNodes": 1629
+    },
+    "draws": 19504,
+    "triangles": 268443304,
+    "uploads": 2,
+    "uploadBytes": 3083024,
+    "uploadFailures": 0,
+    "gpuBytes": 3083024,
+    "residentNodes": 2,
+    "frameDraws": 4,
+    "frameSections": 18,
+    "frameFarthestBlocks": 1547.451945778862
+  },
+  "explorationElapsedNanos": 47748373792,
+  "exploredDiagnostics": {
+    "peakGpuPayloadBytes": 3083024,
+    "cache": {
+      "peakQueuedBytes": 8320445,
+      "store": {
+        "peakDiskPayloadBytes": 124950439,
+        "updateBatches": 167,
+        "updateNanos": 44783613459,
+        "maxUpdateNanos": 646743875
+      }
+    }
+  },
+  "horizon32": {
+    "cache": {
+      "ready": true,
+      "captured": 3891,
+      "saved": 1746,
+      "cacheReads": 1841,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 24716,
+      "queuedNodes": 1,
+      "diskBytes": 133620672,
+      "corrupt": 0,
+      "evictions": 0,
+      "indexedNodes": 1918
+    },
+    "draws": 127665,
+    "triangles": 1215661556,
+    "uploads": 135,
+    "uploadBytes": 71618736,
+    "uploadFailures": 0,
+    "gpuBytes": 71618736,
+    "residentNodes": 135,
+    "frameDraws": 105,
+    "frameSections": 717,
+    "frameFarthestBlocks": 467.2027985984771
+  },
+  "camera32": {
+    "x": -1535.5,
+    "y": 236.0,
+    "z": 256.5,
+    "yaw": -180.0,
+    "pitch": 3.0
+  },
+  "reenabled": {
+    "cache": {
+      "ready": true,
+      "captured": 274,
+      "saved": 16,
+      "cacheReads": 72,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 3472088,
+      "queuedNodes": 258,
+      "diskBytes": 133620672,
+      "corrupt": 0,
+      "evictions": 0,
+      "indexedNodes": 1918
+    },
+    "draws": 128582,
+    "triangles": 1224799834,
+    "uploads": 151,
+    "uploadBytes": 87871056,
+    "uploadFailures": 0,
+    "gpuBytes": 16252320,
+    "residentNodes": 16,
+    "frameDraws": 31,
+    "frameSections": 256,
+    "frameFarthestBlocks": 374.20818316227815
+  },
+  "horizon64": {
+    "cache": {
+      "ready": true,
+      "captured": 330,
+      "saved": 145,
+      "cacheReads": 2874,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 618726,
+      "queuedNodes": 53,
+      "diskBytes": 127640311,
+      "corrupt": 0,
+      "evictions": 0,
+      "indexedNodes": 1775
+    },
+    "draws": 328931,
+    "triangles": 1807692584,
+    "uploads": 457,
+    "uploadBytes": 182491120,
+    "uploadFailures": 0,
+    "gpuBytes": 110872384,
+    "residentNodes": 322,
+    "frameDraws": 166,
+    "frameSections": 973,
+    "frameFarthestBlocks": 885.5855774591187
+  },
+  "camera64": {
+    "x": -1535.5,
+    "y": 236.0,
+    "z": 640.5,
+    "yaw": -180.0,
+    "pitch": 3.0
+  },
+  "horizon128": {
+    "cache": {
+      "ready": true,
+      "captured": 331,
+      "saved": 197,
+      "cacheReads": 4979,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 0,
+      "queuedNodes": 0,
+      "diskBytes": 130539658,
+      "corrupt": 0,
+      "evictions": 0,
+      "indexedNodes": 1859
+    },
+    "draws": 474343,
+    "triangles": 2978291384,
+    "uploads": 507,
+    "uploadBytes": 191980880,
+    "uploadFailures": 0,
+    "gpuBytes": 120362144,
+    "residentNodes": 372,
+    "frameDraws": 144,
+    "frameSections": 998,
+    "frameFarthestBlocks": 1605.2781612565664
+  },
+  "camera128": {
+    "x": -1535.5,
+    "y": 236.0,
+    "z": 1408.5,
+    "yaw": -180.0,
+    "pitch": 3.0
+  }
+}

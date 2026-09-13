@@ -45,7 +45,8 @@ def main():
     for name in ("LodCapabilities", "LodCompilerCapture"):
         source = source.replace(f"import dev.metalcraft.client.lod.{name};\n", "")
     source = source.replace("MetalCraftConfig.lod()", "LodSettings.defaults()")
-    source = source.replace("LodCapabilities.EXPERIMENTAL", "false")
+    source = source.replace("LodCapabilities.GEOMETRY_AVAILABLE", "false")
+    source = source.replace("LodLoadedRenderer.TERRAIN_CENSUS", "false")
     source = re.sub(r"^.*MetalCraftConfig\.setLod\(.*\n", "", source, flags=re.M)
     source = re.sub(r"^.*value.add\(\"lodCapture\".*\n", "", source, flags=re.M)
     source = source.replace('value.addProperty("lodGeometryAvailable", false);',

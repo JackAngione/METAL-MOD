@@ -2447,6 +2447,17 @@ All WU acceptance criteria are complete. Existing W8 release gate remains open.
 
 ## LOD composition regression progress (2026-09-11)
 
+P8 preview continuation (2026-09-12 evening), owner Codex: geometry/horizon controls
+are exposed without a development flag and remain off by default. The full native
+API-validation build passes after the complete preparation timer (19s) and disabled
+idle bookkeeping refinement (18s). The latter skips LOD draw counters and idle
+maintenance; shared water eligibility, bindings and forward draw routing are unchanged.
+The full 48-capture NORMAL/Metal/16/16 horizon route passes reload, dimension and
+clear/close checks; actual settings enable/reset passes in 16s. Earlier merged/split
+LOD water composition evidence below remains applicable. This does not close W8's
+separate water release-performance matrix.
+
+
 P8 native-validation continuation (2026-09-12), owner Codex: the complete build
 now passes with `MTL_DEBUG_LAYER=1` (17s, then 16s after horizon instrumentation).
 SPIRV-Cross native texture-buffer emission fixes the sampler ABI assertion; the

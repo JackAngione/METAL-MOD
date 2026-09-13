@@ -2,17 +2,16 @@ package dev.metalcraft.client.lod;
 
 /** Availability is deliberately separate from saved preferences and shader-pack selection. */
 public record LodCapabilities(boolean metal, boolean geometry, boolean multiresolution, boolean extendedHorizon) {
-    public static final boolean HORIZON_EXPERIMENTAL = Boolean.getBoolean("metalcraft.lodHorizonTest")
-            || Boolean.getBoolean("metalcraft.lodHorizonExperimental");
-    public static final boolean EXPERIMENTAL = Boolean.getBoolean("metalcraft.lodRenderTest")
-            || Boolean.getBoolean("metalcraft.lodExperimental") || HORIZON_EXPERIMENTAL;
-    private static final LodCapabilities METAL = new LodCapabilities(true, EXPERIMENTAL, false, HORIZON_EXPERIMENTAL);
+    // P8 qualifies an opt-in explored-terrain preview. Preferences remain disabled by default.
+    public static final boolean HORIZON_AVAILABLE = true;
+    public static final boolean GEOMETRY_AVAILABLE = true;
+    private static final LodCapabilities METAL = new LodCapabilities(true, GEOMETRY_AVAILABLE, false, HORIZON_AVAILABLE);
     private static final LodCapabilities METAL_UNSUPPORTED = new LodCapabilities(true, false, false, false);
     private static final LodCapabilities UNAVAILABLE = new LodCapabilities(false, false, false, false);
     public static LodCapabilities current(boolean metal) {
-        // Only promote these gates after the corresponding plan acceptance evidence is recorded.
+        // Standard and no-pack composition are qualified; other packs retain their ordinary path.
         if (!metal) return UNAVAILABLE;
-        if (EXPERIMENTAL) {
+        if (GEOMETRY_AVAILABLE) {
             var runtime = dev.metalcraft.client.shader.ShaderPackRuntime.active();
             if (runtime != null && !dev.metalcraft.client.shader.ShaderPackRuntime.NONE_ID.equals(runtime.selectedPackId())
                     && (!dev.metalcraft.client.shader.ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId()) || !runtime.isActive()))

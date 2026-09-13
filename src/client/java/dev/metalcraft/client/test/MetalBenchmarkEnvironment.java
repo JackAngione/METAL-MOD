@@ -36,7 +36,7 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         boolean requestedUnlocked = booleanProperty("metalcraft.benchmarkUnlocked", unlocked);
         boolean requestedLod = booleanProperty("metalcraft.benchmarkLod", false);
         boolean requestedFullscreen = booleanProperty("metalcraft.benchmarkFullscreen", false);
-        if (requestedLod && !LodCapabilities.EXPERIMENTAL) throw new IllegalArgumentException("LOD benchmark requires -PmetalLodExperimental=true");
+        if (requestedLod && !LodCapabilities.GEOMETRY_AVAILABLE) throw new IllegalArgumentException("LOD geometry is unavailable");
         pack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
         try {
             context.runOnClient(c -> {
@@ -95,6 +95,7 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         }
         value.add("shaderOptions", shaderOptions);
         value.addProperty("halfResolution", MetalCraftConfig.halfResolution());
+        value.addProperty("lodTerrainCensus", LodLoadedRenderer.TERRAIN_CENSUS);
         value.addProperty("unlockedFrameRate", MetalCraftConfig.unlockedFrameRate());
         value.addProperty("vsync", client.options.enableVsync().get());
         value.addProperty("frameLimit", client.options.framerateLimit().get());
@@ -107,7 +108,8 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         value.addProperty("passMerging", Boolean.parseBoolean(System.getProperty("metalcraft.passMerging", "true")));
         value.addProperty("commandBatching", Boolean.parseBoolean(System.getProperty("metalcraft.commandBatching", "true")));
         value.add("lodRequested", new Gson().toJsonTree(MetalCraftConfig.lod()));
-        value.addProperty("lodGeometryAvailable", LodCapabilities.EXPERIMENTAL);
+        value.addProperty("lodGeometryAvailable", LodCapabilities.GEOMETRY_AVAILABLE);
+        value.addProperty("lodPrepareTimingScope", "Loaded and distant frame maintenance, selection, uniforms and uploads; excludes workers and GPU execution");
         value.addProperty("lodCounterMeaning", "Cumulative encoded main-world terrain, distant subset, replacements and shadows are separate; subtract phase endpoints. Memory samples are not peaks.");
         value.addProperty("memorySampling", "Heap/Metal snapshots after each phase; OS process-lifetime resident/physical-footprint peaks include startup; LOD CPU charge peaks cover all worker admissions");
         value.addProperty("thermalStateMeaning", "0 nominal, 1 fair, 2 serious, 3 critical; -1 unavailable");
@@ -132,6 +134,10 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
                 && GLFW.glfwGetWindowAttrib(c.getWindow().handle(), GLFW.GLFW_FOCUSED) == GLFW.GLFW_TRUE, 200);
     }
 
+    static final class PresentationInterrupted extends AssertionError {
+        PresentationInterrupted(String message) { super(message); }
+    }
+
     /** One phase, checked on every game tick. A lost/occluded/resized window rejects the capture. */
     static final class Presentation {
         private final long window = Minecraft.getInstance().getWindow().handle();
@@ -143,11 +149,12 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
 
         void check() {
             int state = MetalSurfaceProbe.presentationState(window);
+            if ((GLFW.glfwGetWindowMonitor(window) != 0L) != fullscreen
+                    || !java.util.Arrays.equals(drawable, MetalSurfaceProbe.drawableSize()))
+                throw new AssertionError("Benchmark monitor attachment or drawable changed");
             if (state != 15 || GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_FOCUSED) != GLFW.GLFW_TRUE
-                    || GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_ICONIFIED) != GLFW.GLFW_FALSE
-                    || (GLFW.glfwGetWindowMonitor(window) != 0L) != fullscreen
-                    || !java.util.Arrays.equals(drawable, MetalSurfaceProbe.drawableSize())) {
-                throw new AssertionError("Benchmark presentation changed: AppKit state=" + state
+                    || GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_ICONIFIED) != GLFW.GLFW_FALSE) {
+                throw new PresentationInterrupted("Benchmark presentation changed: AppKit state=" + state
                         + ", focused=" + GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_FOCUSED));
             }
             checks++;

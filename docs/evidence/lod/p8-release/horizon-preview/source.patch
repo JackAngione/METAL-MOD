@@ -1,0 +1,295 @@
+diff --git a/src/client/java/dev/metalcraft/client/gui/MetalCraftLodOptionsScreen.java b/src/client/java/dev/metalcraft/client/gui/MetalCraftLodOptionsScreen.java
+index 4c05269..55115bb 100644
+--- a/src/client/java/dev/metalcraft/client/gui/MetalCraftLodOptionsScreen.java
++++ b/src/client/java/dev/metalcraft/client/gui/MetalCraftLodOptionsScreen.java
+@@ -39,7 +39,7 @@ public final class MetalCraftLodOptionsScreen extends Screen {
+         LodSettings settings = MetalCraftConfig.lod();
+         LodCapabilities capabilities = LodCapabilities.current("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()));
+         String reason = !capabilities.metal() ? "requires_metal" : capabilities.geometry() ? "experimental_geometry"
+-                : LodCapabilities.EXPERIMENTAL ? "unsupported_pack" : "pending_geometry";
++                : LodCapabilities.GEOMETRY_AVAILABLE ? "unsupported_pack" : "pending_geometry";
+         rows.addChild(new MultiLineTextWidget(text(reason), font).setMaxWidth(width).setCentered(true));
+         var enabled = CycleButton.onOffBuilder(capabilities.effective(settings).enabled())
+                 .withTooltip(v -> Tooltip.create(text(reason)))
+diff --git a/src/client/java/dev/metalcraft/client/lod/LodCapabilities.java b/src/client/java/dev/metalcraft/client/lod/LodCapabilities.java
+index 586e68e..cbb3bd4 100644
+--- a/src/client/java/dev/metalcraft/client/lod/LodCapabilities.java
++++ b/src/client/java/dev/metalcraft/client/lod/LodCapabilities.java
+@@ -2,17 +2,16 @@ package dev.metalcraft.client.lod;
+ 
+ /** Availability is deliberately separate from saved preferences and shader-pack selection. */
+ public record LodCapabilities(boolean metal, boolean geometry, boolean multiresolution, boolean extendedHorizon) {
+-    public static final boolean HORIZON_EXPERIMENTAL = Boolean.getBoolean("metalcraft.lodHorizonTest")
+-            || Boolean.getBoolean("metalcraft.lodHorizonExperimental");
+-    public static final boolean EXPERIMENTAL = Boolean.getBoolean("metalcraft.lodRenderTest")
+-            || Boolean.getBoolean("metalcraft.lodExperimental") || HORIZON_EXPERIMENTAL;
+-    private static final LodCapabilities METAL = new LodCapabilities(true, EXPERIMENTAL, false, HORIZON_EXPERIMENTAL);
++    // P8 qualifies an opt-in explored-terrain preview. Preferences remain disabled by default.
++    public static final boolean HORIZON_AVAILABLE = true;
++    public static final boolean GEOMETRY_AVAILABLE = true;
++    private static final LodCapabilities METAL = new LodCapabilities(true, GEOMETRY_AVAILABLE, false, HORIZON_AVAILABLE);
+     private static final LodCapabilities METAL_UNSUPPORTED = new LodCapabilities(true, false, false, false);
+     private static final LodCapabilities UNAVAILABLE = new LodCapabilities(false, false, false, false);
+     public static LodCapabilities current(boolean metal) {
+-        // Only promote these gates after the corresponding plan acceptance evidence is recorded.
++        // Standard and no-pack composition are qualified; other packs retain their ordinary path.
+         if (!metal) return UNAVAILABLE;
+-        if (EXPERIMENTAL) {
++        if (GEOMETRY_AVAILABLE) {
+             var runtime = dev.metalcraft.client.shader.ShaderPackRuntime.active();
+             if (runtime != null && !dev.metalcraft.client.shader.ShaderPackRuntime.NONE_ID.equals(runtime.selectedPackId())
+                     && (!dev.metalcraft.client.shader.ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId()) || !runtime.isActive()))
+diff --git a/src/client/java/dev/metalcraft/client/lod/LodCompilerCapture.java b/src/client/java/dev/metalcraft/client/lod/LodCompilerCapture.java
+index 513a1e3..f732038 100644
+--- a/src/client/java/dev/metalcraft/client/lod/LodCompilerCapture.java
++++ b/src/client/java/dev/metalcraft/client/lod/LodCompilerCapture.java
+@@ -12,7 +12,7 @@ import org.jspecify.annotations.Nullable;
+ 
+ /** Bounded final-mesh capture for experimental LOD and diagnostics, including Fabric renderer output. */
+ public final class LodCompilerCapture {
+-    public static final boolean ENABLED = Boolean.getBoolean("metalcraft.lodCompilerTest") || LodCapabilities.EXPERIMENTAL;
++    public static final boolean ENABLED = Boolean.getBoolean("metalcraft.lodCompilerTest") || LodCapabilities.GEOMETRY_AVAILABLE;
+     private static final boolean DIAGNOSTIC = Boolean.getBoolean("metalcraft.lodCompilerTest");
+     private static volatile boolean activeCapture = DIAGNOSTIC;
+     public static final LodRevisionTracker REVISIONS = new LodRevisionTracker(32768);
+@@ -46,7 +46,7 @@ public final class LodCompilerCapture {
+     /** Frame-boundary adoption. Revocation also releases results from workers admitted before disable. */
+     public static boolean configure(LodSettings settings) {
+         buildBudget = RESERVATION * switch (settings.backgroundWork()) { case LOW -> 1; case BALANCED -> 2; case HIGH -> 4; };
+-        boolean next = DIAGNOSTIC || LodCapabilities.EXPERIMENTAL && settings.enabled();
++        boolean next = DIAGNOSTIC || LodCapabilities.GEOMETRY_AVAILABLE && settings.enabled();
+         if (activeCapture == next) return false;
+         activeCapture = next;
+         REVISIONS.resources();
+@@ -115,7 +115,7 @@ public final class LodCompilerCapture {
+             }
+             // All construction stays on the admitted compiler worker. Uploading and
+             // selection never rerun simplification while the renderer holds a lock.
+-            var tiers = LodCapabilities.EXPERIMENTAL
++            var tiers = LodCapabilities.GEOMETRY_AVAILABLE
+                     ? List.of(baked.simplify(1), baked.simplify(2), baked.simplify(3), simplified)
+                     : java.util.Collections.nCopies(4, simplified);
+             // Retained graph: four source vertices/quad, immutable quad/list, at most
+diff --git a/src/client/java/dev/metalcraft/client/lod/LodDistantRenderer.java b/src/client/java/dev/metalcraft/client/lod/LodDistantRenderer.java
+index 6877396..d43b6a0 100644
+--- a/src/client/java/dev/metalcraft/client/lod/LodDistantRenderer.java
++++ b/src/client/java/dev/metalcraft/client/lod/LodDistantRenderer.java
+@@ -82,7 +82,7 @@ public final class LodDistantRenderer {
+ 
+     public static void beginFrame(@Nullable MetalGpuDevice metal,LodSettings next) {
+         settings=next;
+-        if (!LodCapabilities.HORIZON_EXPERIMENTAL) return;
++        if (!LodCapabilities.HORIZON_AVAILABLE) return;
+         Minecraft client=Minecraft.getInstance();
+         boolean enabled=metal!=null && next.enabled() && next.diskCache() && next.horizonChunks()>16 && client.level!=null;
+         // Disabling keeps the world/device identity but closes the cache. Re-enabling
+diff --git a/src/client/java/dev/metalcraft/client/lod/LodLoadedRenderer.java b/src/client/java/dev/metalcraft/client/lod/LodLoadedRenderer.java
+index 7f1eaef..381c755 100644
+--- a/src/client/java/dev/metalcraft/client/lod/LodLoadedRenderer.java
++++ b/src/client/java/dev/metalcraft/client/lod/LodLoadedRenderer.java
+@@ -15,7 +15,7 @@ import org.jspecify.annotations.Nullable;
+ 
+ /** Render-thread owner of loaded solid replacements. Experimental pending performance acceptance. */
+ public final class LodLoadedRenderer {
+-    public static final boolean AVAILABLE = LodCapabilities.EXPERIMENTAL;
++    public static final boolean AVAILABLE = LodCapabilities.GEOMETRY_AVAILABLE;
+     private static final double[] EXACT_SURFACE_ERRORS = {0, 0, 0, 0, 0};
+     private static @Nullable LodLoadedRenderer active;
+     private final MetalGpuDevice device;
+diff --git a/src/client/java/dev/metalcraft/client/test/MetalBenchmarkEnvironment.java b/src/client/java/dev/metalcraft/client/test/MetalBenchmarkEnvironment.java
+index 348fac8..56c0249 100644
+--- a/src/client/java/dev/metalcraft/client/test/MetalBenchmarkEnvironment.java
++++ b/src/client/java/dev/metalcraft/client/test/MetalBenchmarkEnvironment.java
+@@ -36,7 +36,7 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
+         boolean requestedUnlocked = booleanProperty("metalcraft.benchmarkUnlocked", unlocked);
+         boolean requestedLod = booleanProperty("metalcraft.benchmarkLod", false);
+         boolean requestedFullscreen = booleanProperty("metalcraft.benchmarkFullscreen", false);
+-        if (requestedLod && !LodCapabilities.EXPERIMENTAL) throw new IllegalArgumentException("LOD benchmark requires -PmetalLodExperimental=true");
++        if (requestedLod && !LodCapabilities.GEOMETRY_AVAILABLE) throw new IllegalArgumentException("LOD geometry is unavailable");
+         pack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
+         try {
+             context.runOnClient(c -> {
+@@ -107,7 +107,7 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
+         value.addProperty("passMerging", Boolean.parseBoolean(System.getProperty("metalcraft.passMerging", "true")));
+         value.addProperty("commandBatching", Boolean.parseBoolean(System.getProperty("metalcraft.commandBatching", "true")));
+         value.add("lodRequested", new Gson().toJsonTree(MetalCraftConfig.lod()));
+-        value.addProperty("lodGeometryAvailable", LodCapabilities.EXPERIMENTAL);
++        value.addProperty("lodGeometryAvailable", LodCapabilities.GEOMETRY_AVAILABLE);
+         value.addProperty("lodCounterMeaning", "Cumulative encoded main-world terrain, distant subset, replacements and shadows are separate; subtract phase endpoints. Memory samples are not peaks.");
+         value.addProperty("memorySampling", "Heap/Metal snapshots after each phase; OS process-lifetime resident/physical-footprint peaks include startup; LOD CPU charge peaks cover all worker admissions");
+         value.addProperty("thermalStateMeaning", "0 nominal, 1 fair, 2 serious, 3 critical; -1 unavailable");
+@@ -132,6 +132,10 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
+                 && GLFW.glfwGetWindowAttrib(c.getWindow().handle(), GLFW.GLFW_FOCUSED) == GLFW.GLFW_TRUE, 200);
+     }
+ 
++    static final class PresentationInterrupted extends AssertionError {
++        PresentationInterrupted(String message) { super(message); }
++    }
++
+     /** One phase, checked on every game tick. A lost/occluded/resized window rejects the capture. */
+     static final class Presentation {
+         private final long window = Minecraft.getInstance().getWindow().handle();
+@@ -143,11 +147,12 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
+ 
+         void check() {
+             int state = MetalSurfaceProbe.presentationState(window);
++            if ((GLFW.glfwGetWindowMonitor(window) != 0L) != fullscreen
++                    || !java.util.Arrays.equals(drawable, MetalSurfaceProbe.drawableSize()))
++                throw new AssertionError("Benchmark monitor attachment or drawable changed");
+             if (state != 15 || GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_FOCUSED) != GLFW.GLFW_TRUE
+-                    || GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_ICONIFIED) != GLFW.GLFW_FALSE
+-                    || (GLFW.glfwGetWindowMonitor(window) != 0L) != fullscreen
+-                    || !java.util.Arrays.equals(drawable, MetalSurfaceProbe.drawableSize())) {
+-                throw new AssertionError("Benchmark presentation changed: AppKit state=" + state
++                    || GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_ICONIFIED) != GLFW.GLFW_FALSE) {
++                throw new PresentationInterrupted("Benchmark presentation changed: AppKit state=" + state
+                         + ", focused=" + GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_FOCUSED));
+             }
+             checks++;
+diff --git a/src/client/java/dev/metalcraft/client/test/MetalFrameMetrics.java b/src/client/java/dev/metalcraft/client/test/MetalFrameMetrics.java
+index 1bb9009..aa58a9f 100644
+--- a/src/client/java/dev/metalcraft/client/test/MetalFrameMetrics.java
++++ b/src/client/java/dev/metalcraft/client/test/MetalFrameMetrics.java
+@@ -139,6 +139,16 @@ public final class MetalFrameMetrics {
+ 		size++;
+ 	}
+ 
++	/** Reject a disturbed phase without publishing CPU or GPU timing samples. */
++	public static synchronized int discardCapture() {
++		capturing = false;
++		int discarded = size;
++		size = 0;
++		MetalStallProbe.setEnabled(false);
++		MetalGpuFrameCapture.endCapture();
++		return discarded;
++	}
++
+ 	public static synchronized Phase endCapture(final String name) {
+ 		capturing = false;
+ 		// Taken before the probe is disabled, because the census is guarded on the same flag.
+diff --git a/src/client/java/dev/metalcraft/client/test/MetalLodHorizonBenchmark.java b/src/client/java/dev/metalcraft/client/test/MetalLodHorizonBenchmark.java
+index 5c8d257..ebb6eb1 100644
+--- a/src/client/java/dev/metalcraft/client/test/MetalLodHorizonBenchmark.java
++++ b/src/client/java/dev/metalcraft/client/test/MetalLodHorizonBenchmark.java
+@@ -69,17 +69,11 @@ final class MetalLodHorizonBenchmark {
+                             lastUploads = uploads;
+                         }
+                         if (stable < 20) throw new AssertionError("Horizon GPU residency did not stabilize");
+-                        var before = LodDistantRenderer.stats();
+                         String name = "horizon-" + horizon + "-" + selectedPack + "-half-" + selectedHalf + "-lod-" + enabled + "#" + (repeat + 1);
+-                        MetalBenchmarkEnvironment.focus(context);
+-                        var presentation = context.computeOnClient(c -> new MetalBenchmarkEnvironment.Presentation());
+-                        context.runOnClient(c -> MetalFrameMetrics.beginCapture(30));
+-                        for (int tick = 0; tick < 80; tick++) {
+-                            context.waitTick();
+-                            context.runOnClient(c -> presentation.check());
+-                        }
+-                        var phase = context.computeOnClient(c -> MetalFrameMetrics.endCapture(name));
+-                        var after = LodDistantRenderer.stats();
++                        var capture = capture(context, name);
++                        var phase = capture.phase();
++                        var before = capture.before();
++                        var after = capture.after();
+                         if (phase.frames() < 120 || phase.gpuFrame().samplesMs().length < phase.frames() * .95
+                                 || phase.gpuFrame().invalidFrames() != 0 || phase.gpuFrame().overflowFrames() != 0)
+                             throw new AssertionError("Incomplete horizon frame timing: " + name);
+@@ -88,7 +82,8 @@ final class MetalLodHorizonBenchmark {
+                             throw new AssertionError("Horizon benchmark lost valid bounded terrain ownership");
+                         var row = new LinkedHashMap<String, Object>();
+                         row.put("phase", com.google.gson.JsonParser.parseString(phase.toJson()));
+-                        row.put("presentation", context.computeOnClient(c -> presentation.describe()));
++                        row.put("presentation", capture.presentation());
++                        row.put("discardedPresentationAttempts", capture.discarded());
+                         row.put("horizon", horizon); row.put("enabled", enabled); row.put("repeat", repeat + 1);
+                         row.put("environment", context.computeOnClient(c -> MetalBenchmarkEnvironment.describe()));
+                         row.put("camera", context.computeOnClient(c -> MetalBenchmarkEnvironment.camera()));
+@@ -113,4 +108,36 @@ final class MetalLodHorizonBenchmark {
+             });
+         }
+     }
++
++    private record Capture(MetalFrameMetrics.Phase phase, com.google.gson.JsonObject presentation,
++                           LodDistantRenderer.Stats before, LodDistantRenderer.Stats after,
++                           List<Map<String, Object>> discarded) { }
++
++    /** A focus interruption rejects the entire phase; only a fresh, fully checked retry is retained. */
++    private static Capture capture(ClientGameTestContext context, String name) {
++        var discarded = new ArrayList<Map<String, Object>>();
++        for (int attempt = 0; attempt < 3; attempt++) {
++            MetalBenchmarkEnvironment.focus(context);
++            context.waitTicks(20);
++            try {
++                var presentation = context.computeOnClient(c -> new MetalBenchmarkEnvironment.Presentation());
++                var before = LodDistantRenderer.stats();
++                context.runOnClient(c -> MetalFrameMetrics.beginCapture(30));
++                System.out.println("LOD horizon capturing: " + name + " attempt=" + (attempt + 1));
++                for (int tick = 0; tick < 80; tick++) {
++                    context.waitTick();
++                    context.runOnClient(c -> presentation.check());
++                }
++                var phase = context.computeOnClient(c -> MetalFrameMetrics.endCapture(name));
++                var checked = context.computeOnClient(c -> presentation.describe());
++                return new Capture(phase, checked, before, LodDistantRenderer.stats(), List.copyOf(discarded));
++            } catch (MetalBenchmarkEnvironment.PresentationInterrupted interrupted) {
++                int frames = context.computeOnClient(c -> MetalFrameMetrics.discardCapture());
++                discarded.add(Map.of("reason", interrupted.getMessage(), "discardedFrames", frames));
++                System.out.println("LOD horizon discarded interrupted phase: " + name + ", frames=" + frames);
++                if (attempt == 2) throw interrupted;
++            }
++        }
++        throw new AssertionError("Unreachable capture retry state");
++    }
+ }
+diff --git a/src/client/java/dev/metalcraft/client/test/MetalLodTestScope.java b/src/client/java/dev/metalcraft/client/test/MetalLodTestScope.java
+index f18dd8f..bc20a3f 100644
+--- a/src/client/java/dev/metalcraft/client/test/MetalLodTestScope.java
++++ b/src/client/java/dev/metalcraft/client/test/MetalLodTestScope.java
+@@ -22,9 +22,9 @@ final class MetalLodTestScope implements AutoCloseable {
+         this.context = context;
+         saved = MetalCraftConfig.lod();
+         if (enabled) {
+-            if (!LodCapabilities.EXPERIMENTAL) throw new IllegalArgumentException("LOD validation requires -PmetalLodExperimental=true");
+-            if (HORIZON>16 && !LodCapabilities.HORIZON_EXPERIMENTAL)
+-                throw new IllegalArgumentException("Extended composition validation requires -PmetalLodHorizonExperimental=true");
++            if (!LodCapabilities.GEOMETRY_AVAILABLE) throw new IllegalArgumentException("LOD geometry is unavailable");
++            if (HORIZON>16 && !LodCapabilities.HORIZON_AVAILABLE)
++                throw new IllegalArgumentException("Extended horizon is unavailable");
+             context.runOnClient(client -> MetalCraftConfig.setLod(LodSettings.defaults().withGeometry(2, 2)
+                     .withEnabled(true).withHorizon(HORIZON,true,512)));
+         }
+diff --git a/src/client/resources/assets/metalcraft/lang/en_us.json b/src/client/resources/assets/metalcraft/lang/en_us.json
+index b87226b..af5ede2 100644
+--- a/src/client/resources/assets/metalcraft/lang/en_us.json
++++ b/src/client/resources/assets/metalcraft/lang/en_us.json
+@@ -59,12 +59,12 @@
+   "metalcraft.lod.pixels": "%s px",
+   "metalcraft.lod.pending_stages": "Reduced-resolution shading and diagnostics remain unavailable. Minecraft render and simulation distances are unchanged.",
+   "metalcraft.lod.horizon": "LOD horizon",
+-  "metalcraft.lod.horizon.tooltip": "Experimental explored opaque terrain only. Unseen terrain and distant fluids remain absent. Cached terrain can be stale until revisited. Dense terrain may exceed the bounded cache. Disk cache must be on for extended terrain.",
++  "metalcraft.lod.horizon.tooltip": "Explored opaque terrain only. Unseen terrain and distant fluids remain absent. Cached terrain can be stale until revisited. Dense terrain may exceed the bounded cache; 256 chunks is a stress setting. Disk cache must be on for extended terrain.",
+   "metalcraft.lod.disk_cache": "Distant terrain disk cache",
+   "metalcraft.lod.disk_budget": "Disk cache budget",
+   "metalcraft.lod.clear_cache": "Clear distant terrain cache",
+   "metalcraft.lod.reset": "Reset to Defaults",
+-  "metalcraft.lod.experimental_geometry": "Experimental loaded-terrain LOD. Performance targets are still under validation.",
++  "metalcraft.lod.experimental_geometry": "Explored-terrain preview. Larger horizons add rendering work and may reduce FPS. Keep LOD off for ordinary 16-chunk play.",
+   "metalcraft.lod.unsupported_pack": "Terrain LOD currently supports the Standard pack and no shader pack.",
+   "metalcraft.lod.smoothing": "Transition smoothing",
+   "metalcraft.lod.smoothing.tooltip": "Limits coarsening to one tier per frame. Nearby detail and shared boundaries remain protected.",
+diff --git a/src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java b/src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java
+index 64ebe1c..2d14239 100644
+--- a/src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java
++++ b/src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java
+@@ -155,7 +155,11 @@ public final class LodSmoke {
+         LodFrameSettings frames = new LodFrameSettings();
+         frames.request(custom);
+         check(frames.current().equals(defaults), "mid-frame immutable");
+-        check(!frames.beginFrame(LodCapabilities.current(true)).enabled(), "unimplemented geometry gated");
++        check(frames.beginFrame(LodCapabilities.current(true)).enabled(), "opt-in preview is available without a development flag");
++        check(!LodCapabilities.current(true).effective(defaults).enabled(), "preview stays disabled by default");
++        var horizon = LodCapabilities.current(true).effective(custom.withHorizon(128, true, 2048));
++        check(horizon.enabled() && horizon.horizonChunks() == 128 && horizon.shading() == LodSettings.Shading.FULL,
++                "explored horizon available with full-resolution shading");
+         frames.request(defaults);
+         frames.request(custom);
+         check(frames.beginFrame(new LodCapabilities(true, true, false, false)).equals(custom), "latest request coalesced");

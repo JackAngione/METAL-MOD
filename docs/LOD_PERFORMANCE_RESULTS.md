@@ -1,24 +1,68 @@
 # LOD measurements, 2026-09-11–12
 
-Loaded-terrain geometry and composition validation pass. The full LOD plan is **not
-complete**: the current geometry does not meet the performance targets. P6 now
-implements the plan-authorized full-resolution reduced-lighting fallback; actual
-half/quarter-resolution prototypes fail their net-GPU-cost gate. The persistent extended-horizon functional
-route and merged/split composition regressions pass. All three release
-capability gates remain closed by default.
+Loaded-terrain geometry and composition validation pass. P6 implements the
+plan-authorized full-resolution reduced-lighting fallback; half/quarter pixel
+resolution remains deferred. P8 is being finalized as an **opt-in explored-terrain
+preview**, following the user's acceptance of modest large-horizon costs and request
+to complete the phase. The former loaded-geometry speedup targets remain future
+optimization objectives, not claims for this preview.
 
-P8's unlocked-display **16-case matrix is complete**, including 144 measured phases
-and clean process exits. Native fullscreen is verified at 3840×2160. Continuous
-focus/visibility/mode checks pass throughout every phase. The full build also
-passes Metal API validation after correcting the translated texel-buffer type and
-a layered vertex shader in the shadow-filtering test fixture.
+The candidate exposes geometry and the 32–256-chunk horizon in Metal settings
+without a development flag. LOD stays off by default, with Balanced, full shading,
+a 16-chunk horizon, automatic mesh limits and a 2 GiB disk budget. Standard and
+no shader pack are supported; other packs retain ordinary rendering. Dense circles,
+lower-memory devices and true reduced-resolution shading are outside this preview's
+qualified coverage. Two of eight disabled-overhead pairs pass. Remaining captures and the final idle-path horizon regression require foreground availability.
 
-P8 release acceptance remains open: loaded geometry misses its optimization gates.
-The subsequent horizon rerun stopped before measurement because focus could not be
-acquired; the desktop tool confirmed that the Mac had locked again. That attempt
-is rejected, and the fresh horizon and pre-LOD baseline runs await an unlocked display.
-The user accepts modest costs for a larger horizon; this does not establish a
-loaded-geometry speedup or qualify unmeasured dense coverage.
+## P8 qualified explored-horizon preview
+
+The fresh full route passes in **13m13s**, including all 48 timed captures and
+same-world re-enable, three repeated repairs, resource reload, dimension isolation,
+persisted reopen, active/inactive cache clear and both world closes. NORMAL seed
+`metalcraft`, 16/16 Default/Metal, M4 Max/64 GB, native 3840×2160, 2 GiB disk budget.
+The test cache starts empty. Accepted phases retain continuous foreground/visibility
+checks; minimum GPU coverage is 99.853%, and sampled thermal state is nominal.
+
+A controlled Finder activation proves recovery: all 220 disturbed frames are
+rejected, and a fresh warmed retry passes. Rejected timings are not part of the
+summaries. Mode/drawable changes and GPU/resource failures remain fatal.
+
+| Horizon | Pack | Scene | Median frame change | p99 change |
+| --- | --- | --- | ---: | ---: |
+| 128 | Standard | Full | +21.83% | +2.14% |
+| 128 | Standard | Half | +18.35% | +1.04% |
+| 128 | None | Full | +6.67% | -3.96% |
+| 128 | None | Half | +1.98% | -7.72% |
+| 256 | Standard | Full | +20.37% | -0.31% |
+| 256 | Standard | Half | +17.55% | +1.27% |
+| 256 | None | Full | +2.16% | -3.56% |
+| 256 | None | Half | +4.23% | -1.00% |
+
+Every row meets the provisional +25% median / +35% p99 budget. The enabled
+captures represent 1,002 sections at 128 and 995 at 256. These are explored patches;
+the farther camera does not turn the 256 case into a denser coverage test. Negative
+tail changes are variability, and GPU spans increase with the added horizon.
+
+Cold-cache exploration after world creation takes 47.85s including its final
+120-tick settle; initial world creation is excluded. Three 1,650-block edits persist
+in 800.3 / 646.0 / 399.8 ms. Maximum recorded GPU mesh payload high-water is
+116.70 MiB and cold queue high-water is 9.18 MiB. Recorded per-store write-payload
+high-water reaches 103.48 MiB, while a later disk snapshot reaches 114.17 MiB;
+these differently scoped values are not interchangeable. The maximum sampled OS
+process-lifetime physical footprint is 5.29 GiB. Actual driver allocation peaks and
+filesystem allocation overhead are not measured. All sampled limits pass, uploads
+never fail, and closes/clears leave zero distant GPU bytes.
+
+The inspected 128 off/on and 256 on images show the remembered mountain; unknown
+gaps and omitted distant fluids remain explicit. The repaired gold marker survives
+reload. [Raw report, source identity, retry evidence and images](evidence/lod/p8-release/horizon-preview/README.md).
+
+The full matrix's preparation counter covers loaded LOD only. A subsequent focused
+Standard/full probe includes distant frame maintenance, selection, uniform allocation
+and upload work in that timer. The median-of-repeat p95 is **0.165 ms at 128 / 0.161 ms at 256**; the largest enabled-phase p95 is **0.166 ms**, below 1 ms. [Complete timer evidence](evidence/lod/p8-release/horizon-cost/README.md). The native build passes in 19s, and the disabled-idle refinement passes in 18s. The actual
+settings UI passes in 16s with no development flag, including keyboard enable/reset,
+small-window layout, persistence, malformed recovery and pack independence.
+[Settings evidence](evidence/lod/p8-release/settings-preview/README.md).
 
 ## P8 confirmed loaded matrix (2026-09-12)
 
@@ -111,8 +155,7 @@ are snapshots; OS process resident/physical-footprint peaks include startup. The
 are not GPU allocation peaks or hierarchy-build latency percentiles. The new horizon diagnostics additionally record logical GPU mesh payload high-water
 charges (including resources awaiting GPU completion), compressed queue high-water
 bytes, owned disk payload before atomic rename/trim, completed worker-batch latency,
-and repeated edit-to-persist latency. The locked-display attempt did not complete
-that route, so no fresh horizon result is claimed. Disk payload excludes filesystem
+and repeated edit-to-persist latency. The locked-display attempt is retained as rejected evidence; the subsequent unlocked 48-capture route completes as reported above. Disk payload excludes filesystem
 metadata/allocation rounding; GPU payload excludes driver allocation overhead. Thermal states are recorded (0 nominal to 3 critical). Only M4 Max
 hardware is tested; base/lower-memory Apple Silicon and power consumption remain
 unmeasured.
@@ -605,29 +648,22 @@ P6's full-resolution reduced-lighting fallback is complete. Actual half/quarter
 pixel-resolution shading remains a deferred follow-up with its original cost,
 image and transition gates.
 
-P8 remains unchecked. The remaining work is:
+P8 remains open for six of eight disabled-versus-pre-LOD pairs and a final full
+horizon/enable-disable regression after the idle-path refinement. The initial
+native/None/full pilot exceeded the 2% median target. Skipping idle maintenance and
+per-draw census now yields two passing native None/full and None/half pairs, with
+zero LOD capture, upload, draw bookkeeping and preparation work while off. The
+Standard/full baseline exhausts three foreground-loss retries; a read-only
+NSWorkspace check identifies Chrome foreground. An unlocked display alone does not
+qualify these timings. [Partial comparison](evidence/lod/p8-release/disabled-comparison/README.md)
+and [rejected attempts](evidence/lod/p8-release/disabled-focus-rejected/README.md).
+The final horizon rerun is necessary because the refinement changes the off-side
+cost and disable/retirement path. The earlier full route, repair/preparation probes,
+settings UI and native build pass; they are retained with their exact source identities.
 
-- Finish the fresh 128/256-chunk horizon route with continuous presentation checks,
-  first-build/repair timing and resource payload high-water measurements. The first
-  new attempt was rejected before timing because focus could not be acquired;
-  the Mac was locked. [Rejected attempt](evidence/lod/p8-release/horizon-focus-rejected/README.md).
-- Measure disabled overhead against pre-LOD `f48460d`. A detached baseline with the
-  same measurement harness is prepared and compiles. The eight-case runner and
-  matched summary are ready; live capture still awaits an unlocked display.
-  [Baseline patch and provenance](evidence/lod/p8-release/baseline-prepared/README.md).
-  Experimental off/on pairs alone do not establish the <=2% median / <=5% p99 gate.
-- Improve loaded geometry enough to meet the targets, or explicitly revise those
-  targets with appropriate evidence. The confirmed matrix saves 0.127–0.250% of
-  distant triangles; no tested configuration demonstrates a median speedup.
-  Keep LOD off, Balanced, full shading and a 16-chunk horizon by default.
-- Qualify dense horizon coverage and repair churn under that load, actual driver
-  GPU allocation peaks, and base/lower-memory Apple Silicon where available.
-  Explored patches and logical payload counters do not establish these gates.
-- Resolve the intermittent GLFW final-window-reset crash. Its null-monitor native
-  fault is identified; the callback sequence that creates that state is not.
+Separate follow-ups outside the opt-in explored-terrain preview are:
 
-The full 16-case capture, native sampler correction, shadow fixture correction,
-continuous presentation checks, GPU distributions, loaded-worker timings, CPU charge
-peaks, OS memory peaks, thermal provenance and same-world re-enable regression are
-complete. No release capability is promoted. Modest large-horizon cost remains
-acceptable under the user's clarification, with its measured tradeoff explicit.
+- Improve loaded geometry enough to establish a net speedup; the measured distant-triangle reduction is only 0.127–0.250%. The original 50% triangle / 20% exclusive terrain-GPU objectives remain future work.
+- Qualify dense horizon coverage and sustained repair churn, actual driver GPU allocation peaks, and base/lower-memory Apple Silicon. Explored patches and logical payload counters do not establish these results.
+- Resolve the intermittent GLFW final-window-reset crash. Its null-monitor native fault is identified; the callback sequence that creates that state is not. Clean test exits do not prove a fix.
+- Implement and qualify actual half/quarter pixel-resolution shading; P6 currently uses its accepted full-resolution reduced-lighting fallback.

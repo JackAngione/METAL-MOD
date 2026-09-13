@@ -139,6 +139,16 @@ public final class MetalFrameMetrics {
 		size++;
 	}
 
+	/** Reject a disturbed phase without publishing CPU or GPU timing samples. */
+	public static synchronized int discardCapture() {
+		capturing = false;
+		int discarded = size;
+		size = 0;
+		MetalStallProbe.setEnabled(false);
+		MetalGpuFrameCapture.endCapture();
+		return discarded;
+	}
+
 	public static synchronized Phase endCapture(final String name) {
 		capturing = false;
 		// Taken before the probe is disabled, because the census is guarded on the same flag.

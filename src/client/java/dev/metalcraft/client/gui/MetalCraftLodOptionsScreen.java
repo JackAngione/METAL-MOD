@@ -39,7 +39,7 @@ public final class MetalCraftLodOptionsScreen extends Screen {
         LodSettings settings = MetalCraftConfig.lod();
         LodCapabilities capabilities = LodCapabilities.current("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()));
         String reason = !capabilities.metal() ? "requires_metal" : capabilities.geometry() ? "experimental_geometry"
-                : LodCapabilities.EXPERIMENTAL ? "unsupported_pack" : "pending_geometry";
+                : LodCapabilities.GEOMETRY_AVAILABLE ? "unsupported_pack" : "pending_geometry";
         rows.addChild(new MultiLineTextWidget(text(reason), font).setMaxWidth(width).setCentered(true));
         var enabled = CycleButton.onOffBuilder(capabilities.effective(settings).enabled())
                 .withTooltip(v -> Tooltip.create(text(reason)))

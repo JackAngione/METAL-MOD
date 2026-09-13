@@ -155,7 +155,11 @@ public final class LodSmoke {
         LodFrameSettings frames = new LodFrameSettings();
         frames.request(custom);
         check(frames.current().equals(defaults), "mid-frame immutable");
-        check(!frames.beginFrame(LodCapabilities.current(true)).enabled(), "unimplemented geometry gated");
+        check(frames.beginFrame(LodCapabilities.current(true)).enabled(), "opt-in preview is available without a development flag");
+        check(!LodCapabilities.current(true).effective(defaults).enabled(), "preview stays disabled by default");
+        var horizon = LodCapabilities.current(true).effective(custom.withHorizon(128, true, 2048));
+        check(horizon.enabled() && horizon.horizonChunks() == 128 && horizon.shading() == LodSettings.Shading.FULL,
+                "explored horizon available with full-resolution shading");
         frames.request(defaults);
         frames.request(custom);
         check(frames.beginFrame(new LodCapabilities(true, true, false, false)).equals(custom), "latest request coalesced");
