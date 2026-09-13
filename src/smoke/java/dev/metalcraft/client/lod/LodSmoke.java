@@ -25,12 +25,35 @@ public final class LodSmoke {
         captureLifecycle();
         atlas();
         LodDistantSmoke.run();
+        generationCursor();
         check(LodSettings.defaults().meshBudgetBytes(64L << 30, 1L << 30, 0) == (512L << 20), "automatic working-set budget is capped");
         check(LodSettings.defaults().meshBudgetBytes(1L << 30, 1L << 30, 0) == 1, "other renderer pressure removes admission headroom");
         check(LodSettings.defaults().meshBudgetBytes(0, 1L << 30, 0) == (128L << 20), "unknown working set retains a bounded fallback");
         System.out.println("LOD smoke passed: settings recovery/round trip/gates, exact surface coverage, caves/overhangs/materials/seams, selection and stale/bounded jobs");
     }
 
+    private static void generationCursor() {
+        for(int horizon:new int[]{16,32,64,128,256}) {
+            var cursor=new LodGenerationCursor(-51,73,16,horizon);
+            var seen=new HashSet<LodGenerationCursor.Column>();
+            int lastRadius=16;
+            for(var next=cursor.next();next!=null;next=cursor.next()) {
+                int dx=Math.abs(next.x()+51),dz=Math.abs(next.z()-73),radius=Math.max(dx,dz);
+                check(radius>16 && radius>=lastRadius && radius<=horizon,"nearest rings outside loaded square");
+                check(seen.add(next),"each generation column occurs once"); lastRadius=radius;
+            }
+            for(int z=-horizon;z<=horizon;z++) for(int x=-horizon;x<=horizon;x++) {
+                long nx=Math.max(0,Math.abs(x)-1),nz=Math.max(0,Math.abs(z)-1);
+                boolean expected=Math.max(Math.abs(x),Math.abs(z))>16 && nx*nx+nz*nz<(long)horizon*horizon;
+                check(seen.contains(new LodGenerationCursor.Column(x-51,z+73))==expected,"complete bounded horizon coverage");
+            }
+            check(cursor.next()==null,"completed cursor remains exhausted");
+        }
+        var saved=LodSettings.defaults().withGeneration(false).withHorizon(64,true,2048).withEnabled(true);
+        check(!LodSettingsCodec.read(JsonParser.parseString(new Gson().toJson(saved))).generateTerrain(),"generation disable persists");
+        check(LodSettingsCodec.read(JsonParser.parseString("{} ")).generateTerrain(),"old settings acquire generation default");
+        check(!saved.withPreset(LodSettings.Preset.QUALITY).generateTerrain(),"presets preserve generation preference");
+    }
     private static void atlas() {
         var left = new LodBakedMesh.Sprite("left", 0, 0, .5f, 1);
         var right = new LodBakedMesh.Sprite("right", .5f, 0, 1, 1);

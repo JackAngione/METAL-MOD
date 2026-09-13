@@ -23,7 +23,7 @@ final class MetalLodSettingsGameTest {
         boolean originalHalf = MetalCraftConfig.halfResolution();
         String pack = context.computeOnClient(c -> ShaderPackRuntime.active() == null ? "" : ShaderPackRuntime.active().selectedPackId());
         try {
-            LodSettings custom = original.withGeometry(9, 1.5).withEnabled(false);
+            LodSettings custom = original.withGeometry(9, 1.5).withEnabled(false).withGeneration(false);
             MetalCraftConfig.setLod(custom);
             MetalCraftConfig.reload();
             check(MetalCraftConfig.lod().equals(custom), "disk reload round trip");
@@ -49,7 +49,7 @@ final class MetalLodSettingsGameTest {
                 var screen = c.gui.screen();
                 boolean available = dev.metalcraft.client.lod.LodCapabilities.current(true).geometry();
                 boolean horizon = dev.metalcraft.client.lod.LodCapabilities.current(true).extendedHorizon();
-                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 4 + (available ? 3 : 0) + (horizon ? 3 : 0),
+                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 4 + (available ? 3 : 0) + (horizon ? 4 : 0),
                         "resize does not duplicate option widgets");
                 boolean disabled = widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).map(e -> (CycleButton<?>)e)
                         .anyMatch(b -> !b.active && b.getMessage().getString().contains("Enable terrain LOD"));
@@ -60,6 +60,10 @@ final class MetalLodSettingsGameTest {
                 context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
                 context.waitTicks(2);
                 check(MetalCraftConfig.lod().enabled(), "keyboard enables the opt-in preview without a development flag");
+                focusButton(context, "Generate distant terrain");
+                context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
+                context.waitTicks(2);
+                check(MetalCraftConfig.lod().generateTerrain(), "keyboard enables single-player generation preference");
             }
             focusButton(context, "Reset to Defaults");
             context.takeScreenshot("metalcraft-lod-settings-keyboard-reset");

@@ -26,6 +26,7 @@ public final class LodDistantCache implements AutoCloseable {
                         long queuedBytes, int queuedNodes, long diskBytes, long corrupt, long evictions, int indexedNodes) { }
     private final StoreFactory factory;
     private final java.util.concurrent.Executor worker;
+    private final int maxVersions;
     private final LinkedHashMap<LodDistantNode.Key,Update> pending = new LinkedHashMap<>();
     private final Set<LodDistantNode.Key> openingDirty = new HashSet<>();
     private final ConcurrentHashMap<LodDistantNode.Key,Long> versions = new ConcurrentHashMap<>();
@@ -59,8 +60,13 @@ public final class LodDistantCache implements AutoCloseable {
         }, WORKER);
     }
     LodDistantCache(StoreFactory factory, java.util.concurrent.Executor worker) {
+        this(factory,worker,MAX_VERSIONS);
+    }
+    LodDistantCache(StoreFactory factory, java.util.concurrent.Executor worker,int maxVersions) {
+        if(maxVersions<128 || maxVersions>MAX_VERSIONS) throw new IllegalArgumentException("Invalid revision budget");
         this.factory = factory;
         this.worker = worker;
+        this.maxVersions=maxVersions;
     }
     public Stats stats() { return stats; }
     public long generation() { return generation; }
@@ -69,6 +75,14 @@ public final class LodDistantCache implements AutoCloseable {
     public record EntryState(long receivedRevision,long persistedRevision,boolean stored) { }
     public EntryState entry(LodDistantNode.Key key) {
         return new EntryState(version(key),persistedVersions.getOrDefault(key,-1L),diskLeaves.contains(key));
+    }
+    boolean columnStored(int x,int z,int minSection,int maxSection) {
+        for(int y=minSection;y<maxSection;y++) if(!storedCurrent(new LodDistantNode.Key(0,x,y,z))) return false;
+        return true;
+    }
+    boolean storedCurrent(LodDistantNode.Key key) {
+        long revision=version(key);
+        return diskLeaves.contains(key) && (revision==0 || persistedVersions.getOrDefault(key,-1L)==revision);
     }
     java.util.Iterator<LodDistantNode.Key> knownIterator() { return knownLeaves.iterator(); }
     boolean needsRecapture(LodDistantNode.Key key) {
@@ -96,6 +110,9 @@ public final class LodDistantCache implements AutoCloseable {
                              float yaw, float pitch, float projectionX, float projectionY) {
         View previous = view;
         return previous == null || previous.loaded != loaded || previous.horizon != horizon || previous.diskBudget != budget
+                // Surface ownership changes at chunk boundaries, even when camera
+                // movement is below the ordinary selection refresh threshold.
+                || Math.floor(x/16) != Math.floor(previous.x/16) || Math.floor(z/16) != Math.floor(previous.z/16)
                 || Math.abs(x-previous.x)>8 || Math.abs(y-previous.y)>8 || Math.abs(z-previous.z)>8
                 || Math.abs(yaw-previous.yaw)>3 || Math.abs(pitch-previous.pitch)>3
                 || projectionX != previous.projectionX || projectionY != previous.projectionY;
@@ -118,24 +135,34 @@ public final class LodDistantCache implements AutoCloseable {
         enqueue(key,null,null);
     }
     public void capture(LodDistantNode node,LodRevisionTracker.Ticket ticket) {
+        capture(node,ticket,false,0,0);
+    }
+    /** Generated copies may only fill missing data; received compiler output always wins. */
+    boolean captureGenerated(LodDistantNode node,LodRevisionTracker.Ticket ticket,long expectedVersion,long expectedGeneration) {
+        return capture(node,ticket,true,expectedVersion,expectedGeneration);
+    }
+    private boolean capture(LodDistantNode node,LodRevisionTracker.Ticket ticket,boolean generated,long expectedVersion,long expectedGeneration) {
         long admittedGeneration=generation;
-        if (closed || ticket==null || !ticket.current()) return;
+        if (closed || ticket==null || !ticket.current()) return false;
         // Compression runs on the submitting compiler worker, outside the cache monitor.
         // Queue pressure is charged to actual compressed storage; no raw mesh remains retained.
         byte[] packed;
         try { packed=LodDistantStore.encode(node); }
-        catch(IOException unsupported) { reject(node.key()); return; }
+        catch(IOException unsupported) { if(!generated) reject(node.key()); return false; }
         synchronized(this) {
-            if (closed || failed || generation!=admittedGeneration || !ticket.current()) return;
+            if (closed || failed || generation!=admittedGeneration || !ticket.current()) return false;
+            if(generated && (generation!=expectedGeneration || version(node.key())!=expectedVersion || diskLeaves.contains(node.key())
+                    || pending.containsKey(node.key()))) return false;
             captured++;
             openingDirty.remove(node.key());
             enqueue(node.key(),packed,ticket);
             knownLeaves.add(node.key());
+            return true;
         }
     }
     private void enqueue(LodDistantNode.Key key, byte[] packed, LodRevisionTracker.Ticket ticket) {
         if (closed || failed) return;
-        if (pending.size() >= MAX_PENDING || versions.size() > MAX_VERSIONS - 10) {
+        if (pending.size() >= MAX_PENDING || versions.size() > maxVersions - 10) {
             // Bounded overload recovery is deliberately lossy, never stale: revoke the entire generation.
             clear=true; generation++; pending.clear(); queuedBytes=0;
             versions.clear(); persistedVersions.clear(); knownLeaves.clear(); result.set(null); dropped++;
@@ -268,6 +295,12 @@ public final class LodDistantCache implements AutoCloseable {
                     storeDiagnostics = store.diagnostics();
                     diskLeaves=leaves(store.keys());
                     persistedVersions.keySet().retainAll(diskLeaves);
+                }
+                // Large generated horizons outlive the bounded revision table. At
+                // a drained boundary start a new GPU epoch without deleting disk data.
+                if(!closed && !failed && !clear && pending.isEmpty() && versions.size()>maxVersions-Math.min(1024,maxVersions/4)) {
+                    generation++; versions.clear(); persistedVersions.clear(); result.set(null);
+                    knownLeaves.retainAll(diskLeaves); view=null;
                 }
                 if (closed || failed) closeStore();
                 scheduled=false;

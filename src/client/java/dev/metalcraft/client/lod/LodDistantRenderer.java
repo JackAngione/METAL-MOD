@@ -49,6 +49,13 @@ public final class LodDistantRenderer {
     public static long recaptures() { var current=cache; return current==null?0:current.recaptures(); }
     public static int horizon() { return settings.enabled() && settings.diskCache() ? settings.horizonChunks() : 16; }
     public static Stats stats() { return published; }
+    /** Diagnostic query; no per-frame census or GPU readback is needed. */
+    public static boolean isResident(LodDistantNode.Key section) {
+        var current=cache;
+        if(current==null) return false;
+        return selected.stream().anyMatch(c->c.node().key().contains(section)
+                && current.version(c.node().key())==c.version() && residency.contains(key(c)));
+    }
     private static Path cacheRoot() {
         return Minecraft.getInstance().gameDirectory.toPath().resolve(Boolean.getBoolean("fabric.client.gametest")
                 ? "build/lod-test-cache" : "metalcraft-lod");
@@ -64,6 +71,7 @@ public final class LodDistantRenderer {
     }
     public static void encoded(int indices) { draws++; triangles+=indices/3; }
     public static void worldChanged() {
+        LodTerrainGeneration.reset();
         LodDistantRecapture.reset();
         var previous=cache; cache=null;
         if(previous!=null) previous.close();

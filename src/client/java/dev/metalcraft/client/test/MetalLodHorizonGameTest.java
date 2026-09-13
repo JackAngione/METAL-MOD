@@ -38,7 +38,7 @@ final class MetalLodHorizonGameTest {
         });
         try (var environment=benchmark ? new MetalBenchmarkEnvironment(context) : null) {
             context.runOnClient(c -> {
-                MetalCraftConfig.setLod(LodSettings.defaults().withEnabled(true).withHorizon(256,true,diskBudget));
+                MetalCraftConfig.setLod(LodSettings.defaults().withGeneration(false).withEnabled(true).withHorizon(256,true,diskBudget));
                 ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);
             });
             net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave save;

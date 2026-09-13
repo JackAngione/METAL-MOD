@@ -3,7 +3,7 @@ package dev.metalcraft.client.lod;
 /** Renderer-owned immutable preferences. Capabilities determine what may actually run. */
 public record LodSettings(boolean enabled, Preset preset, int fullDetailChunks, double errorPixels,
         Shading shading, int horizonChunks, boolean smoothTransitions, int meshBudgetMiB,
-        Work backgroundWork, boolean diskCache, int diskBudgetMiB, boolean diagnostics) {
+        Work backgroundWork, boolean diskCache, int diskBudgetMiB, boolean diagnostics, boolean generateTerrain) {
     public enum Preset { QUALITY, BALANCED, PERFORMANCE, CUSTOM }
     public enum Shading { FULL, HALF, QUARTER, AUTO }
     public enum Work { LOW, BALANCED, HIGH }
@@ -24,7 +24,7 @@ public record LodSettings(boolean enabled, Preset preset, int fullDetailChunks, 
 
     public static LodSettings defaults() {
         return new LodSettings(false, Preset.BALANCED, 4, 2, Shading.FULL, 16, true, 0,
-                Work.BALANCED, true, 2048, false);
+                Work.BALANCED, true, 2048, false, true);
     }
 
     private static int radius(Preset preset) { return switch (preset) { case QUALITY -> 6; case PERFORMANCE -> 2; default -> 4; }; }
@@ -33,27 +33,32 @@ public record LodSettings(boolean enabled, Preset preset, int fullDetailChunks, 
     public LodSettings withPreset(Preset value) {
         if (value == null || value == Preset.CUSTOM) return withGeometry(fullDetailChunks, errorPixels);
         return new LodSettings(enabled, value, radius(value), error(value), shading, horizonChunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics);
+                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics, generateTerrain);
     }
 
     public LodSettings withGeometry(int radius, double error) {
         return new LodSettings(enabled, Preset.CUSTOM, radius, error, shading, horizonChunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics);
+                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics, generateTerrain);
     }
 
     public LodSettings withEnabled(boolean value) {
         return new LodSettings(value, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics);
+                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics, generateTerrain);
     }
 
     public LodSettings withHorizon(int chunks, boolean cache, int diskMiB) {
         return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, chunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, cache, diskMiB, diagnostics);
+                smoothTransitions, meshBudgetMiB, backgroundWork, cache, diskMiB, diagnostics, generateTerrain);
     }
 
     public LodSettings withRuntimeLimits(boolean smoothing, int memoryMiB, Work work) {
         return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
-                smoothing, memoryMiB, work, diskCache, diskBudgetMiB, diagnostics);
+                smoothing, memoryMiB, work, diskCache, diskBudgetMiB, diagnostics, generateTerrain);
+    }
+
+    public LodSettings withGeneration(boolean value) {
+        return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
+                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics, value);
     }
 
     /** Keep headroom for the rest of the renderer; retirement remains charged under pressure. */

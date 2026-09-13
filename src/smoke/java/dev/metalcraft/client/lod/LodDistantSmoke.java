@@ -21,6 +21,9 @@ final class LodDistantSmoke {
                 storage(root.resolve("store"));
                 globalBudget(root.resolve("budget"));
                 scheduling(root.resolve("queue"));
+                chunkBoundary(root.resolve("boundary"));
+                generatedOwnership(root.resolve("generated"));
+                revisionRollover(root.resolve("rollover"));
                 cancellation(root.resolve("cancel"));
                 compressedQueue(root.resolve("compressed"));
             } finally {
@@ -169,6 +172,86 @@ final class LodDistantSmoke {
         cache.close(); drain(work);
         check(cache.takeResult()==null,"closed cache never publishes");
         try(var ignored=new LodDistantStore(root,"world","dim","mat",BUDGET)) { }
+    }
+    private static void chunkBoundary(Path root) throws java.io.IOException {
+        // Follow appendOwned's needsView/view protocol with terrain leaving the
+        // loaded square after a tiny step, including floor semantics below zero.
+        for (int axis=0;axis<2;axis++) for (int direction:new int[]{-1,1}) {
+            double before=direction>0 ? 15.99 : 0.01;
+            double after=direction>0 ? 16.01 : -0.01;
+            int section=direction>0 ? -16 : 16;
+            var key=new LodDistantNode.Key(0,axis==0?section:0,0,axis==1?section:0);
+            var leaf=new LodDistantNode(key,node(0,1).layers(),0,1);
+            Path directory=root.resolve(axis+"-"+direction);
+            try(var store=new LodDistantStore(directory,"world","dim","mat",BUDGET)) {
+                store.putLeaf(leaf);
+            }
+            var work=new ArrayDeque<Runnable>();
+            var cache=new LodDistantCache(budget->new LodDistantStore(directory,"world","dim","mat",budget),work::add);
+            try {
+                cache.view(new LodDistantCache.View(axis==0?before:8,8,axis==1?before:8,
+                        16,32,BUDGET,0,0,1,1,k->true));
+                drain(work);
+                check(cache.takeResult().nodes().isEmpty(),"loaded terrain retains sole ownership before crossing");
+                double x=axis==0?after:8,z=axis==1?after:8;
+                check(key.outsideLoaded(x,z,16),"fixture section leaves loaded square");
+                if(cache.needsView(x,8,z,16,32,BUDGET,0,0,1,1)) {
+                    cache.view(new LodDistantCache.View(x,8,z,16,32,BUDGET,0,0,1,1,k->true));
+                }
+                drain(work);
+                var result=cache.takeResult();
+                check(result!=null && result.nodes().stream().anyMatch(c->c.node().key().contains(key)),
+                        "chunk-boundary crossing must select newly distant terrain: axis="+axis+", direction="+direction);
+                check(!cache.needsView(x+.001,8,z+.001,16,32,BUDGET,0,0,1,1),
+                        "small movement within a chunk does not reschedule the worker");
+            } finally {
+                cache.close(); drain(work);
+            }
+        }
+    }
+    private static void generatedOwnership(Path root) {
+        var work=new ArrayDeque<Runnable>();
+        var cache=new LodDistantCache(budget->new LodDistantStore(root,"world","dim","mat",budget),work::add);
+        var revisions=new LodRevisionTracker(128);
+        var leaf=node(40,1);
+        try {
+            cache.view(view(k->true)); drain(work);
+            var ticket=revisions.capture(40,0,0);
+            check(cache.captureGenerated(leaf,ticket,0,cache.generation()),"generated snapshot fills an unknown section");
+            drain(work);
+            check(cache.entry(leaf.key()).stored(),"generated section is persisted");
+            check(!cache.captureGenerated(node(40,2),ticket,cache.version(leaf.key()),cache.generation()),"generated data cannot replace a stored section");
+            cache.invalidate(leaf.key()); drain(work);
+            long old=cache.version(leaf.key());
+            cache.capture(node(40,3),revisions.capture(41,0,0));
+            check(!cache.captureGenerated(leaf,ticket,old,cache.generation()),"received pending output wins over generated snapshot");
+            drain(work);
+            var result=cache.takeResult();
+            check(result.nodes().stream().anyMatch(c->c.node().bytes()==3*112),"received current payload retained");
+            cache.invalidate(leaf.key()); drain(work); old=cache.version(leaf.key());
+            revisions.resources();
+            check(!cache.captureGenerated(leaf,ticket,old,cache.generation()),"cancelled generation cannot repopulate the cache");
+            ticket=revisions.capture(40,0,0);
+            long epoch=cache.generation(); cache.clear(); drain(work);
+            check(!cache.captureGenerated(leaf,ticket,0,epoch),"pre-clear generated snapshot cannot reuse zero revision in a new epoch");
+            check(cache.captureGenerated(leaf,ticket,0,cache.generation()),"new generation can fill a cleared cache"); drain(work);
+        } finally { cache.close(); drain(work); }
+    }
+    private static void revisionRollover(Path root) {
+        var work=new ArrayDeque<Runnable>();
+        var cache=new LodDistantCache(budget->new LodDistantStore(root,"world","dim","mat",budget),work::add,128);
+        var revisions=new LodRevisionTracker(128);
+        try {
+            for(int i=0;i<32;i++) {
+                cache.view(view(k->true));
+                int x=40+i*256;
+                cache.capture(node(x,1),revisions.capture(x,0,0)); drain(work);
+            }
+            check(cache.generation()>0 && cache.stats().dropped()==0,"drained revision rollover never drops saved terrain");
+            for(int i=0;i<32;i++) check(cache.entry(new LodDistantNode.Key(0,40+i*256,0,0)).stored(),"rollover preserves every disk leaf");
+            cache.view(view(k->true)); drain(work);
+            check(!cache.takeResult().nodes().isEmpty(),"new revision epoch selects preserved cache data");
+        } finally { cache.close(); drain(work); }
     }
     private static void cancellation(Path root) throws java.io.IOException {
         var work=new ArrayDeque<Runnable>(); var reference=new AtomicReference<LodDistantCache>();

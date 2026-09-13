@@ -1,0 +1,76 @@
+{
+  "beforePausedStop": {
+    "active": true,
+    "columns": 0,
+    "sections": 0,
+    "failures": 0,
+    "tickets": 9,
+    "x": -113,
+    "z": -25
+  },
+  "pausedStop": {
+    "active": false,
+    "columns": 0,
+    "sections": 0,
+    "failures": 0,
+    "tickets": 0,
+    "x": 0,
+    "z": 0
+  },
+  "generation": {
+    "active": true,
+    "columns": 1,
+    "sections": 23,
+    "failures": 0,
+    "tickets": 9,
+    "x": -112,
+    "z": -25
+  },
+  "stopped": {
+    "active": false,
+    "columns": 1,
+    "sections": 23,
+    "failures": 0,
+    "tickets": 0,
+    "x": 0,
+    "z": 0
+  },
+  "distant": {
+    "cache": {
+      "ready": true,
+      "captured": 407,
+      "saved": 304,
+      "cacheReads": 109,
+      "dropped": 0,
+      "failures": 0,
+      "queuedBytes": 1340862,
+      "queuedNodes": 56,
+      "diskBytes": 109567448,
+      "corrupt": 0,
+      "evictions": 0,
+      "indexedNodes": 448
+    },
+    "draws": 2080,
+    "triangles": 2803412,
+    "uploads": 8,
+    "uploadBytes": 801248,
+    "uploadFailures": 0,
+    "gpuBytes": 801248,
+    "residentNodes": 8,
+    "frameDraws": 4,
+    "frameSections": 20,
+    "frameFarthestBlocks": 433.64474439985213
+  },
+  "disabled": {
+    "draws": 2092,
+    "triangles": 2824580,
+    "uploads": 8,
+    "uploadBytes": 801248,
+    "uploadFailures": 0,
+    "gpuBytes": 0,
+    "residentNodes": 0,
+    "frameDraws": 0,
+    "frameSections": 0,
+    "frameFarthestBlocks": 0.0
+  }
+}

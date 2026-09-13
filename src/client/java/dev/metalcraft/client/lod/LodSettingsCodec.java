@@ -17,7 +17,7 @@ public final class LodSettingsCodec {
                 integer(value, "horizonChunks", d.horizonChunks()), bool(value, "smoothTransitions", d.smoothTransitions()),
                 integer(value, "meshBudgetMiB", d.meshBudgetMiB()), enumeration(value, "backgroundWork", d.backgroundWork()),
                 bool(value, "diskCache", d.diskCache()), integer(value, "diskBudgetMiB", d.diskBudgetMiB()),
-                bool(value, "diagnostics", d.diagnostics()));
+                bool(value, "diagnostics", d.diagnostics()), bool(value, "generateTerrain", d.generateTerrain()));
     }
 
     private static boolean bool(JsonObject v, String k, boolean fallback) {

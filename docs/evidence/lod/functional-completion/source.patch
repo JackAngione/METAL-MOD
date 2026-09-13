@@ -1,0 +1,69 @@
+diff --git a/src/client/java/dev/metalcraft/client/lod/LodDistantCache.java b/src/client/java/dev/metalcraft/client/lod/LodDistantCache.java
+index 15db745..c99cd6b 100644
+--- a/src/client/java/dev/metalcraft/client/lod/LodDistantCache.java
++++ b/src/client/java/dev/metalcraft/client/lod/LodDistantCache.java
+@@ -96,6 +96,9 @@ public final class LodDistantCache implements AutoCloseable {
+                              float yaw, float pitch, float projectionX, float projectionY) {
+         View previous = view;
+         return previous == null || previous.loaded != loaded || previous.horizon != horizon || previous.diskBudget != budget
++                // Surface ownership changes at chunk boundaries, even when camera
++                // movement is below the ordinary selection refresh threshold.
++                || Math.floor(x/16) != Math.floor(previous.x/16) || Math.floor(z/16) != Math.floor(previous.z/16)
+                 || Math.abs(x-previous.x)>8 || Math.abs(y-previous.y)>8 || Math.abs(z-previous.z)>8
+                 || Math.abs(yaw-previous.yaw)>3 || Math.abs(pitch-previous.pitch)>3
+                 || projectionX != previous.projectionX || projectionY != previous.projectionY;
+diff --git a/src/smoke/java/dev/metalcraft/client/lod/LodDistantSmoke.java b/src/smoke/java/dev/metalcraft/client/lod/LodDistantSmoke.java
+index d5e783b..bc6cf97 100644
+--- a/src/smoke/java/dev/metalcraft/client/lod/LodDistantSmoke.java
++++ b/src/smoke/java/dev/metalcraft/client/lod/LodDistantSmoke.java
+@@ -21,6 +21,7 @@ final class LodDistantSmoke {
+                 storage(root.resolve("store"));
+                 globalBudget(root.resolve("budget"));
+                 scheduling(root.resolve("queue"));
++                chunkBoundary(root.resolve("boundary"));
+                 cancellation(root.resolve("cancel"));
+                 compressedQueue(root.resolve("compressed"));
+             } finally {
+@@ -170,6 +171,42 @@ final class LodDistantSmoke {
+         check(cache.takeResult()==null,"closed cache never publishes");
+         try(var ignored=new LodDistantStore(root,"world","dim","mat",BUDGET)) { }
+     }
++    private static void chunkBoundary(Path root) throws java.io.IOException {
++        // Follow appendOwned's needsView/view protocol with terrain leaving the
++        // loaded square after a tiny step, including floor semantics below zero.
++        for (int axis=0;axis<2;axis++) for (int direction:new int[]{-1,1}) {
++            double before=direction>0 ? 15.99 : 0.01;
++            double after=direction>0 ? 16.01 : -0.01;
++            int section=direction>0 ? -16 : 16;
++            var key=new LodDistantNode.Key(0,axis==0?section:0,0,axis==1?section:0);
++            var leaf=new LodDistantNode(key,node(0,1).layers(),0,1);
++            Path directory=root.resolve(axis+"-"+direction);
++            try(var store=new LodDistantStore(directory,"world","dim","mat",BUDGET)) {
++                store.putLeaf(leaf);
++            }
++            var work=new ArrayDeque<Runnable>();
++            var cache=new LodDistantCache(budget->new LodDistantStore(directory,"world","dim","mat",budget),work::add);
++            try {
++                cache.view(new LodDistantCache.View(axis==0?before:8,8,axis==1?before:8,
++                        16,32,BUDGET,0,0,1,1,k->true));
++                drain(work);
++                check(cache.takeResult().nodes().isEmpty(),"loaded terrain retains sole ownership before crossing");
++                double x=axis==0?after:8,z=axis==1?after:8;
++                check(key.outsideLoaded(x,z,16),"fixture section leaves loaded square");
++                if(cache.needsView(x,8,z,16,32,BUDGET,0,0,1,1)) {
++                    cache.view(new LodDistantCache.View(x,8,z,16,32,BUDGET,0,0,1,1,k->true));
++                }
++                drain(work);
++                var result=cache.takeResult();
++                check(result!=null && result.nodes().stream().anyMatch(c->c.node().key().contains(key)),
++                        "chunk-boundary crossing must select newly distant terrain: axis="+axis+", direction="+direction);
++                check(!cache.needsView(x+.001,8,z+.001,16,32,BUDGET,0,0,1,1),
++                        "small movement within a chunk does not reschedule the worker");
++            } finally {
++                cache.close(); drain(work);
++            }
++        }
++    }
+     private static void cancellation(Path root) throws java.io.IOException {
+         var work=new ArrayDeque<Runnable>(); var reference=new AtomicReference<LodDistantCache>();
+         var cache=new LodDistantCache(budget->{

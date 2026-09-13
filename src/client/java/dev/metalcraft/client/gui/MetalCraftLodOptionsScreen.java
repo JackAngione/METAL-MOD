@@ -93,6 +93,13 @@ public final class MetalCraftLodOptionsScreen extends Screen {
         }
         if (capabilities.extendedHorizon()) {
             rows.addChild(new MultiLineTextWidget(text("horizon.tooltip"), font).setMaxWidth(width).setCentered(true));
+            var generation=CycleButton.onOffBuilder(settings.generateTerrain())
+                    .withTooltip(v -> Tooltip.create(text("generation.tooltip")))
+                    .create(0,0,width,20,text("generation"),(b,v) -> MetalCraftConfig.setLod(MetalCraftConfig.lod().withGeneration(v)));
+            generation.active=minecraft.level==null || minecraft.getSingleplayerServer()!=null;
+            rows.addChild(generation);
+            if(minecraft.level!=null && minecraft.getSingleplayerServer()==null)
+                rows.addChild(new MultiLineTextWidget(text("generation.remote"),font).setMaxWidth(width).setCentered(true));
             rows.addChild(CycleButton.<Integer>builder(v -> Component.translatable("metalcraft.lod.chunks",v),settings.horizonChunks())
                     .withValues(16,32,64,128,256)
                     .create(0,0,width,20,text("horizon"),(b,v) -> {

@@ -25,7 +25,7 @@ final class MetalLodTestScope implements AutoCloseable {
             if (!LodCapabilities.GEOMETRY_AVAILABLE) throw new IllegalArgumentException("LOD geometry is unavailable");
             if (HORIZON>16 && !LodCapabilities.HORIZON_AVAILABLE)
                 throw new IllegalArgumentException("Extended horizon is unavailable");
-            context.runOnClient(client -> MetalCraftConfig.setLod(LodSettings.defaults().withGeometry(2, 2)
+            context.runOnClient(client -> MetalCraftConfig.setLod(LodSettings.defaults().withGeneration(false).withGeometry(2, 2)
                     .withEnabled(true).withHorizon(HORIZON,true,512)));
         }
     }

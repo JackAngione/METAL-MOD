@@ -78,6 +78,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			throw new AssertionError("Lifecycle test selected unexpected backend: " + backend + " (expected " + expectedBackend + ")");
 		}
 		LOGGER.info("Metal lifecycle validation: {} backend selected", backend);
+		if (Boolean.getBoolean("metalcraft.lodGenerationTest")) {
+			MetalLodGenerationGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.lodHorizonTest")) {
 			MetalLodHorizonGameTest.run(context);
 			return;

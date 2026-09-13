@@ -26,6 +26,6 @@ public record LodCapabilities(boolean metal, boolean geometry, boolean multireso
                 metal && multiresolution ? desired.shading() : LodSettings.Shading.FULL,
                 metal && extendedHorizon ? desired.horizonChunks() : 16, desired.smoothTransitions(),
                 desired.meshBudgetMiB(), desired.backgroundWork(), desired.diskCache(),
-                desired.diskBudgetMiB(), desired.diagnostics() && metal && geometry);
+                desired.diskBudgetMiB(), desired.diagnostics() && metal && geometry, desired.generateTerrain());
     }
 }

@@ -1,6 +1,12 @@
 # LOD feature implementation plan
 
-Status: P1–P5 complete for conservative loaded geometry and composition compatibility.
+Status: functional handoff and P11 single-player background generation complete (Codex, 2026-09-13).
+The user requested a working feature now and refinement later. P9's performance,
+dense-coverage qualification, multiresolution shading and independent GLFW investigation
+remain explicit follow-ups; they are not newly claimed as implemented or measured.
+P10 below tracks the final functional handoff and current-source validation.
+
+P1–P5 complete for conservative loaded geometry and composition compatibility.
 P6 is complete in the plan-authorized full-resolution reduced-lighting scope;
 half/quarter pixel-resolution shading remains deferred.
 P7 functional cache acceptance is complete. P8 is complete for the opt-in explored-terrain preview.
@@ -114,7 +120,9 @@ and material versions; bound disk usage with eviction and validate atomic writes
 Test disconnect/reconnect, corrupted entries, and edits after revisiting cached areas.
 Show that cached distant terrain may be stale until revisited. Multiplayer cannot
 invent unseen server chunks. Automatic world generation and a server streaming
-extension are outside this initial feature; explored data is sufficient for stage 3.
+extension were outside the initial P1–P8 feature; explored data was sufficient for stage 3.
+P11 extends single-player to integrated-server generation. Remote multiplayer still
+uses received terrain only and has no new server installation or protocol requirement.
 
 ## Texture and shading resolution
 
@@ -621,7 +629,57 @@ Dependencies: P1 → P2/P3 → P4 → P5 → P6 evaluation; P7 builds on P4/P5 a
 P8 requires P2–P7 correctness and the recorded P6 scope decision. A geometry/cache
 milestone must explicitly exclude multiresolution shading and its unpassed gates.
 
-## Post-preview optimization work
+## Functional completion — 2026-09-13
+
+- [x] P11 — Generate single-player distant terrain without exploration. Owner: Codex.
+  Status: complete (2026-09-13). User-authorized scope extension: use the integrated
+  server's asynchronous world generation with loading-only tickets, bounded nearest-first
+  scheduling and immutable terrain/light/biome snapshots. Build opaque meshes on a worker
+  and feed the existing Metal cache. Preserve 16/16, stop/release on disable, disconnect,
+  cache clear and dimension/resource changes, and never replace newer received terrain.
+  Remote multiplayer retains ordinary received-terrain caching without requiring a mod
+  or changing the server protocol. Add a persisted generation switch and clear UI status.
+  Acceptance: bounded scheduling/lifecycle fixtures, native build and a short NORMAL-world
+  test proving generation/cache/rendering beyond the unmodified client receive distance.
+  - Implemented: generation switch, constant-space outward rings, one 3×3 loading-only
+    neighborhood, one immutable snapshot/worker mesh at a time, server-pressure backoff,
+    received-output precedence, bounded repair, epoch rollover without deleting disk data,
+    cancellation drain and paused-menu teardown.
+  - Validation: `MTL_DEBUG_LAYER=1 ./gradlew build` passes in 17s on M4 Max/64 GiB,
+    macOS 27.0. New CPU tests cover all supported horizon rings, generation settings,
+    received-write precedence, cancellation/epoch races and disk-preserving rollover.
+    The final stationary NORMAL-world 16/16 Default/Metal route passes in 27s: a full
+    generated column persists and reaches residency/drawing without client chunk receipt;
+    active generation does not simulate the target. Nine active tickets drop to zero
+    while paused; generation resumes, then stop/disable/close pass with zero GPU charges.
+    The settings UI passes in 13s, including generation toggle/persistence/reset and
+    small-window keyboard navigation. Multiplayer fallback is source-verified; no
+    external server session or dense 128/256 performance qualification is claimed.
+    [Commands, limits, source identity and evidence](evidence/lod/generated-terrain/README.md).
+
+- [x] P10 — Finish the functional handoff. Owner: Codex. Status: complete.
+  - Fixed distant selection failing to refresh when the camera crosses a loaded
+    chunk boundary by less than the eight-block view threshold. Selection now
+    refreshes on horizontal chunk changes; small moves within a chunk retain the
+    existing throttling. The production-cache regression fails before the fix (2s)
+    and passes afterward (3s), covering both axes and positive/negative crossings.
+  - Current-source validation on Apple M4 Max/64 GiB, macOS 27.0:
+    `MTL_DEBUG_LAYER=1 ./gradlew build` passes in 15s. The focused NORMAL-world
+    horizon toggle route passes in 76s at 16/16 Default/Metal under API validation.
+    The 32-chunk capture represents 722 sections in 97 layer draws, with zero cache
+    drops/failures/corruption and zero upload failures. Disable releases distant
+    ownership; same-world re-enable restores draws; the client exits successfully.
+    The screenshot was inspected. This is a functional check, not a new FPS or
+    dense 128/256-chunk qualification. [Commands and evidence](evidence/lod/functional-completion/README.md).
+  - Preserve the delivered P1–P8 scope: opt-in loaded geometry, full-resolution
+    reduced lighting, persisted explored opaque terrain, settings and safe fallback.
+    FPS optimization, denser representation, diagnostic UI and true half/quarter
+    shading are refinements, with their limitations retained rather than marked passed.
+
+## Deferred refinement backlog
+
+The user deferred refinement on 2026-09-13. The unchecked P9 items below remain
+unimplemented or unqualified; they are not prerequisites for the functional handoff.
 
 - [x] P9.1 — Share emitted-face classification across loaded mesh tiers.
   - Owner: Codex (2026-09-12). Status: complete. The compiler now classifies
