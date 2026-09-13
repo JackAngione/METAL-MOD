@@ -103,7 +103,7 @@ public final class LodCompilerCapture {
                 if (sprite == null) { materialRejects.increment(); rejected.increment(); return null; }
                 quads.add(new LodBakedMesh.Quad(sprite, vertices));
             }
-            var baked = new LodBakedMesh(quads);
+            var baked = new LodBakedMesh(quads).classify();
             var simplified = baked.simplify(4);
             if (!simplified.supported()) { geometryRejects.increment(); rejected.increment(); return null; }
             supported.increment(); input.add(simplified.originalQuads()); output.add(simplified.quads());

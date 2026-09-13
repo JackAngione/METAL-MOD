@@ -1,0 +1,28 @@
+Exact four-tier baseline output matches: quads=256 shaded=false
+before 399.706 us/build 603597 bytes/build
+after 106.846 us/build 225729 bytes/build
+after 108.364 us/build 225729 bytes/build
+before 267.605 us/build 603389 bytes/build
+before 266.590 us/build 603385 bytes/build
+after 107.978 us/build 225729 bytes/build
+Exact four-tier baseline output matches: quads=256 shaded=true
+before 423.644 us/build 665788 bytes/build
+after 177.801 us/build 215668 bytes/build
+after 164.510 us/build 209545 bytes/build
+before 221.749 us/build 539369 bytes/build
+before 229.421 us/build 539369 bytes/build
+after 128.679 us/build 209497 bytes/build
+Exact four-tier baseline output matches: quads=4096 shaded=false
+before 4070.114 us/build 9229529 bytes/build
+after 1298.135 us/build 3492217 bytes/build
+after 1339.731 us/build 3492217 bytes/build
+before 4182.546 us/build 9229529 bytes/build
+before 4296.601 us/build 9229529 bytes/build
+after 1320.912 us/build 3492217 bytes/build
+Exact four-tier baseline output matches: quads=4096 shaded=true
+before 3806.406 us/build 8606473 bytes/build
+after 1186.086 us/build 3336673 bytes/build
+after 1183.644 us/build 3336673 bytes/build
+before 3659.109 us/build 8606473 bytes/build
+before 3611.100 us/build 8606473 bytes/build
+after 1168.090 us/build 3336673 bytes/build

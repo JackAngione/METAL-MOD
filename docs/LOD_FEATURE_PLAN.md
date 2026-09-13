@@ -621,6 +621,32 @@ Dependencies: P1 → P2/P3 → P4 → P5 → P6 evaluation; P7 builds on P4/P5 a
 P8 requires P2–P7 correctness and the recorded P6 scope decision. A geometry/cache
 milestone must explicitly exclude multiresolution shading and its unpassed gates.
 
+## Post-preview optimization work
+
+- [x] P9.1 — Share emitted-face classification across loaded mesh tiers.
+  - Owner: Codex (2026-09-12). Status: complete. The compiler now classifies
+    emitted faces once and reuses that worker-local grouping for four independent
+    tier merges. Tier-4 profitability/stale/unsupported exits, boundary strips,
+    appearance rules and memory budgets are preserved.
+  - Validation: `./gradlew lodSmoke` passes (4s); `MTL_DEBUG_LAYER=1 ./gradlew build`
+    passes (18s), Apple M4 Max/macOS 27.0. The short paired CPU probe matches every
+    tier against the pre-change mesher for four 256/4,096-quad flat/mixed-shading
+    fixtures. Median sample construction time falls 28–69%; allocated bytes fall
+    61–63%. This is worker CPU evidence, not a frame-rate or triangle-saving claim.
+    [Reproduction, exact-output checks and measurements](evidence/lod/shared-classification/README.md).
+- [ ] P9.2 — Improve loaded geometry enough to demonstrate a net frame-time benefit.
+  P9.1 reduces construction overhead only; the original triangle/GPU objectives
+  remain unestablished.
+- [ ] P9.3 — Qualify dense explored coverage and sustained repair churn, including
+  actual driver allocation peaks and base/lower-memory Apple Silicon when available.
+- [ ] P9.4 — Implement actual half/quarter pixel-resolution shading that passes
+  the complete GPU-cost, image and transition gates. Prior rejected approaches
+  remain evidence; current full-resolution reduced lighting stays in place.
+- [ ] P9.5 — Diagnose the independent intermittent GLFW final-window-reset crash;
+  identify the callback sequence behind the recorded null-monitor fault.
+
+These follow-ups do not reopen P8 or reinstate its waived long validation runs.
+
 ## Validation and performance gates
 
 Use the same seed, camera path, time, weather, pack, resolution, and warm-up for each

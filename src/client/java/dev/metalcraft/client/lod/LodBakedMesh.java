@@ -49,42 +49,61 @@ public record LodBakedMesh(List<Quad> quads) {
     /** Conservatively merges only unit faces with identical flat shading and UV orientation. */
     public Simplified simplify(int tier) {
         if (tier < 1 || tier > 4) throw new IllegalArgumentException("LOD tier must be 1–4");
+        return classify().simplify(tier);
+    }
+
+    /** Classify once on the compiler worker; each tier owns its mutable merge cells. */
+    public List<Simplified> simplifyTiers() {
+        Classified classified = classify();
+        return List.of(classified.simplify(1), classified.simplify(2),
+                classified.simplify(3), classified.simplify(4));
+    }
+
+    Classified classify() {
         Map<Plane, Map<Integer, Quad>> planes = new LinkedHashMap<>();
         java.util.Set<Surface> occupied = new java.util.HashSet<>();
         List<Quad> unmerged = new ArrayList<>();
         // Reject custom/thin geometry as a whole section. Nonuniform lighting is preserved verbatim.
         for (Quad quad : quads) {
             Face face = face(quad);
-            if (face == null) return new Simplified(false, List.of(), List.of(), quads.size());
+            if (face == null) return new Classified(false, Map.of(), List.of(), quads.size());
             if (!occupied.add(new Surface(face.axis, face.plane, face.u, face.v)))
-                return new Simplified(false, List.of(), List.of(), quads.size());
+                return new Classified(false, Map.of(), List.of(), quads.size());
             if (face.appearance == null) { unmerged.add(quad); continue; }
             Plane plane = new Plane(face.axis, face.sign, face.plane, face.appearance);
             Map<Integer, Quad> cells = planes.computeIfAbsent(plane, ignored -> new java.util.HashMap<>());
             int cell = face.u + 16 * face.v;
             cells.put(cell, quad);
         }
-        List<Rectangle> rectangles = new ArrayList<>();
-        int limit = 1 << tier;
-        for (var entry : planes.entrySet()) {
-            Plane plane = entry.getKey();
-            Map<Integer, Quad> cells = entry.getValue();
-            for (int v = 0; v < 16; v++) for (int u = 0; u < 16; u++) {
-                Quad source = cells.get(u + 16 * v);
-                if (source == null) continue;
-                int width = 1, height = 1;
-                if (u > 0 && v > 0 && u < 15 && v < 15) {
-                    while (width < limit && u + width < 15 && cells.containsKey(u + width + 16 * v)) width++;
-                    rows: while (height < limit && v + height < 15) {
-                        for (int dx = 0; dx < width; dx++) if (!cells.containsKey(u + dx + 16 * (v + height))) break rows;
-                        height++;
+        return new Classified(true, planes, unmerged, quads.size());
+    }
+
+    record Classified(boolean supported, Map<Plane, Map<Integer, Quad>> planes,
+                              List<Quad> unmerged, int originalQuads) {
+        Simplified simplify(int tier) {
+            if (!supported) return new Simplified(false, List.of(), List.of(), originalQuads);
+            List<Rectangle> rectangles = new ArrayList<>();
+            int limit = 1 << tier;
+            for (var entry : planes.entrySet()) {
+                Plane plane = entry.getKey();
+                Map<Integer, Quad> cells = new java.util.HashMap<>(entry.getValue());
+                for (int v = 0; v < 16; v++) for (int u = 0; u < 16; u++) {
+                    Quad source = cells.get(u + 16 * v);
+                    if (source == null) continue;
+                    int width = 1, height = 1;
+                    if (u > 0 && v > 0 && u < 15 && v < 15) {
+                        while (width < limit && u + width < 15 && cells.containsKey(u + width + 16 * v)) width++;
+                        rows: while (height < limit && v + height < 15) {
+                            for (int dx = 0; dx < width; dx++) if (!cells.containsKey(u + dx + 16 * (v + height))) break rows;
+                            height++;
+                        }
                     }
+                    for (int dy = 0; dy < height; dy++) for (int dx = 0; dx < width; dx++) cells.remove(u + dx + 16 * (v + dy));
+                    rectangles.add(new Rectangle(source, plane.axis, plane.sign, plane.plane, u, v, width, height));
                 }
-                for (int dy = 0; dy < height; dy++) for (int dx = 0; dx < width; dx++) cells.remove(u + dx + 16 * (v + dy));
-                rectangles.add(new Rectangle(source, plane.axis, plane.sign, plane.plane, u, v, width, height));
             }
+            return new Simplified(true, rectangles, unmerged, originalQuads);
         }
-        return new Simplified(true, rectangles, unmerged, quads.size());
     }
 
     private static Face face(Quad quad) {

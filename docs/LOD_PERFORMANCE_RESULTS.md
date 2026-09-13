@@ -671,3 +671,12 @@ Separate follow-ups outside the opt-in explored-terrain preview are:
 - Qualify dense horizon coverage and sustained repair churn, actual driver GPU allocation peaks, and base/lower-memory Apple Silicon. Explored patches and logical payload counters do not establish these results.
 - Resolve the intermittent GLFW final-window-reset crash. Its null-monitor native fault is identified; the callback sequence that creates that state is not. Clean test exits do not prove a fix.
 - Implement and qualify actual half/quarter pixel-resolution shading; P6 currently uses its accepted full-resolution reduced-lighting fallback.
+
+
+### Loaded construction follow-up (2026-09-12)
+
+P9.1 shares emitted-face classification across all four loaded tiers. Short CPU
+fixtures match the pre-change tier output and reduce median sample construction
+cost by 28–69% and allocated bytes by 61–63% on M4 Max. The native validation build
+passes. These synthetic worker measurements do not establish game frame-time gains
+or change the measured triangle savings above. [Evidence and reproduction](evidence/lod/shared-classification/README.md).

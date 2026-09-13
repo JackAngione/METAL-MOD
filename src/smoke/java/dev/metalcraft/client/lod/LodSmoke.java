@@ -119,9 +119,11 @@ public final class LodSmoke {
             }
         }
         check(repeated == 4, "one 14x14 inner face repeats; boundary faces retain original samples");
+        var tiers = snapshot.simplifyTiers();
         for (int tier = 1; tier <= 4; tier++) {
+            check(tiers.get(tier - 1).equals(snapshot.simplify(tier)), "shared classification preserves tier output");
             Set<String> coverage = new HashSet<>();
-            for (var rect : snapshot.simplify(tier).rectangles()) {
+            for (var rect : tiers.get(tier - 1).rectangles()) {
                 for (int v = 0; v < rect.height(); v++) for (int u = 0; u < rect.width(); u++)
                     check(coverage.add((rect.u() + u) + ":" + (rect.v() + v)), "baked face owned once");
             }
@@ -133,6 +135,17 @@ public final class LodSmoke {
         var shaded = new LodBakedMesh.Quad(sprite, vertices);
         var exact = new LodBakedMesh(List.of(shaded)).simplify(4);
         check(exact.supported() && exact.unmerged().equals(List.of(shaded)), "AO and light gradients retained verbatim");
+        var mixed = new java.util.ArrayList<>(snapshot.quads());
+        mixed.set(0, shaded);
+        var mixedMesh = new LodBakedMesh(mixed);
+        var mixedTiers = mixedMesh.simplifyTiers();
+        for (int tier = 1; tier <= 4; tier++) {
+            check(mixedTiers.get(tier - 1).equals(mixedMesh.simplify(tier))
+                    && mixedTiers.get(tier - 1).unmerged().equals(List.of(shaded)),
+                    "shared tiers preserve shaded faces alongside merged surfaces");
+        }
+        check(new LodBakedMesh(List.of(quads.getFirst(), quads.getFirst())).simplifyTiers().stream()
+                .noneMatch(LodBakedMesh.Simplified::supported), "all shared tiers reject overlapping faces");
         vertices.set(0, new LodBakedMesh.Vertex(.25f, first.y(), first.z(), first.u(), first.v(), -1, 240));
         check(!new LodBakedMesh(List.of(new LodBakedMesh.Quad(sprite, vertices))).simplify(4).supported(), "custom/thin models reject section");
         check(!new LodBakedMesh(List.of(quads.getFirst(), quads.getFirst())).simplify(4).supported(), "overlapping model faces reject section");
