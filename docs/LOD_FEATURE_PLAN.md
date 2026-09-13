@@ -635,6 +635,20 @@ milestone must explicitly exclude multiresolution shading and its unpassed gates
     61–63%. This is worker CPU evidence, not a frame-rate or triangle-saving claim.
     [Reproduction, exact-output checks and measurements](evidence/lod/shared-classification/README.md).
 - [ ] P9.2 — Improve loaded geometry enough to demonstrate a net frame-time benefit.
+  - Owner: Codex (2026-09-12). Status: evaluated; net frame-time acceptance unmet.
+    After two focus-rejected attempts, the foreground off/on pair passes all 18
+    phases (NORMAL, 16/16, Default/Metal, 3840×2160, None/full, three repeats).
+    Median intervals change +6.73% stationary / +1.19% pan / −14.22% traversal;
+    CPU work rises 11–16% in every phase and FPS repeat ranges overlap. Distant
+    triangle savings are 0.264–0.398%; no overall net benefit is established.
+    [Qualified pair and limits](evidence/lod/p9-qualification/foreground-pair/README.md).
+  - [x] P9.2b — Share maximal exact surface merges and GPU residency across loaded
+    selection tiers. One worker-built mesh preserves appearance and unit boundary
+    strips; identity-equal tiers alias one residency key while selection history
+    and counters retain their own tiers. CPU retention charges remain conservative
+    at 768 bytes/source quad plus 4,096 bytes/candidate under the unchanged 64 MiB cap.
+    CPU/Metal smoke and native API-validation build pass; this establishes correctness,
+    not a net frame-time benefit. [Evidence](evidence/lod/p9-qualification/README.md).
   P9.1 reduces construction overhead only; the original triangle/GPU objectives
   remain unestablished.
   - [x] P9.2a — Reduce per-frame loaded selection allocation. Owner: Codex
@@ -650,6 +664,21 @@ milestone must explicitly exclude multiresolution shading and its unpassed gates
     open. [Evidence and reproduction](evidence/lod/shared-selection/README.md).
 - [ ] P9.3 — Qualify dense explored coverage and sustained repair churn, including
   actual driver allocation peaks and base/lower-memory Apple Silicon when available.
+  - Owner: Codex (2026-09-12). Status: partial; dense live acceptance remains open.
+    The production cache represents only 936/1,024 sections in the heavier synthetic
+    patch, omitting 88 at its fixed 64 MiB result limit. Complete dense explored
+    coverage requires further representation work; no budget was silently increased.
+  - [x] P9.3a — Add reproducible bounded production-cache stress. Two contiguous
+    32×32 section fixtures, 768 repair submissions each, coalesced backlog, final
+    revision/payload persistence after reopen, no stale/overlapping owners, zero
+    drops/failures/corruption/evictions, and final empty queues pass. This is a
+    synthetic stepped-worker probe, not concurrent live-world throughput.
+  - [x] P9.3b — Add opt-in allocation-event Metal driver high-water telemetry.
+    Buffer/texture/view/drawable observations retain transient peaks; an 8 MiB
+    native allocation/release fixture passes. Reports distinguish observed device
+    peaks from LOD payload charges and unobserved driver-internal transients.
+    Dense live driver measurements and base/lower-memory hardware remain untested.
+    [Results, reproduction and limits](evidence/lod/p9-qualification/README.md).
 - [ ] P9.4 — Implement actual half/quarter pixel-resolution shading that passes
   the complete GPU-cost, image and transition gates. Prior rejected approaches
   remain evidence; current full-resolution reduced lighting stays in place.

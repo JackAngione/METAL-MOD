@@ -131,7 +131,7 @@ public final class LodLoadedRenderer {
             double nearestDepth = -(x * view.m02() + y * view.m12() + z * view.m22())
                     - 8 * (Math.abs(view.m02()) + Math.abs(view.m12()) + Math.abs(view.m22()));
             Draw last = previous.get(section);
-            before[index] = last != null && last.owner == mesh ? last.key.tier() : 0;
+            before[index] = last != null && last.owner == mesh ? last.tier : 0;
             desired[index] = LodSelector.select(true, nearestDepth, distance, .05, height, fov, settings,
                     EXACT_SURFACE_ERRORS, before[index]);
             if (desired[index] > 0) candidates.add(new Candidate(index, section, mesh, capture, distance));
@@ -159,7 +159,7 @@ public final class LodLoadedRenderer {
             for (int tier = 1; tier <= usefulTiers[candidate.index()]; tier++) {
                 var mesh = capture.mesh(tier);
                 if (mesh == null || mesh.quads() == 0 || mesh.quads() >= mesh.originalQuads()) continue;
-                var key = new LodMeshResidency.Key(capture.key(), tier);
+                var key = new LodMeshResidency.Key(capture.key(), capture.residencyTier(tier));
                 if (!residency.contains(key) && remaining > 0) {
                     long bytes = LodWorldMesh.bytes(mesh);
                     if (bytes <= allowance - frameUploadBytes) {
@@ -175,7 +175,7 @@ public final class LodLoadedRenderer {
         }
         // Resolve availability after all admission/eviction, then relax every visible boundary.
         for (var candidate : candidates) for (int tier = 1; tier <= 4; tier++) {
-            if (residency.contains(new LodMeshResidency.Key(candidate.capture().key(), tier)))
+            if (residency.contains(new LodMeshResidency.Key(candidate.capture().key(), candidate.capture().residencyTier(tier))))
                 available[candidate.index()] |= 1 << tier;
         }
         int[] resolved = LodSelector.resolveLoaded(desired, before, available, adjacency, settings.smoothTransitions());
@@ -188,8 +188,8 @@ public final class LodLoadedRenderer {
         for (var candidate : candidates) {
             int tier = resolved[candidate.index()];
             if (tier > 0) {
-                var key = new LodMeshResidency.Key(candidate.capture().key(), tier);
-                selected.put(candidate.section(), new Draw(this, candidate.section(), candidate.owner(), candidate.capture(), key));
+                var key = new LodMeshResidency.Key(candidate.capture().key(), candidate.capture().residencyTier(tier));
+                selected.put(candidate.section(), new Draw(this, candidate.section(), candidate.owner(), candidate.capture(), key, tier));
             }
         }
         // Admission may have evicted an earlier selection. It must retain its ordinary draw.
@@ -239,8 +239,8 @@ public final class LodLoadedRenderer {
         var capture = source.metalcraft$lodCandidate();
         if (capture == null || capture.currentMesh() == null) return null;
         for (int tier = 4; tier > 0; tier--) {
-            var key = new LodMeshResidency.Key(capture.key(), tier);
-            if (active.residency.contains(key)) return new Draw(active, section, mesh, capture, key).borrow(device);
+            var key = new LodMeshResidency.Key(capture.key(), capture.residencyTier(tier));
+            if (active.residency.contains(key)) return new Draw(active, section, mesh, capture, key, tier).borrow(device);
         }
         return null;
     }
@@ -259,8 +259,9 @@ public final class LodLoadedRenderer {
         private final SectionMesh owner;
         private final LodCapturedMesh capture;
         private final LodMeshResidency.Key key;
-        private Draw(LodLoadedRenderer renderer, RenderSection section, SectionMesh owner, LodCapturedMesh capture, LodMeshResidency.Key key) {
-            this.renderer = renderer; this.section = section; this.owner = owner; this.capture = capture; this.key = key;
+        private final int tier;
+        private Draw(LodLoadedRenderer renderer, RenderSection section, SectionMesh owner, LodCapturedMesh capture, LodMeshResidency.Key key, int tier) {
+            this.renderer = renderer; this.section = section; this.owner = owner; this.capture = capture; this.key = key; this.tier = tier;
         }
 
         /** Pipeline/binding preflight precedes this final identity check and timeline reservation. */
@@ -280,7 +281,7 @@ public final class LodLoadedRenderer {
         public void encoded(LodWorldMesh mesh) {
             encodedTerrain(mesh.originalIndexCount(), mesh.indexCount(), true);
             renderer.draws++;
-            switch (key.tier()) { case 1 -> renderer.tier1Draws++; case 2 -> renderer.tier2Draws++;
+            switch (tier) { case 1 -> renderer.tier1Draws++; case 2 -> renderer.tier2Draws++;
                 case 3 -> renderer.tier3Draws++; case 4 -> renderer.tier4Draws++; }
             renderer.originalTriangles += mesh.originalIndexCount() / 3;
             renderer.replacementTriangles += mesh.indexCount() / 3;

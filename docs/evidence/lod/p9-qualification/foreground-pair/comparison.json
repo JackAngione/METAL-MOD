@@ -1,0 +1,307 @@
+{
+  "resolution": [
+    3840,
+    2160
+  ],
+  "device": "Apple M4 Max",
+  "scope": "One isolated off/on pair, three route repeats each; synthetic GPU/frame percentiles are not inferred",
+  "percentileAggregation": "Median of each repeat's percentile; not a pooled percentile",
+  "gpuCaveat": "Command-buffer busy means and overlapping pass spans are not exclusive costs or frame percentiles",
+  "presentationCaveat": "Requested unlocked/VSync-off settings do not prove unpaced presentation. The 120Hz flag is an interval/acquire heuristic; inspect CPU work, acquire waits and repeat variability separately.",
+  "chunkLoadAndRenderSettlePassed": {
+    "off": true,
+    "on": true
+  },
+  "phases": {
+    "stationary": {
+      "off": {
+        "averageFps": 122.36,
+        "onePercentLowFps": 64.92,
+        "p50CpuMs": 1.73,
+        "p95CpuMs": 2.006,
+        "p99CpuMs": 2.208,
+        "p50IntervalMs": 6.845,
+        "p99IntervalMs": 14.84,
+        "fpsRange": [
+          120.51,
+          122.77
+        ],
+        "meanAcquireMs": 6.146403560830861,
+        "approximately120HzCadence": false,
+        "gpuCommandBufferBusyMeanMs": 4.175,
+        "gpuFrameP50Ms": 3.983875,
+        "gpuFrameP95Ms": 6.651209,
+        "gpuFrameP99Ms": 7.00675,
+        "minimumGpuSampleCoverage": 0.9969879518072289,
+        "excludedGpuFrames": 6,
+        "p50PrepareMs": 0.003875,
+        "p95PrepareMs": 0.006166,
+        "p99PrepareMs": 0.009125,
+        "terrainTriangleReductionPercent": 0.0,
+        "terrainInputTrianglesPerFrame": 1451018.8816568048,
+        "distantTriangleReductionPercent": 0.0,
+        "distantInputTrianglesPerFrame": 1389798.8816568048,
+        "nativeCommandBatchesPerFrame": 3.0,
+        "Section layers for opaqueMeanSpanMs": null,
+        "MetalCraft shader: shadow_terrainMeanSpanMs": null,
+        "uploadBytes": 0,
+        "uploadFailures": 0
+      },
+      "on": {
+        "averageFps": 120.32,
+        "onePercentLowFps": 65.11,
+        "p50CpuMs": 1.999,
+        "p95CpuMs": 2.381,
+        "p99CpuMs": 2.619,
+        "p50IntervalMs": 7.306,
+        "p99IntervalMs": 15.071,
+        "fpsRange": [
+          120.06,
+          121.45
+        ],
+        "meanAcquireMs": 5.942666666666667,
+        "approximately120HzCadence": false,
+        "gpuCommandBufferBusyMeanMs": 4.0145757575757575,
+        "gpuFrameP50Ms": 3.965334,
+        "gpuFrameP95Ms": 6.345375,
+        "gpuFrameP99Ms": 6.608375,
+        "minimumGpuSampleCoverage": 0.996969696969697,
+        "excludedGpuFrames": 6,
+        "p50PrepareMs": 0.203499,
+        "p95PrepareMs": 0.249833,
+        "p99PrepareMs": 0.279166,
+        "terrainTriangleReductionPercent": 0.38093462223027785,
+        "terrainInputTrianglesPerFrame": 1449735.7636363637,
+        "distantTriangleReductionPercent": 0.39773413323453966,
+        "distantInputTrianglesPerFrame": 1388501.7636363637,
+        "nativeCommandBatchesPerFrame": 3.0,
+        "Section layers for opaqueMeanSpanMs": null,
+        "MetalCraft shader: shadow_terrainMeanSpanMs": null,
+        "uploadBytes": 4808064,
+        "uploadFailures": 0
+      },
+      "changePercent": {
+        "p50CpuMs": 15.549132947976885,
+        "p99CpuMs": 18.614130434782616,
+        "p50IntervalMs": 6.734842951059172,
+        "p99IntervalMs": 1.556603773584908,
+        "gpuFrameP50Ms": -0.4654011483794074,
+        "gpuFrameP95Ms": -4.598171550465491,
+        "gpuFrameP99Ms": -5.6855888964213115
+      }
+    },
+    "pan": {
+      "off": {
+        "averageFps": 121.9,
+        "onePercentLowFps": 64.46,
+        "p50CpuMs": 1.433,
+        "p95CpuMs": 1.914,
+        "p99CpuMs": 2.093,
+        "p50IntervalMs": 6.967,
+        "p99IntervalMs": 15.12,
+        "fpsRange": [
+          120.58,
+          126.03
+        ],
+        "meanAcquireMs": 6.5372059701492535,
+        "approximately120HzCadence": false,
+        "gpuCommandBufferBusyMeanMs": 4.378449275362319,
+        "gpuFrameP50Ms": 4.840625,
+        "gpuFrameP95Ms": 7.171291,
+        "gpuFrameP99Ms": 7.521375,
+        "minimumGpuSampleCoverage": 0.9969879518072289,
+        "excludedGpuFrames": 6,
+        "p50PrepareMs": 0.003333,
+        "p95PrepareMs": 0.005166,
+        "p99PrepareMs": 0.009542,
+        "terrainTriangleReductionPercent": 0.0,
+        "terrainInputTrianglesPerFrame": 953649.8192771084,
+        "distantTriangleReductionPercent": 0.0,
+        "distantInputTrianglesPerFrame": 879976.2590361446,
+        "nativeCommandBatchesPerFrame": 3.0,
+        "Section layers for opaqueMeanSpanMs": null,
+        "MetalCraft shader: shadow_terrainMeanSpanMs": null,
+        "uploadBytes": 0,
+        "uploadFailures": 0
+      },
+      "on": {
+        "averageFps": 121.32,
+        "onePercentLowFps": 64.49,
+        "p50CpuMs": 1.615,
+        "p95CpuMs": 2.236,
+        "p99CpuMs": 2.352,
+        "p50IntervalMs": 7.05,
+        "p99IntervalMs": 15.218,
+        "fpsRange": [
+          120.36,
+          121.5
+        ],
+        "meanAcquireMs": 6.333009063444109,
+        "approximately120HzCadence": false,
+        "gpuCommandBufferBusyMeanMs": 4.295721556886227,
+        "gpuFrameP50Ms": 4.429375,
+        "gpuFrameP95Ms": 7.057959,
+        "gpuFrameP99Ms": 7.297459,
+        "minimumGpuSampleCoverage": 0.9969788519637462,
+        "excludedGpuFrames": 6,
+        "p50PrepareMs": 0.1485,
+        "p95PrepareMs": 0.233833,
+        "p99PrepareMs": 0.252625,
+        "terrainTriangleReductionPercent": 0.24330371496397163,
+        "terrainInputTrianglesPerFrame": 949795.6978851964,
+        "distantTriangleReductionPercent": 0.26374362970573717,
+        "distantInputTrianglesPerFrame": 876187.3111782477,
+        "nativeCommandBatchesPerFrame": 3.0,
+        "Section layers for opaqueMeanSpanMs": null,
+        "MetalCraft shader: shadow_terrainMeanSpanMs": null,
+        "uploadBytes": 1013536,
+        "uploadFailures": 0
+      },
+      "changePercent": {
+        "p50CpuMs": 12.70062805303558,
+        "p99CpuMs": 12.374581939799324,
+        "p50IntervalMs": 1.191330558346504,
+        "p99IntervalMs": 0.6481481481481532,
+        "gpuFrameP50Ms": -8.495803744351193,
+        "gpuFrameP95Ms": -1.5803570096374564,
+        "gpuFrameP99Ms": -2.9770620398530845
+      }
+    },
+    "traversal": {
+      "off": {
+        "averageFps": 120.31,
+        "onePercentLowFps": 65.05,
+        "p50CpuMs": 1.716,
+        "p95CpuMs": 2.108,
+        "p99CpuMs": 2.464,
+        "p50IntervalMs": 8.176,
+        "p99IntervalMs": 14.936,
+        "fpsRange": [
+          120.01,
+          121.54
+        ],
+        "meanAcquireMs": 6.250642424242424,
+        "approximately120HzCadence": true,
+        "gpuCommandBufferBusyMeanMs": 4.227543806646525,
+        "gpuFrameP50Ms": 4.2215,
+        "gpuFrameP95Ms": 6.70175,
+        "gpuFrameP99Ms": 7.025625,
+        "minimumGpuSampleCoverage": 0.996969696969697,
+        "excludedGpuFrames": 6,
+        "p50PrepareMs": 0.003375,
+        "p95PrepareMs": 0.005041,
+        "p99PrepareMs": 0.005875,
+        "terrainTriangleReductionPercent": 0.0,
+        "terrainInputTrianglesPerFrame": 1525676.2925373134,
+        "distantTriangleReductionPercent": 0.0,
+        "distantInputTrianglesPerFrame": 1466633.271641791,
+        "nativeCommandBatchesPerFrame": 3.0,
+        "Section layers for opaqueMeanSpanMs": null,
+        "MetalCraft shader: shadow_terrainMeanSpanMs": null,
+        "uploadBytes": 0,
+        "uploadFailures": 0
+      },
+      "on": {
+        "averageFps": 119.99,
+        "onePercentLowFps": 63.02,
+        "p50CpuMs": 1.905,
+        "p95CpuMs": 2.38,
+        "p99CpuMs": 2.732,
+        "p50IntervalMs": 7.013,
+        "p99IntervalMs": 15.444,
+        "fpsRange": [
+          119.63,
+          121.09
+        ],
+        "meanAcquireMs": 6.082185410334347,
+        "approximately120HzCadence": false,
+        "gpuCommandBufferBusyMeanMs": 4.1872192192192195,
+        "gpuFrameP50Ms": 4.012,
+        "gpuFrameP95Ms": 6.498459,
+        "gpuFrameP99Ms": 6.718375,
+        "minimumGpuSampleCoverage": 0.9969604863221885,
+        "excludedGpuFrames": 6,
+        "p50PrepareMs": 0.186333,
+        "p95PrepareMs": 0.241667,
+        "p99PrepareMs": 0.277791,
+        "terrainTriangleReductionPercent": 0.2850785450292159,
+        "terrainInputTrianglesPerFrame": 1517137.8258258258,
+        "distantTriangleReductionPercent": 0.2968292836965203,
+        "distantInputTrianglesPerFrame": 1458027.075075075,
+        "nativeCommandBatchesPerFrame": 3.0,
+        "Section layers for opaqueMeanSpanMs": null,
+        "MetalCraft shader: shadow_terrainMeanSpanMs": null,
+        "uploadBytes": 3544944,
+        "uploadFailures": 0
+      },
+      "changePercent": {
+        "p50CpuMs": 11.01398601398602,
+        "p99CpuMs": 10.876623376623385,
+        "p50IntervalMs": -14.22455968688846,
+        "p99IntervalMs": 3.4011783610069735,
+        "gpuFrameP50Ms": -4.962690986616137,
+        "gpuFrameP95Ms": -3.03340172343044,
+        "gpuFrameP99Ms": -4.373276398896897
+      }
+    }
+  },
+  "coverage": {
+    "off": {
+      "loadedChunkFraction": 1.0,
+      "visibleSections": 871,
+      "flatFrameFraction": 0.7576
+    },
+    "on": {
+      "loadedChunkFraction": 1.0,
+      "visibleSections": 945,
+      "flatFrameFraction": 0.7608
+    }
+  },
+  "sampledMemory": {
+    "off": {
+      "maxSampledHeapBytes": 1591484976,
+      "maxSampledMetalBytes": 1242595328,
+      "maxSampledLodGpuBytes": 0,
+      "maxSampledLodRetainedCpuBytes": 0,
+      "processPeakResidentBytes": 2807087104,
+      "processPeakPhysicalFootprintBytes": 4330000152,
+      "thermalStates": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxBuildNanos": 0,
+      "peakReservedBytes": 0,
+      "peakRetainedBytes": 0
+    },
+    "on": {
+      "maxSampledHeapBytes": 1424251848,
+      "maxSampledMetalBytes": 1269956608,
+      "maxSampledLodGpuBytes": 25083344,
+      "maxSampledLodRetainedCpuBytes": 67103744,
+      "processPeakResidentBytes": 2763259904,
+      "processPeakPhysicalFootprintBytes": 4222553856,
+      "thermalStates": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxBuildNanos": 8973291,
+      "peakReservedBytes": 33554432,
+      "peakRetainedBytes": 67108608
+    }
+  },
+  "gpuFrameContract": "First GPU start to last GPU end of buffers committed on the render thread inside each frame; includes gaps, never sums overlapping spans; pending/invalid/empty/overflow frames excluded and counted"
+}

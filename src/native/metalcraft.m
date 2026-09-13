@@ -12,6 +12,33 @@
 
 #define MC_EXPORT __attribute__((visibility("default")))
 
+// Opt-in driver observations at allocation/acquisition boundaries. Per MTLDevice,
+// not logical LOD payload accounting; hidden driver-only transients can be missed.
+@interface MCAllocationProbe : NSObject {
+@public
+    atomic_uint_fast64_t peak;
+    atomic_uint_fast64_t samples;
+}
+@end
+@implementation MCAllocationProbe
+- (instancetype)init {
+    self = [super init];
+    if (self) { atomic_init(&peak, 0); atomic_init(&samples, 0); }
+    return self;
+}
+@end
+static char MCAllocationProbeKey;
+static uint64_t mc_sample_allocation(id<MTLDevice> device) {
+    MCAllocationProbe *probe = objc_getAssociatedObject(device, &MCAllocationProbeKey);
+    if (probe == nil) return 0;
+    uint64_t bytes = device.currentAllocatedSize;
+    uint_fast64_t before = atomic_load_explicit(&probe->peak, memory_order_relaxed);
+    while (before < bytes && !atomic_compare_exchange_weak_explicit(&probe->peak,
+            &before, bytes, memory_order_relaxed, memory_order_relaxed)) { }
+    atomic_fetch_add_explicit(&probe->samples, 1, memory_order_relaxed);
+    return bytes;
+}
+
 /**
  * Shader stages a resource binding applies to, matching MetalRenderPass.STAGE_*.
  *
@@ -1638,6 +1665,42 @@ Java_dev_metalcraft_client_metal_MetalNative_nCurrentAllocatedSize(JNIEnv *env, 
 	}
 }
 
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nStartAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
+    @autoreleasepool {
+        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+        if (device == nil) return;
+        objc_setAssociatedObject(device, &MCAllocationProbeKey, [MCAllocationProbe new], OBJC_ASSOCIATION_RETAIN);
+        mc_sample_allocation(device);
+    }
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nStopAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
+    @autoreleasepool {
+        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+        if (device != nil) objc_setAssociatedObject(device, &MCAllocationProbeKey, nil, OBJC_ASSOCIATION_RETAIN);
+    }
+}
+
+MC_EXPORT JNIEXPORT jlongArray JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
+    @autoreleasepool {
+        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+        if (device == nil) return NULL;
+        MCAllocationProbe *probe = objc_getAssociatedObject(device, &MCAllocationProbeKey);
+        jlong values[3] = {0, 0, 0};
+        if (probe != nil) {
+            values[0] = (jlong)mc_sample_allocation(device);
+            values[1] = (jlong)atomic_load_explicit(&probe->peak, memory_order_relaxed);
+            values[2] = (jlong)atomic_load_explicit(&probe->samples, memory_order_relaxed);
+        }
+        jlongArray result = (*env)->NewLongArray(env, 3);
+        if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, 3, values);
+        return result;
+    }
+}
+
 MC_EXPORT JNIEXPORT jlong JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nCreateCommandQueue(JNIEnv *env, jclass type, jlong deviceHandle) {
 	@autoreleasepool {
@@ -1745,6 +1808,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nAcquireDrawable(JNIEnv *env, jclas
 			return 0;
 		}
 		id<CAMetalDrawable> drawable = [surface.layer nextDrawable];
+		mc_sample_allocation(surface.layer.device);
 		return drawable == nil ? 0 : mc_register_object(drawable, MCObjectTypeDrawable, surfaceHandle);
 	}
 }
@@ -1942,6 +2006,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateBuffer(
 			mc_throw_state(env, @"Metal could not allocate the requested buffer");
 			return 0;
 		}
+		mc_sample_allocation(device);
 		buffer.label = @"MetalCraft buffer";
 		return mc_register_object(buffer, MCObjectTypeBuffer, deviceHandle);
 	}
@@ -2649,6 +2714,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 			mc_throw_state(env, @"Metal could not allocate the requested texture");
 			return 0;
 		}
+		mc_sample_allocation(device);
 		texture.label = @"MetalCraft texture";
 		return mc_register_object(texture, MCObjectTypeTexture, deviceHandle);
 	}
@@ -2683,6 +2749,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTextureView(
 			mc_throw_state(env, @"Metal could not create a texture view");
 			return 0;
 		}
+		mc_sample_allocation(texture.device);
 		textureView.label = @"MetalCraft texture view";
 		return mc_register_object(textureView, MCObjectTypeTextureView, textureHandle);
 	}
@@ -3448,6 +3515,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexelBuffer(
 				mc_throw_state(env, @"Metal could not create a texture-buffer view");
 				return;
 			}
+			mc_sample_allocation(buffer.device);
 			texture.label = @"MetalCraft texel-buffer view";
 			[viewCache storeView:texture offset:(NSUInteger)offset length:logicalBytes format:pixelFormat];
 		}

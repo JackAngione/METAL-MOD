@@ -54,6 +54,11 @@ def main():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--phase-ticks", type=int, default=120)
     parser.add_argument("--repeats", type=int, default=3)
+    labels = [f"{resolution}-{pack}-half-{str(half).lower()}-lod-{str(enabled).lower()}"
+              for resolution in ("native", "1080p") for pack in ("standard", "none")
+              for half in (False, True) for enabled in (False, True)]
+    parser.add_argument("--case", action="append", choices=labels,
+                        help="Run only this case; repeat for a focused matched pair")
     args = parser.parse_args()
     if args.repeats < 3 or args.phase_ticks < 60:
         parser.error("Release captures require at least three repeats and 60 ticks per phase")
@@ -69,6 +74,8 @@ def main():
             for half in (False, True):
                 for enabled in (False, True):
                     name = f"{label}-{pack}-half-{str(half).lower()}-lod-{str(enabled).lower()}"
+                    if args.case and name not in args.case:
+                        continue
                     folder = args.output / name
                     command = ["./gradlew", "runClient", "-PmetalLifecycleTest", "-PmetalLifecycleBenchmark=true",
                                "-PmetalLodTerrainCensus=true", f"-PmetalBenchmarkLod={str(enabled).lower()}",

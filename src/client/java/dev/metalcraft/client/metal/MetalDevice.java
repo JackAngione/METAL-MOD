@@ -47,6 +47,20 @@ public final class MetalDevice implements AutoCloseable {
 		return MetalNative.nCurrentAllocatedSize(this.requireOpenHandle());
 	}
 
+    /** Reset opt-in, device-wide observations; call before a benchmark, outside timed phases. */
+    public synchronized void startAllocationProbe() {
+        MetalNative.nStartAllocationProbe(this.requireOpenHandle());
+    }
+
+    public synchronized void stopAllocationProbe() {
+        MetalNative.nStopAllocationProbe(this.requireOpenHandle());
+    }
+
+    /** Current bytes, observed peak bytes, observation count. No GPU synchronization. */
+    public synchronized long[] allocationProbe() {
+        return MetalNative.nAllocationProbe(this.requireOpenHandle());
+    }
+
 	public synchronized MetalCommandQueue createCommandQueue() {
 		long queueHandle = MetalNative.nCreateCommandQueue(this.requireOpenHandle());
 		if (queueHandle == 0L) {

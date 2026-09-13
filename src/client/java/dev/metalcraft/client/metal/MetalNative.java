@@ -67,6 +67,9 @@ public final class MetalNative {
 
 	static native long nRecommendedWorkingSet(long handle);
 	static native long nCurrentAllocatedSize(long handle);
+	static native void nStartAllocationProbe(long handle);
+	static native void nStopAllocationProbe(long handle);
+	static native long[] nAllocationProbe(long handle);
 
 	static native long nCreateCommandQueue(long deviceHandle);
 

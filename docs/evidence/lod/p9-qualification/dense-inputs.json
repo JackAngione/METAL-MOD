@@ -1,0 +1,7 @@
+{
+  "src/smoke/java/dev/metalcraft/client/lod/LodDenseProbe.java": "51c4553590cbd07f8c0652a76e25bdf6c609532890595ca9415a05366b15c7b5",
+  "src/client/java/dev/metalcraft/client/lod/LodDistantNode.java": "d09a290507da29bb215f830c74107b43aead6a95df380f1640e2cb713aecc29f",
+  "src/client/java/dev/metalcraft/client/lod/LodDistantCache.java": "6f110bbc378c07d0f818ea4a65149b150e64b397350b3ada1c09f081ec19e081",
+  "src/client/java/dev/metalcraft/client/lod/LodDistantStore.java": "30e5a1318c8311b6c95bfef879c3b84eeb3d53947e72fa67a25031ce672d43d4",
+  "src/client/java/dev/metalcraft/client/lod/LodRevisionTracker.java": "5a63b1aa41fd70d0276edecca8d334851a0bd1a6d7ac15bb77cb8c0ac205b780"
+}

@@ -81,6 +81,13 @@ tasks.register('lodSmoke', JavaExec) {
 	mainClass = 'dev.metalcraft.client.lod.LodSmoke'
 }
 
+tasks.register('lodDenseProbe', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava')
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.lod.LodDenseProbe'
+	maxHeapSize = '1G'
+}
+
 tasks.named('check') {
 	dependsOn tasks.named('lodSmoke')
 }

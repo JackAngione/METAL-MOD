@@ -17,6 +17,18 @@ public final class LodMetalSmoke {
         dev.metalcraft.client.shader.LodShadingBenchmark.verifyDistanceLighting();
         dev.metalcraft.client.metal.MetalLodTimelineSmoke.run();
         dev.metalcraft.client.metal.MetalLodWorldSmoke.run();
+        try (MetalDevice probe = MetalNative.openDefaultDevice().orElseThrow()) {
+            probe.startAllocationProbe();
+            long baseline = probe.allocationProbe()[0];
+            try (var allocation = probe.createBuffer(8L << 20, MetalBuffer.StorageMode.SHARED)) {
+                long[] live = probe.allocationProbe();
+                check(live[1] >= live[0] && live[0] >= baseline + (8L << 20) && live[2] >= 3,
+                        "driver allocation event contributes to device high-water mark");
+            }
+            check(probe.allocationProbe()[1] >= baseline + (8L << 20), "released transient retains observed peak");
+            probe.stopAllocationProbe();
+            check(probe.allocationProbe()[2] == 0, "benchmark teardown stops allocation observations");
+        }
         var empty = new TerrainSnapshot.Material(0,TerrainSnapshot.Policy.EMPTY,-1,0);
         var solid = new TerrainSnapshot.Material(1,TerrainSnapshot.Policy.OPAQUE_CUBE,-1,0);
         var key = new TerrainSnapshot.Key(1,"fixture",0,0,0,1,1);

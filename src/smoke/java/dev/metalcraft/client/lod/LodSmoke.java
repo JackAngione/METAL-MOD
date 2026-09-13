@@ -60,6 +60,15 @@ public final class LodSmoke {
         var releases = new java.util.concurrent.atomic.AtomicInteger();
         var candidate = new LodCapturedMesh(first, mesh, releases::incrementAndGet);
         check(candidate.currentMesh() == mesh, "current captured payload available");
+        for (int tier = 1; tier <= 4; tier++)
+            check(candidate.residencyTier(tier) == 1 && candidate.mesh(tier) == mesh,
+                    "exact shared tiers use one GPU residency owner");
+        var other = new LodBakedMesh.Simplified(true, List.of(), List.of(), 0);
+        try (var distinct = new LodCapturedMesh(tracker.capture(7, 2, 3),
+                List.of(mesh, other, mesh, other), LodAtlas.current(), () -> { })) {
+            check(distinct.residencyTier(2) == 2 && distinct.residencyTier(3) == 1
+                    && distinct.residencyTier(4) == 2, "only identity-equal meshes alias residency");
+        }
         tracker.dirty(1, 2, 3);
         check(!first.current() && candidate.currentMesh() == null, "dirty section revokes captured payload before replacement upload");
         check(releases.get() == 1, "revocation releases CPU bytes without waiting for vanilla mesh retirement");

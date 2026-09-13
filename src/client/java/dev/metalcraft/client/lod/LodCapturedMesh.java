@@ -41,6 +41,15 @@ public final class LodCapturedMesh implements AutoCloseable {
         return ticket.current() && atlas == LodAtlas.current() && current != null ? current.get(tier - 1) : null;
     }
 
+    /** Alias only identical immutable meshes, never merely equal triangle counts. */
+    public int residencyTier(int tier) {
+        if (tier < 1 || tier > 4) throw new IllegalArgumentException("LOD tier must be 1–4");
+        var current = meshes;
+        if (current != null) for (int index = 0; index < tier - 1; index++)
+            if (current.get(index) == current.get(tier - 1)) return index + 1;
+        return tier;
+    }
+
     @Override public synchronized void close() {
         if (meshes == null) return;
         meshes = null;

@@ -691,3 +691,29 @@ construction, matches prior selector outputs and reduces median sample CPU time
 randomized solver checks and the native validation build pass. This is synthetic
 selection evidence, not a game frame-time or GPU claim; P9.2 remains open.
 [Evidence and reproduction](evidence/lod/shared-selection/README.md).
+
+
+## P9 exact-mesh sharing and dense qualification checkpoint (2026-09-12)
+
+The loaded compiler now constructs the maximal exact surface merge once and aliases
+its CPU/GPU ownership across four selection tiers. Smaller rectangle limits did not
+reduce the geometric error of these exact, flat-shaded surfaces. Section boundary
+strips, full-detail selection, stale ownership and unsupported-model fallbacks remain.
+CPU/Metal smoke and the final native API-validation build pass. The first two focused
+NORMAL-world 16/16 Default/Metal off-runs were rejected for foreground loss.
+The subsequent user-authorized foreground pair passes all 18 phases at 3840×2160,
+None/full. Median intervals change +6.73/+1.19/−14.22% for stationary/pan/traversal,
+while CPU work rises 11–16% and average-FPS repeat ranges overlap. Distant triangle
+savings are 0.264–0.398%. No overall game frame-time benefit is established.
+Observed driver allocation peaks are 1,275,953,152/1,303,740,416 bytes off/on.
+[Raw qualified pair and attribution limits](evidence/lod/p9-qualification/foreground-pair/README.md).
+
+The reproducible synthetic production-cache probe retains all 1,024 sections of a
+light contiguous patch, but only 936/1,024 at 640 quads per section under the unchanged
+64 MiB result budget. It submits 768 repairs per case with producer/worker overlap,
+coalesces to 400 writes, drains completely and preserves the final payloads across
+reopen with zero drops/failures. These are stepped-worker cache results, not live
+explored-terrain coverage or render-thread timings. Native allocation-event telemetry
+now reports observed device allocation peaks, separately from LOD payload accounting.
+Dense live measurements and other Apple Silicon devices remain untested. P9.2 and
+P9.3 stay open. [Evidence, commands and explicit limits](evidence/lod/p9-qualification/README.md).

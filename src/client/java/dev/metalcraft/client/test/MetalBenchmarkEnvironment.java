@@ -40,6 +40,8 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         pack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
         try {
             context.runOnClient(c -> {
+                var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).metalcraft$backend();
+                if (backend instanceof MetalGpuDevice metal) metal.metal().startAllocationProbe();
                 if (c.getWindow().isFullscreen() != requestedFullscreen) c.getWindow().toggleFullScreen();
                 if (requestedPack != null) ShaderPackRuntime.active().selectPack(requestedPack.equals("none") ? ShaderPackRuntime.NONE_ID : ShaderPackRuntime.BUILTIN_ID);
                 MetalCraftConfig.setHalfResolution(requestedHalf);
@@ -77,6 +79,10 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).metalcraft$backend();
         if (backend instanceof MetalGpuDevice metal) {
             value.addProperty("metalAllocatedBytes", metal.metal().currentAllocatedBytes());
+            long[] allocation = metal.metal().allocationProbe();
+            value.addProperty("metalObservedPeakAllocatedBytes", allocation[1]);
+            value.addProperty("metalAllocationObservations", allocation[2]);
+            value.addProperty("metalAllocationPeakScope", "Device-wide allocation/view/drawable events since environment start; hidden driver transients excluded");
             value.addProperty("metalWorkingSetBytes", metal.metal().recommendedWorkingSetBytes());
         }
         return value;
@@ -111,7 +117,7 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
         value.addProperty("lodGeometryAvailable", LodCapabilities.GEOMETRY_AVAILABLE);
         value.addProperty("lodPrepareTimingScope", "Loaded and distant frame maintenance, selection, uniforms and uploads; excludes workers and GPU execution");
         value.addProperty("lodCounterMeaning", "Cumulative encoded main-world terrain, distant subset, replacements and shadows are separate; subtract phase endpoints. Memory samples are not peaks.");
-        value.addProperty("memorySampling", "Heap/Metal snapshots after each phase; OS process-lifetime resident/physical-footprint peaks include startup; LOD CPU charge peaks cover all worker admissions");
+        value.addProperty("memorySampling", "Heap/Metal current snapshots after each phase; Metal observed peak covers allocation/view/drawable events since environment start, not hidden driver transients; OS process-lifetime resident/physical-footprint peaks include startup; LOD CPU charge peaks cover all worker admissions");
         value.addProperty("thermalStateMeaning", "0 nominal, 1 fair, 2 serious, 3 critical; -1 unavailable");
         value.addProperty("buildLatencyMeaning", "Cumulative admitted worker capture/validation/simplification attempts, nanoseconds total and maximum; includes rejected attempts, excludes queue wait and GPU upload");
         return value;
@@ -175,6 +181,8 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
 
     @Override public void close() {
         context.runOnClient(c -> {
+            var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).metalcraft$backend();
+            if (backend instanceof MetalGpuDevice metal) metal.metal().stopAllocationProbe();
             if (c.getWindow().isFullscreen() != fullscreen) c.getWindow().toggleFullScreen();
             MetalCraftConfig.setHalfResolution(half);
             MetalCraftConfig.setUnlockedFrameRate(unlocked);

@@ -115,14 +115,13 @@ public final class LodCompilerCapture {
             }
             // All construction stays on the admitted compiler worker. Uploading and
             // selection never rerun simplification while the renderer holds a lock.
-            var tiers = LodCapabilities.GEOMETRY_AVAILABLE
-                    ? List.of(baked.simplify(1), baked.simplify(2), baked.simplify(3), simplified)
-                    : java.util.Collections.nCopies(4, simplified);
-            // Retained graph: four source vertices/quad, immutable quad/list, at most
-            // four rectangles and four list references. 1 KiB per input quad bounds
-            // this even with uncompressed references; temporary merge maps are charged
-            // separately by the larger build reservation and do not escape the worker.
-            long retainedBytes = 4096L + count * 1024L;
+            // Every merge preserves positions, flat appearance and unit boundary strips.
+            // The smaller rectangle limits do not improve geometric error or seams;
+            // all selection tiers can therefore share the maximal exact merge.
+            var tiers = java.util.Collections.nCopies(4, simplified);
+            // One source graph and one rectangle list (instead of four). This bound
+            // includes uncompressed references and immutable list/vertex overhead.
+            long retainedBytes = 4096L + count * 768L;
             long used;
             do {
                 used = retained.get();
