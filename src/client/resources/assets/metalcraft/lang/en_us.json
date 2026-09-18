@@ -79,5 +79,8 @@
   "metalcraft.lod.work.low": "Low",
   "metalcraft.lod.work.balanced": "Balanced",
   "metalcraft.lod.work.high": "High",
-  "metalcraft.lod.work.tooltip": "Bounds concurrent LOD builds and upload bytes per frame. Higher settings prepare detail sooner but add work."
+  "metalcraft.lod.work.tooltip": "Bounds concurrent LOD builds and upload bytes per frame. Higher settings prepare detail sooner but add work.",
+  "metalcraft.options.native_distance": "Render Distance in Video Settings now supports up to 256 chunks at full block detail. Single-player loads terrain through Minecraft's normal chunk pipeline. Multiplayer remains limited by the server. Higher distances use substantially more memory; resolution LOD is coming later.",
+  "metalcraft.options.clear_distance_fog": "Clear distance fog",
+  "metalcraft.options.clear_distance_fog.tooltip": "Keeps distant terrain clear in fair weather by pushing distance fog beyond the loaded view. Water, lava, snow, weather and status-effect fog remain. Applies immediately on Metal."
 }

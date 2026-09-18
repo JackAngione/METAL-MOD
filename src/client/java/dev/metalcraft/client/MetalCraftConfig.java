@@ -66,6 +66,16 @@ public final class MetalCraftConfig {
 		return data.unlockedFrameRate;
 	}
 
+	public static synchronized boolean clearDistanceFog() {
+		return data.clearDistanceFog;
+	}
+
+	public static synchronized void setClearDistanceFog(final boolean enabled) {
+		if (data.clearDistanceFog == enabled) return;
+		data.clearDistanceFog = enabled;
+		save();
+	}
+
 	public static synchronized void setUnlockedFrameRate(final boolean enabled) {
 		if (data.unlockedFrameRate == enabled) {
 			return;
@@ -85,6 +95,7 @@ public final class MetalCraftConfig {
 			Data loaded = new Data();
 			loaded.halfResolution = readBoolean(json, "halfResolution");
 			loaded.unlockedFrameRate = readBoolean(json, "unlockedFrameRate");
+			loaded.clearDistanceFog = readBoolean(json, "clearDistanceFog");
 			loaded.lod = LodSettingsCodec.read(json.get("lod"));
 			return loaded;
 		} catch (IOException | RuntimeException error) {
@@ -124,6 +135,7 @@ public final class MetalCraftConfig {
 	private static final class Data {
 		private boolean halfResolution;
 		private boolean unlockedFrameRate;
+		private boolean clearDistanceFog;
 		private LodSettings lod = LodSettings.defaults();
 	}
 }

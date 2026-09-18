@@ -68,9 +68,14 @@ public final class MetalCraftOptionsScreen extends Screen {
 			});
 		contents.addChild(unlockedFrameRate);
 
+		contents.addChild(CycleButton.onOffBuilder(MetalCraftConfig.clearDistanceFog())
+			.withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.clear_distance_fog.tooltip")))
+			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.clear_distance_fog"),
+				(button, enabled) -> MetalCraftConfig.setClearDistanceFog(enabled)));
+
 		this.addShaderPackControls(contents, appleSilicon);
-		contents.addChild(Button.builder(Component.translatable("metalcraft.lod.title"), button ->
-			this.minecraft.gui.setScreen(new MetalCraftLodOptionsScreen(this))).width(310).build());
+		contents.addChild(new MultiLineTextWidget(Component.translatable("metalcraft.options.native_distance"), this.font)
+			.setMaxWidth(310).setCentered(true));
 
 		this.resolutionStatus = new StringWidget(Component.empty(), this.font);
 		contents.addChild(this.resolutionStatus);

@@ -21,7 +21,6 @@ public final class MetalCraftClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
-		dev.metalcraft.client.lod.LodTerrainGeneration.initialize();
 		ClientLifecycleEvents.CLIENT_STARTED.register(client -> initializeRendererExtensions());
 	}
 

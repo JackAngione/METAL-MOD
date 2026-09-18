@@ -3,8 +3,6 @@
   "package": "dev.metalcraft.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
-    "CameraLodHorizonMixin",
-    "FogLodHorizonMixin",
     "BlockableEventLoopDrainMixin",
     "ChunkSectionsToRenderMixin",
     "BlockableEventLoopTaskCensusMixin",
@@ -48,7 +46,19 @@
     "RenderPassWaterDrawMixin",
     "LevelRendererWaterDrawMixin",
     "WaterFogEnvironmentMixin",
-    "ScreenEffectRendererWaterMixin"
+    "ScreenEffectRendererWaterMixin",
+    "OptionsNativeDistanceMixin",
+    "ChunkMapNativeDistanceMixin",
+    "ClientInformationNativeDistanceMixin",
+    "FixedPlayerDistanceNativeMixin",
+    "ChunkTrackerNativeDistanceMixin",
+    "PlayerTicketNativeDistanceMixin",
+    "ChunkTaskPriorityNativeDistanceMixin",
+    "ChunkMapDistanceAccessor",
+    "PlayerChunkSenderNativeDistanceMixin",
+    "ServerConnectionAccessor",
+    "AtmosphericFogAccessor",
+    "FogDistanceMixin"
   ],
   "injectors": {
     "defaultRequire": 1

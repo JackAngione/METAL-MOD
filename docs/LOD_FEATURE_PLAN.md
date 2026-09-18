@@ -1,5 +1,10 @@
 # LOD feature implementation plan
 
+> Superseded for the active runtime by [the native chunk foundation](NATIVE_CHUNKS_PLAN.md).
+> The old loaded-mesh LOD and cached horizon are disabled, including persisted opt-in
+> settings. Their code and evidence remain historical reference for the later LOD phase.
+> Render distance now belongs to Minecraft's ordinary full-detail chunk pipeline.
+
 Status: functional handoff and P11 single-player background generation complete (Codex, 2026-09-13).
 The user requested a working feature now and refinement later. P9's performance,
 dense-coverage qualification, multiresolution shading and independent GLFW investigation

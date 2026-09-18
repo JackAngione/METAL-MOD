@@ -67,6 +67,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	}
 
 	private void runConfiguredTest(final ClientGameTestContext context) {
+		if (Boolean.getBoolean("metalcraft.nativeChunkDistanceTest")) {
+			MetalNativeChunkDistanceGameTest.run(context);
+			return;
+		}
 		context.runOnClient(client -> {
 			client.options.renderDistance().set(16);
 			client.options.simulationDistance().set(16);

@@ -2,9 +2,9 @@ package dev.metalcraft.client.lod;
 
 /** Availability is deliberately separate from saved preferences and shader-pack selection. */
 public record LodCapabilities(boolean metal, boolean geometry, boolean multiresolution, boolean extendedHorizon) {
-    // P8 qualifies an opt-in explored-terrain preview. Preferences remain disabled by default.
-    public static final boolean HORIZON_AVAILABLE = true;
-    public static final boolean GEOMETRY_AVAILABLE = true;
+    // Native full-detail distance is the active architecture. Resolution LOD is deferred.
+    public static final boolean HORIZON_AVAILABLE = false;
+    public static final boolean GEOMETRY_AVAILABLE = false;
     private static final LodCapabilities METAL = new LodCapabilities(true, GEOMETRY_AVAILABLE, false, HORIZON_AVAILABLE);
     private static final LodCapabilities METAL_UNSUPPORTED = new LodCapabilities(true, false, false, false);
     private static final LodCapabilities UNAVAILABLE = new LodCapabilities(false, false, false, false);
