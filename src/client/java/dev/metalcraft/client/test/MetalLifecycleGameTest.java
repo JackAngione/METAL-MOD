@@ -67,6 +67,14 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	}
 
 	private void runConfiguredTest(final ClientGameTestContext context) {
+		if (Boolean.getBoolean("metalcraft.geometricLodTest")) {
+			MetalGeometricLodGameTest.run(context);
+			return;
+		}
+		if (Boolean.getBoolean("metalcraft.nativeTerrainLodTest")) {
+			MetalNativeTerrainLodGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.nativeChunkDistanceTest")) {
 			MetalNativeChunkDistanceGameTest.run(context);
 			return;

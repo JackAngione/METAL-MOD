@@ -199,6 +199,8 @@ tasks.named('runClient') {
 		systemProperty 'metalcraft.lodRenderTest', providers.gradleProperty('metalLodRenderTest').getOrElse('false')
 		systemProperty 'metalcraft.lodHorizonTest', providers.gradleProperty('metalLodHorizonTest').getOrElse('false')
 		systemProperty 'metalcraft.nativeChunkDistanceTest', providers.gradleProperty('metalNativeChunkDistanceTest').getOrElse('false')
+		systemProperty 'metalcraft.nativeTerrainLodTest', providers.gradleProperty('metalNativeTerrainLodTest').getOrElse('false')
+		systemProperty 'metalcraft.geometricLodTest', providers.gradleProperty('metalGeometricLodTest').getOrElse('false')
 		systemProperty 'metalcraft.lodGenerationTest', providers.gradleProperty('metalLodGenerationTest').getOrElse('false')
 		systemProperty 'metalcraft.lodExpectedRadius', providers.gradleProperty('metalLodExpectedRadius').getOrElse('-1')
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
@@ -256,3 +258,10 @@ tasks.register('nativeChunkDistanceSmoke', JavaExec) {
     maxHeapSize = '1G'
 }
 tasks.named('check') { dependsOn tasks.named('nativeChunkDistanceSmoke') }
+
+tasks.register('nativeTerrainLodSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.chunk.NativeTerrainLodSmoke'
+}
+tasks.named('check') { dependsOn tasks.named('nativeTerrainLodSmoke') }

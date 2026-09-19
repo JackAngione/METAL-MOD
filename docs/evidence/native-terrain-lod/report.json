@@ -1,0 +1,23 @@
+{
+  "distantCellSize": 4,
+  "distantIndices": 1056,
+  "distantEditRebuilt": true,
+  "nativeIndices": 3456,
+  "fixtureTriangleReductionPercent": 69.44444444444444,
+  "zoomRestoresFinerDetail": "4 -\u003e 2 at FOV 30",
+  "approachRestoresFullDetail": true,
+  "packs": "None and Standard",
+  "compilerStats": {
+    "builds": 843,
+    "originalQuads": 317005,
+    "outputQuads": 215480,
+    "workerNanos": 72168049
+  },
+  "world": "NORMAL / metalcraft",
+  "backend": "Metal",
+  "renderDistance": 16,
+  "simulationDistance": 16,
+  "chunkBuilder": "Threaded",
+  "worldClosed": true,
+  "elapsedSeconds": 26.152374833
+}

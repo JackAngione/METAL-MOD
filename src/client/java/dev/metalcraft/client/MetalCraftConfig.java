@@ -7,6 +7,7 @@ import dev.metalcraft.client.lod.LodSettings;
 import dev.metalcraft.client.lod.LodSettingsCodec;
 import dev.metalcraft.client.lod.LodFrameSettings;
 import dev.metalcraft.client.lod.LodCapabilities;
+import dev.metalcraft.client.chunk.NativeLodSelection;
 import com.mojang.logging.LogUtils;
 import java.io.IOException;
 import java.io.Reader;
@@ -70,6 +71,32 @@ public final class MetalCraftConfig {
 		return data.clearDistanceFog;
 	}
 
+	public static synchronized boolean nativeTerrainLod() { return data.nativeTerrainLod; }
+
+	public static synchronized int nativeLodReduction() { return data.nativeLodReduction; }
+
+	public static synchronized int nativeQualityDistance() { return data.nativeQualityDistance; }
+
+	public static synchronized void setNativeQualityDistance(final int chunks) {
+		int clamped = NativeLodSelection.clampNativeDistance(chunks);
+		if (data.nativeQualityDistance == clamped) return;
+		data.nativeQualityDistance = clamped;
+		save();
+	}
+
+	public static synchronized void setNativeLodReduction(final int reduction) {
+		int clamped = NativeLodSelection.clampReduction(reduction);
+		if (data.nativeLodReduction == clamped) return;
+		data.nativeLodReduction = clamped;
+		save();
+	}
+
+	public static synchronized void setNativeTerrainLod(final boolean enabled) {
+		if (data.nativeTerrainLod == enabled) return;
+		data.nativeTerrainLod = enabled;
+		save();
+	}
+
 	public static synchronized void setClearDistanceFog(final boolean enabled) {
 		if (data.clearDistanceFog == enabled) return;
 		data.clearDistanceFog = enabled;
@@ -96,6 +123,11 @@ public final class MetalCraftConfig {
 			loaded.halfResolution = readBoolean(json, "halfResolution");
 			loaded.unlockedFrameRate = readBoolean(json, "unlockedFrameRate");
 			loaded.clearDistanceFog = readBoolean(json, "clearDistanceFog");
+			var nativeLod = json.get("nativeTerrainLod");
+			loaded.nativeTerrainLod = nativeLod == null || !nativeLod.isJsonPrimitive()
+				|| !nativeLod.getAsJsonPrimitive().isBoolean() || nativeLod.getAsBoolean();
+			loaded.nativeLodReduction = NativeLodSettingsCodec.readReduction(json.get("nativeLodReduction"));
+			loaded.nativeQualityDistance = NativeLodSettingsCodec.readNativeDistance(json.get("nativeQualityDistance"));
 			loaded.lod = LodSettingsCodec.read(json.get("lod"));
 			return loaded;
 		} catch (IOException | RuntimeException error) {
@@ -136,6 +168,9 @@ public final class MetalCraftConfig {
 		private boolean halfResolution;
 		private boolean unlockedFrameRate;
 		private boolean clearDistanceFog;
+		private boolean nativeTerrainLod = true;
+		private int nativeLodReduction = NativeLodSelection.DEFAULT_REDUCTION;
+		private int nativeQualityDistance = NativeLodSelection.DEFAULT_NATIVE_DISTANCE;
 		private LodSettings lod = LodSettings.defaults();
 	}
 }

@@ -5,6 +5,7 @@ import dev.metalcraft.api.MetalCraftShaderPackInfo;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.MetalCraftPlatform;
 import dev.metalcraft.client.MetalCraftRenderResolution;
+import dev.metalcraft.client.chunk.NativeLodSelection;
 import dev.metalcraft.client.shader.ShaderPack;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.util.ArrayList;
@@ -74,6 +75,17 @@ public final class MetalCraftOptionsScreen extends Screen {
 				(button, enabled) -> MetalCraftConfig.setClearDistanceFog(enabled)));
 
 		this.addShaderPackControls(contents, appleSilicon);
+		contents.addChild(CycleButton.onOffBuilder(MetalCraftConfig.nativeTerrainLod())
+			.withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.native_lod.tooltip")))
+			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.native_lod"),
+				(button, enabled) -> MetalCraftConfig.setNativeTerrainLod(enabled)));
+		contents.addChild(CycleButton.<Integer>builder(
+			value -> Component.translatable("metalcraft.options.native_lod_reduction." + value), MetalCraftConfig.nativeLodReduction())
+			.withValues(0, 1, 2, 3, 4, 5)
+			.withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.native_lod_reduction.tooltip")))
+			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.native_lod_reduction"),
+				(button, value) -> MetalCraftConfig.setNativeLodReduction(value)));
+		contents.addChild(nativeQualityDistanceSlider());
 		contents.addChild(new MultiLineTextWidget(Component.translatable("metalcraft.options.native_distance"), this.font)
 			.setMaxWidth(310).setCentered(true));
 
@@ -86,6 +98,30 @@ public final class MetalCraftOptionsScreen extends Screen {
 		this.layout.addToFooter(Button.builder(CommonComponents.GUI_DONE, button -> this.onClose()).width(200).build());
 		this.layout.visitWidgets(this::addRenderableWidget);
 		this.repositionElements();
+	}
+
+	private AbstractSliderButton nativeQualityDistanceSlider() {
+		int minimum = NativeLodSelection.MIN_NATIVE_DISTANCE;
+		int span = NativeLodSelection.MAX_NATIVE_DISTANCE - minimum;
+		AbstractSliderButton slider = new AbstractSliderButton(0, 0, 310, 20,
+			Component.translatable("metalcraft.options.native_quality_distance", MetalCraftConfig.nativeQualityDistance()),
+			(MetalCraftConfig.nativeQualityDistance() - minimum) / (double)span) {
+			private int chunks() { return minimum + (int)Math.round(this.value * span); }
+
+			@Override
+			protected void updateMessage() {
+				this.setMessage(Component.translatable("metalcraft.options.native_quality_distance", chunks()));
+			}
+
+			@Override
+			protected void applyValue() {
+				int chunks = chunks();
+				this.value = (chunks - minimum) / (double)span;
+				MetalCraftConfig.setNativeQualityDistance(chunks);
+			}
+		};
+		slider.setTooltip(Tooltip.create(Component.translatable("metalcraft.options.native_quality_distance.tooltip")));
+		return slider;
 	}
 
 	private void addShaderPackControls(final LinearLayout contents, final boolean appleSilicon) {

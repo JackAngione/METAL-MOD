@@ -17,6 +17,12 @@ abstract class LevelExtractorLodMixin {
     @Shadow private net.minecraft.client.SectionUpdateTracker sectionUpdateTracker;
     @Shadow @Final private net.minecraft.client.renderer.state.level.LevelRenderState levelRenderState;
 
+    @Inject(method = "extract", at = @At(value = "NEW", target = "net/minecraft/client/renderer/chunk/RenderRegionCache"))
+    private void metalcraft$nativeLod(net.minecraft.client.DeltaTracker delta, net.minecraft.client.Camera camera,
+                                    float partialTick, CallbackInfo ci) {
+        if (sectionUpdateTracker != null) dev.metalcraft.client.chunk.NativeTerrainLod.beginFrame(sectionUpdateTracker, camera);
+    }
+
     @Inject(method="extract",at=@At("TAIL"))
     private void metalcraft$recaptureDistant(net.minecraft.client.DeltaTracker delta,net.minecraft.client.Camera camera,
                                            float partialTick,CallbackInfo ci) {
@@ -25,6 +31,7 @@ abstract class LevelExtractorLodMixin {
     }
     @Inject(method = "setLevel", at = @At("HEAD"))
     private void metalcraft$worldLod(@Nullable ClientLevel level, CallbackInfo ci) {
+        dev.metalcraft.client.chunk.NativeTerrainLod.reset();
         dev.metalcraft.client.lod.LodDistantRenderer.worldChanged();
         if (LodCompilerCapture.ENABLED)
             LodCompilerCapture.REVISIONS.world(level == null ? "disconnected" : level.dimension().identifier().toString());
@@ -32,6 +39,7 @@ abstract class LevelExtractorLodMixin {
 
     @Inject(method = "allChanged", at = @At("HEAD"))
     private void metalcraft$resetLod(CallbackInfo ci) {
+        dev.metalcraft.client.chunk.NativeTerrainLod.reset();
         if (LodCompilerCapture.ENABLED) LodCompilerCapture.REVISIONS.resources();
     }
 

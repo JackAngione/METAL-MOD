@@ -13,13 +13,20 @@ import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.core.SectionPos;
 import org.spongepowered.asm.mixin.Mixin;
 
-/** Reads final output on its compiler worker before upload/release; ordinary draws stay untouched. */
+/** Reduces distant native solid output on its compiler worker, before ordinary upload/release. */
 @Mixin(SectionCompiler.class)
 abstract class SectionCompilerLodMixin {
     @WrapMethod(method = "compile")
     private SectionCompiler.Results metalcraft$captureLod(SectionPos section, RenderSectionRegion region,
             VertexSorting sorting, SectionBufferBuilderPack builders, Operation<SectionCompiler.Results> original) {
         SectionCompiler.Results results = original.call(section, region, sorting, builders);
+        try {
+            dev.metalcraft.client.chunk.NativeTerrainLod.compile(results, builders,
+                    ((dev.metalcraft.client.chunk.NativeLodState)region).metalcraft$cellSize());
+        } catch (RuntimeException | Error error) {
+            results.release();
+            throw error;
+        }
         if (LodCompilerCapture.capturing()) {
             try {
                 dev.metalcraft.client.lod.LodDistantRenderer.capture(section, results,

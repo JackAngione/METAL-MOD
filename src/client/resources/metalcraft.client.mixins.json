@@ -25,6 +25,7 @@
     "ShaderManagerMixin",
     "SectionCompilerWaterMixin",
     "SectionCompilerLodMixin",
+    "NativeLodStateMixin",
     "SectionCompilerResultsLodMixin",
     "CompiledSectionMeshLodMixin",
     "RenderSectionRegionLodMixin",

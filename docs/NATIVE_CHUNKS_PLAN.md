@@ -1,5 +1,9 @@
 # Native chunk distance foundation
 
+The foundation below is complete. The active distance-dependent surface LOD follow-up
+is tracked in [NATIVE_TERRAIN_LOD_PLAN.md](NATIVE_TERRAIN_LOD_PLAN.md); statements below
+about unchanged/full-detail rendering describe the original foundation validation.
+
 Replace the active cached opaque horizon with Minecraft's ordinary chunk pipeline,
 extending render distance to 256 before adding any block-resolution LOD.
 

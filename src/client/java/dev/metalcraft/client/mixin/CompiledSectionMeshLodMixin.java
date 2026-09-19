@@ -20,6 +20,8 @@ abstract class CompiledSectionMeshLodMixin implements LodMeshSource {
 
     @Inject(method = "<init>", at = @At("RETURN"))
     private void metalcraft$adoptLod(TranslucencyPointOfView pointOfView, SectionCompiler.Results results, CallbackInfo ci) {
+        ((dev.metalcraft.client.chunk.NativeLodState)this).metalcraft$cellSize(
+                ((dev.metalcraft.client.chunk.NativeLodState)(Object)results).metalcraft$cellSize());
         this.metalcraft$lodCandidate = ((LodCaptureOwner)(Object)results).metalcraft$takeLodCandidate();
         if (this.metalcraft$lodCandidate != null) LodCompilerCapture.transferred();
     }
