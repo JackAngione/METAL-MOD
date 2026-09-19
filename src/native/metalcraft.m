@@ -2765,12 +2765,14 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateSampler(
 	jint addressModeU,
 	jint addressModeV,
 	jint maxAnisotropy,
-	jdouble maxLod
+	jdouble maxLod,
+	jdouble minLod
 ) {
 	@autoreleasepool {
 		if ((minFilter != 0 && minFilter != 1) || (magFilter != 0 && magFilter != 1)
 			|| addressModeU < 0 || addressModeU > 2 || addressModeV < 0 || addressModeV > 2
-			|| maxAnisotropy < 1 || maxAnisotropy > 16 || isnan(maxLod) || maxLod < 0.0) {
+			|| maxAnisotropy < 1 || maxAnisotropy > 16 || isnan(maxLod) || maxLod < 0.0
+			|| !isfinite(minLod) || minLod < 0.0 || minLod > maxLod) {
 			mc_throw_state(env, @"Unsupported Metal sampler configuration");
 			return 0;
 		}
@@ -2793,6 +2795,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateSampler(
 		descriptor.mipFilter = maxLod > 0.25 ? MTLSamplerMipFilterLinear : MTLSamplerMipFilterNearest;
 		descriptor.maxAnisotropy = (NSUInteger)maxAnisotropy;
 		descriptor.lodMaxClamp = isinf(maxLod) ? FLT_MAX : (float)maxLod;
+		descriptor.lodMinClamp = (float)minLod;
 		descriptor.label = @"MetalCraft sampler";
 		id<MTLSamplerState> sampler = [device newSamplerStateWithDescriptor:descriptor];
 		if (sampler == nil) {

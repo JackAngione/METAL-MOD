@@ -64,6 +64,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	private final GpuBufferSlice[] boundUniforms = new GpuBufferSlice[RESOURCE_SLOTS];
 	private final MetalGpuTextureView[] boundTextureViews = new MetalGpuTextureView[RESOURCE_SLOTS];
 	private final MetalGpuSampler[] boundSamplers = new MetalGpuSampler[RESOURCE_SLOTS];
+	private int terrainTextureMip;
 	private MetalRenderPass metal;
 	private RenderPass.RenderArea renderArea;
 	private int outputWidth;
@@ -305,6 +306,8 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		boolean lodDraws = dev.metalcraft.client.lod.LodLoadedRenderer.trackingDraws();
 		try {
 			for (RenderPass.Draw<T> draw : draws) {
+				this.terrainTextureMip = ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source
+					? source.metalcraft$textureMip() : 0;
 				BiConsumer<T, RenderPass.UniformUploader> uploader = draw.uniformUploaderConsumer();
 				if (uploader != null) uploader.accept(uniformArgument, this::setUniform);
 				if (lodDraws
@@ -344,6 +347,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 					dev.metalcraft.client.lod.LodLoadedRenderer.encodedTerrain(draw.indexCount(), draw.indexCount(), source.metalcraft$isDistant());
 			}
 		} finally {
+			this.terrainTextureMip = 0;
 			// Cleared before the batch is submitted, so a draw that threw part-way discards what it
 			// recorded rather than encoding half a multi-draw into the pass.
 			this.recording = null;
@@ -450,16 +454,18 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			String name = samplerLayout.get(index);
 			TextureBinding value = this.textures.get(name);
 			if (value == null) throw new IllegalStateException("Missing Metal sampler " + name);
+			MetalGpuSampler sampler = this.terrainTextureMip > 0 && name.equals("Sampler0")
+				? value.sampler.distant(this.terrainTextureMip) : value.sampler;
 			int resourceIndex = uniformLayout.size() + index;
 			requireSlot(resourceIndex, name);
 			// Views and samplers have identity equality, so this is the same test the record's
 			// equals() performed, without boxing the slot to look the pair up.
-			if (this.boundTextureViews[resourceIndex] != value.view || this.boundSamplers[resourceIndex] != value.sampler) {
+			if (this.boundTextureViews[resourceIndex] != value.view || this.boundSamplers[resourceIndex] != sampler) {
 				int stages = this.pipeline.textureStages(resourceIndex);
 				this.encodeTexture(resourceIndex, value.view.metal(), stages);
-				this.encodeSampler(resourceIndex, value.sampler.metal(), stages);
+				this.encodeSampler(resourceIndex, sampler.metal(), stages);
 				this.boundTextureViews[resourceIndex] = value.view;
-				this.boundSamplers[resourceIndex] = value.sampler;
+				this.boundSamplers[resourceIndex] = sampler;
 			}
 		}
 	}

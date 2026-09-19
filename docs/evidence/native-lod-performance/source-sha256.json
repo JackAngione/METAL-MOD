@@ -1,0 +1,18 @@
+{
+  "src/client/java/dev/metalcraft/client/chunk/NativeLodSelection.java": "ac6e6220460c46cb2073cb417b94266a05dd127aa41dcb96fac239c183583c9b",
+  "src/client/java/dev/metalcraft/client/chunk/NativeSurfaceMesher.java": "025554fc59f20976e3638d13d57294d552a358af832318b47076db77169f12ac",
+  "src/client/java/dev/metalcraft/client/chunk/NativeTerrainLod.java": "5ff61c757d3db3426786a7cbaf3abbcb920d1b7915b9269f3ad1dc9e8d986bfc",
+  "src/client/java/dev/metalcraft/client/lod/LodDrawSource.java": "6091d91bc5c3a578d3e2dc8959fdb0455e3d36a54d3cd52e0257c1e6f59da67c",
+  "src/client/java/dev/metalcraft/client/metal/MetalDevice.java": "5f810e80418763761c3459fe2198656a444e9cdd26e63b9812636b43b6d51bdc",
+  "src/client/java/dev/metalcraft/client/metal/MetalGpuSampler.java": "0dafa279e8bf510b672471dce66dee25aead48a54425bafc884d4669b33770a9",
+  "src/client/java/dev/metalcraft/client/metal/MetalNative.java": "becb3612b752fb35b0829c293eb7ffaec01b7568b05aab4a533aaebcb1656722",
+  "src/client/java/dev/metalcraft/client/metal/MetalRenderPassBackend.java": "bd12f37f504f206b6dff988ba27dd92511bba9531badbcd01eff537e4dcedbb2",
+  "src/client/java/dev/metalcraft/client/metal/MetalSampler.java": "edf495adb093c10309bfe5539e2221b11265b2cceddbbdc42e11057c3fca6e53",
+  "src/client/java/dev/metalcraft/client/mixin/LevelRendererLodDrawMixin.java": "335b8230499b5e17febac6ea72226529aa11659ac0da5f746b5dbfc2551b448e",
+  "src/client/java/dev/metalcraft/client/mixin/RenderPassLodDrawMixin.java": "2bb916c96de46ac3148dc101163179e6698e220023c68ed6e5c6e7b287c8adac",
+  "src/client/java/dev/metalcraft/client/test/MetalGeometricLodGameTest.java": "ee03cb14a3f066e2f03821cb59af5490c904f601d73bc24c92fc078e708084e5",
+  "src/client/resources/assets/metalcraft/lang/en_us.json": "2a0251fe2599f91d4609b1c733ea837fdc787257b2b4f8fc2eb7f1ec409eb677",
+  "src/native/metalcraft.m": "da85a030fb12998fcc6c3c281cbfc655b0ce1ff61839bb6ae293b0f9a5761004",
+  "src/smoke/java/dev/metalcraft/client/chunk/NativeTerrainLodSmoke.java": "1430072b09b24299c0181fa2865b3a48160a55e08e9929bc172a303be44dff75",
+  "src/smoke/java/dev/metalcraft/client/metal/MetalShaderTranslationSmoke.java": "77326248ca84788133764960bee719d7c203fe22f7bc03af4db59890e6fdbaa8"
+}

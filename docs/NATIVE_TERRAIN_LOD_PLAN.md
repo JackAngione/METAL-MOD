@@ -1,5 +1,32 @@
 # Native terrain surface LOD
 
+## Large-distance performance follow-up — September 19
+
+Owner: Codex. Status: implemented and validated. Changes target the active native chunk path;
+legacy distant-cache rendering stays disabled.
+
+- [x] Reduce solid-terrain texture sampling to half/quarter linear resolution with
+  distance-selected native LOD, restore immediately on approach/zoom, retain cutout detail.
+- [x] Compile distance/FOV thresholds once per settings change and reuse squared
+  distances for selection/priority; preserve existing refinement scheduling.
+- [x] Reduce geometry-worker allocation without changing output topology or materials.
+- [x] Run CPU equivalence, Metal mip readback, full build, and one short NORMAL-world
+  16/16, Threaded, Default/Metal restoration check. Report measured limits.
+
+
+Validation: `MTL_DEBUG_LAYER=1 ./gradlew build` passes in 22 seconds; selection
+matches 98,304 scalar decisions, eligibility matches 12,000 original-classifier
+cases, and Metal readback verifies half/quarter mip floors plus restoration and
+lifetime. One 17.89-second NORMAL-world, 16/16, Threaded, Default/Metal route
+passes coarse textures, approach/refinement, retreat, radius expansion, level zero
+and world close. Inspected images and the report are retained.
+
+The paired CPU probe measures 45.3% lower selection time, 46.1–51.1% lower
+geometry-worker time and 59.4–67.9% fewer worker allocated bytes, with identical
+geometry output across five shapes and four tiers. These are isolated CPU savings;
+full atlas storage, chunk loading/generation and the 256-chunk memory limit remain.
+No dense-256 FPS gain is claimed. [Evidence and reproduction](evidence/native-lod-performance/README.md).
+
 ## Approach transition correction
 
 Owner: Codex. Status: implemented and verified following coarse chunks persisting near the camera.

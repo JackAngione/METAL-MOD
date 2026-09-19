@@ -14,6 +14,8 @@ public final class NativeTerrainLodSmoke {
 
     public static void main(String[] args) {
         selection();
+        compiledSelection();
+        eligibilityParity();
         reductionSettings();
         nativeDistanceSettings();
         rebuildTransitions();
@@ -76,6 +78,60 @@ public final class NativeTerrainLodSmoke {
         check(NativeLodSelection.select(Double.NaN, 70, 8, true) == 1, "invalid camera fallback");
         check(NativeLodSelection.distance(-16, -16, -16, -1, -1, -1) == 0, "negative section bounds");
         check(NativeLodSelection.distance(0, 0, 0, 1, 0, 0) == 16, "nearest bounds distance");
+    }
+
+    private static void eligibilityParity() {
+        try {
+            var classify=NativeSurfaceMesher.class.getDeclaredMethod("classify",ByteBuffer.class,int.class,NativeSurfaceMesher.Layout.class);
+            classify.setAccessible(true);
+            Random random=new Random(1909);
+            // Compare the new allocation-free predicate with the unchanged surface classifier,
+            // including malformed positions, UVs, alpha, winding and optional packed normals.
+            for(int axis=0;axis<3;axis++) for(int sign:new int[]{-1,1}) for(int i=0;i<2000;i++) {
+                var data=ByteBuffer.allocate(128).order(ByteOrder.nativeOrder());
+                quad(data,axis,sign,8,4,5,0,0xffa0b0c0);
+                if(i%2==0) {
+                    int vertex=random.nextInt(4), component=random.nextInt(7);
+                    int offset=vertex*28+component*4;
+                    if(component==3 || component==6) data.putInt(offset,random.nextInt());
+                    else data.putFloat(offset,i%13==0?Float.NaN:i%17==0?Float.POSITIVE_INFINITY:random.nextFloat()*20-2);
+                }
+                var layout=LAYOUT;
+                if(i%3==0) {
+                    // Repack each 28-byte vertex into a 32-byte layout with a normal.
+                    var withNormals=ByteBuffer.allocate(128).order(ByteOrder.nativeOrder());
+                    for(int v=0;v<4;v++) {
+                        withNormals.put(data.slice(v*28,28));
+                        withNormals.putInt((sign*127&255)<<(axis*8));
+                    }
+                    if(i%7==0) withNormals.put(28,(byte)42);
+                    data=withNormals;
+                    layout=new NativeSurfaceMesher.Layout(32,0,12,16,24,28);
+                }
+                boolean old=classify.invoke(null,data,0,layout)!=null;
+                check(NativeSurfaceMesher.unitFace(data,0,layout)==old,"allocation-free eligibility matches full classification");
+            }
+            System.out.println("Native face eligibility passed: 12,000 original-classifier comparisons including custom/malformed inputs");
+        } catch(ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+
+    private static void compiledSelection() {
+        Random random=new Random(74093);
+        for(int radius=1;radius<=256;radius++) for(int reduction=0;reduction<=5;reduction++) {
+            double fov=1+random.nextDouble()*178;
+            var policy=NativeLodSelection.policy(fov,true,reduction,radius);
+            for(int i=0;i<64;i++) {
+                double distance=i==0?radius*16.0:random.nextDouble()*8192;
+                int previous=1<<random.nextInt(5);
+                check(policy.selectSquared(distance*distance,previous)==NativeLodSelection.select(distance,fov,previous,true,reduction,radius),
+                        "compiled squared-distance selector matches scalar FOV/hysteresis contract");
+            }
+            check(policy.selectSquared(Double.NaN,16)==1,"invalid squared distance stays native");
+        }
+        for(double fov:new double[]{0,180,Double.NaN,Double.POSITIVE_INFINITY})
+            check(NativeLodSelection.policy(fov,true,5,4).selectSquared(1e8,16)==1,"invalid FOV remains native");
+        check(NativeLodSelection.policy(70,false,5,4).selectSquared(1e8,16)==1,"disabled compiled policy");
+        System.out.println("Compiled native selection passed: 98,304 scalar comparisons, all radii/strengths, zoom/hysteresis and invalid inputs");
     }
 
     private static void reductionSettings() {

@@ -22,12 +22,13 @@ import org.lwjgl.system.MemoryUtil;
 
 /** One LOD mesh per native section; native worker queues and uploads own every replacement. */
 public final class NativeTerrainLod {
-    private record Frame(double x, double y, double z, double fov, boolean enabled, int reduction, int nativeDistance) { }
+    private record Frame(double x, double y, double z, double fov, boolean enabled, int reduction, int nativeDistance,
+                         NativeLodSelection.Policy policy) { }
     private record Candidate(long node, SectionMesh mesh, int desired, double distance,
                              NativeLodRebuildQueue.Change change) { }
     private static final Comparator<Candidate> NEAREST_FIRST = Comparator.comparingDouble(Candidate::distance)
             .thenComparingLong(Candidate::node);
-    private static Frame camera = new Frame(0, 0, 0, 70, false, NativeLodSelection.DEFAULT_REDUCTION, NativeLodSelection.DEFAULT_NATIVE_DISTANCE);
+    private static volatile Frame camera = initialFrame();
     private static final NativeLodRebuildQueue rebuilds = new NativeLodRebuildQueue();
     private static int cursor;
     private static final LongAdder builds = new LongAdder(), original = new LongAdder(), reduced = new LongAdder();
@@ -35,12 +36,22 @@ public final class NativeTerrainLod {
     private static final LongAdder geometricBuilds = new LongAdder(), movedVertices = new LongAdder();
     private NativeTerrainLod() { }
 
+    private static Frame initialFrame() {
+        return new Frame(0,0,0,70,false,NativeLodSelection.DEFAULT_REDUCTION,NativeLodSelection.DEFAULT_NATIVE_DISTANCE,
+                NativeLodSelection.policy(70,false,NativeLodSelection.DEFAULT_REDUCTION,NativeLodSelection.DEFAULT_NATIVE_DISTANCE));
+    }
+
     /** Extraction thread only. Existing full-detail geometry remains installed until upload completes. */
     public static void beginFrame(SectionUpdateTracker tracker, Camera view) {
         Minecraft client = Minecraft.getInstance();
         var pos = view.position();
-        camera = new Frame(pos.x, pos.y, pos.z, view.getFov(), MetalCraftConfig.nativeTerrainLod()
-                && "Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()), MetalCraftConfig.nativeLodReduction(), MetalCraftConfig.nativeQualityDistance());
+        boolean enabled=MetalCraftConfig.nativeTerrainLod() && "Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName());
+        int reduction=MetalCraftConfig.nativeLodReduction(), nativeDistance=MetalCraftConfig.nativeQualityDistance();
+        double fov=view.getFov();
+        Frame previous=camera;
+        var policy=previous.fov==fov && previous.enabled==enabled && previous.reduction==reduction && previous.nativeDistance==nativeDistance
+                ? previous.policy : NativeLodSelection.policy(fov,enabled,reduction,nativeDistance);
+        camera = new Frame(pos.x,pos.y,pos.z,fov,enabled,reduction,nativeDistance,policy);
         long now = System.nanoTime();
         var area = client.levelRenderer.viewArea();
         rebuilds.prune(now, (node, mesh) -> {
@@ -64,7 +75,8 @@ public final class NativeTerrainLod {
             int current = state.metalcraft$cellSize();
             boolean scanCoarsening = Math.floorMod(index - cursor, size) < 512;
             if (current == 1 && !scanCoarsening && !rebuilds.isPending(node)) continue;
-            int desired = select(node, current);
+            double distance = distanceSquared(camera,node);
+            int desired = camera.policy.selectSquared(distance,current);
             var change = rebuilds.change(node, mesh, current, desired);
             if (!rebuilds.hasCapacity(node, change)) continue;
             boolean refine = change == NativeLodRebuildQueue.Change.REFINE;
@@ -72,8 +84,6 @@ public final class NativeTerrainLod {
             var dirty = tracker.getDirtyState(node);
             // Ordinary block edits already produce a fresh camera-stamped snapshot.
             if (dirty == null || dirty.getSectionNode() != node || dirty.isDirty()) continue;
-            double distance = NativeLodSelection.distance(camera.x, camera.y, camera.z,
-                    SectionPos.x(node), SectionPos.y(node), SectionPos.z(node));
             var candidates = refine ? refinements : coarsenings;
             int budget = refine ? 8 : 4;
             if (candidates.size() == budget && distance >= candidates.peek().distance) continue;
@@ -106,13 +116,25 @@ public final class NativeTerrainLod {
     }
 
     private static int select(long section, int previous) {
-        return NativeLodSelection.select(NativeLodSelection.distance(camera.x, camera.y, camera.z,
-                SectionPos.x(section), SectionPos.y(section), SectionPos.z(section)), camera.fov, previous, camera.enabled, camera.reduction, camera.nativeDistance);
+        Frame frame=camera;
+        return frame.policy.selectSquared(distanceSquared(frame,section),previous);
+    }
+
+    private static double distanceSquared(Frame frame,long section) {
+        return NativeLodSelection.distanceSquared(frame.x,frame.y,frame.z,
+                SectionPos.x(section),SectionPos.y(section),SectionPos.z(section));
+    }
+
+    /** Restore texture detail immediately on approach/zoom while native mesh refinement is queued. */
+    public static int textureMip(long section, int installedCell) {
+        if (installedCell<=1) return 0;
+        int cell=Math.min(installedCell,select(section,installedCell));
+        return cell>=4 ? 2 : cell>=2 ? 1 : 0;
     }
 
     public static void reset() {
         rebuilds.clear(); cursor = 0;
-        camera = new Frame(0, 0, 0, 70, false, NativeLodSelection.DEFAULT_REDUCTION, NativeLodSelection.DEFAULT_NATIVE_DISTANCE);
+        camera = initialFrame();
     }
 
     /** Bounded CPU-only simplification on the already scheduled native compiler worker. */

@@ -76,6 +76,10 @@ final class MetalGeometricLodGameTest {
                 context.waitTicks(10);
                 int coarseIndices = context.computeOnClient(c -> indices(c, marker));
                 check(coarseIndices < nativeIndices, "stepped fixture geometry reduced");
+                int coarseMip=context.computeOnClient(c -> NativeTerrainLod.textureMip(
+                        net.minecraft.core.SectionPos.of(marker).asLong(),selectedCell));
+                check(coarseMip==(selectedCell>=4?2:1),"coarse native solid uses reduced texture mip");
+                report.put("coarseTextureMip",coarseMip);
                 check(NativeTerrainLod.stats().geometricBuilds() > before.geometricBuilds(), "actual clustering was uploaded");
                 context.takeScreenshot("geometric-lod-5-extreme");
                 // Keep LOD enabled: moving into the native radius must replace the
@@ -88,6 +92,10 @@ final class MetalGeometricLodGameTest {
                 context.waitTicks(20);
                 check(context.computeOnClient(c -> uploaded(c, marker, 1) && indices(c, marker) == nativeIndices),
                         "late coarse builds cannot leave nearby fixture degraded");
+                check(context.computeOnClient(c -> NativeTerrainLod.textureMip(
+                        net.minecraft.core.SectionPos.of(marker).asLong(),selectedCell))==0,
+                        "approach restores full texture detail even with a stale coarse mesh");
+                report.put("approachTextureRestored",true);
                 context.takeScreenshot("geometric-lod-approach-native");
                 world.getServer().runCommand("tp @a " + cameraX + " 185 " + cameraZ + " -110 10");
                 context.getInput().lookAt(-110, 10);
@@ -100,6 +108,8 @@ final class MetalGeometricLodGameTest {
                 context.waitFor(c -> uploaded(c, marker, selectedCell), 100);
                 context.runOnClient(c -> MetalCraftConfig.setNativeLodReduction(0));
                 context.waitFor(c -> uploaded(c, marker, 1) && indices(c, marker) == nativeIndices, 600);
+                check(context.computeOnClient(c -> NativeTerrainLod.textureMip(
+                        net.minecraft.core.SectionPos.of(marker).asLong(),selectedCell))==0,"level zero restores native texture sampling");
                 context.waitTicks(5);
                 context.takeScreenshot("geometric-lod-0-restored");
                 report.put("world", "NORMAL / metalcraft"); report.put("backend", "Metal");

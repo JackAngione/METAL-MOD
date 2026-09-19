@@ -319,6 +319,7 @@ public final class MetalShaderTranslationSmoke {
 			assertMipRenderTargetViewport(device);
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
+			assertDistantMipSampling(device);
 			assertBatchedResourceBindings(device);
 			assertQueriesAndLifetime(device, pipeline);
 			assertPassGpuTiming(device, pipeline);
@@ -477,6 +478,54 @@ public final class MetalShaderTranslationSmoke {
 				throw new AssertionError("Metal explicit LOD 2 sampled the wrong mip level: rgb=" + red + "," + green + "," + blue);
 			}
 		}
+	}
+
+	private static void assertDistantMipSampling(final MetalDevice device) {
+		for (int mipFloor : new int[]{1,2}) for (int maxLod : new int[]{0, 1, 3}) for (boolean explicit : new boolean[]{false, true}) {
+			String fragment = MIP_FRAGMENT_GLSL.replace("textureLod(Source, vec2(0.5), 2.0)",
+				explicit ? "textureLod(Source, vec2(0.5), 0.0)" : "texture(Source, vec2(0.5))");
+			try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
+					VERTEX_GLSL, "smoke/distant-mip.vert", fragment, "smoke/distant-mip.frag", MetalTexture.Format.RGBA8_UNORM, null));
+				 MetalCommandQueue queue = device.createCommandQueue();
+				 MetalTexture source = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 8, 8, 4));
+				 MetalTextureView view = source.createView();
+				 MetalTexture target = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 8, 8, 1));
+				 MetalGpuSampler base = new MetalGpuSampler(device.createSampler(new MetalSampler.Descriptor(
+					MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE,
+					MetalSampler.AddressMode.CLAMP_TO_EDGE, 8, maxLod)),
+					com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE, com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE,
+					com.mojang.blaze3d.textures.FilterMode.NEAREST, com.mojang.blaze3d.textures.FilterMode.NEAREST,
+					8, java.util.OptionalDouble.of(maxLod))) {
+				int[] colors = {0xff0000ff, 0xff00ff00, 0xffff0000, 0xffffffff};
+				for (int mip=0; mip<4; mip++) {
+					int size=8>>mip;
+					var pixels=ByteBuffer.allocateDirect(size*size*4).order(ByteOrder.nativeOrder());
+					while(pixels.hasRemaining()) pixels.putInt(colors[mip]);
+					source.upload(queue,mip,pixels.flip());
+				}
+				var distant=base.distant(mipFloor);
+				if (distant != base.distant(mipFloor) || distant.getMaxAnisotropy()!=1 || base.getMaxAnisotropy()!=8
+					|| base.metal().descriptor().minLod()!=0) throw new AssertionError("Distant sampler isolation/reuse");
+				// Ordinary -> distant -> ordinary verifies restoring the original sampling behavior.
+				for (var sampler : new MetalGpuSampler[]{base, distant, base}) {
+					try (var commands=queue.createCommandBuffer(); var pass=commands.beginRenderPass(new MetalRenderPass.Descriptor(
+							MetalRenderPass.ColorAttachment.clear(target,0,0,0,1)))) {
+						pass.setPipeline(pipeline);
+						pass.setTexture(0,view,MetalRenderPass.STAGE_FRAGMENT);
+						pass.setSampler(0,sampler.metal(),MetalRenderPass.STAGE_FRAGMENT);
+						pass.draw(MetalRenderPass.Primitive.TRIANGLE,0,3,1,0);
+						pass.close(); commands.commitAndWait();
+					}
+					int expected=colors[sampler==base?0:Math.min(mipFloor,maxLod)];
+					int actual=target.readback(queue,0).order(ByteOrder.nativeOrder()).getInt((4*8+4)*4);
+					if(actual!=expected) throw new AssertionError("Distant mip floor/readback: max="+maxLod
+						+" explicit="+explicit+" expected="+Integer.toHexString(expected)+" actual="+Integer.toHexString(actual));
+				}
+				base.close();
+				if(!distant.metal().isClosed()) throw new AssertionError("Distant sampler lifetime leaked");
+			}
+		}
+		System.out.println("Distant Metal mip sampling passed: quarter resolution, mip caps, ordinary restoration and lifetime");
 	}
 
 	private static void assertFramebufferOrientation(final MetalDevice device) {

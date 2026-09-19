@@ -130,7 +130,8 @@ public final class MetalDevice implements AutoCloseable {
 			descriptor.addressModeU().ordinal(),
 			descriptor.addressModeV().ordinal(),
 			descriptor.maxAnisotropy(),
-			descriptor.maxLod()
+			descriptor.maxLod(),
+			descriptor.minLod()
 		);
 		if (samplerHandle == 0L) {
 			throw new IllegalStateException("Metal did not create the requested sampler");

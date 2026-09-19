@@ -211,7 +211,8 @@ public final class MetalNative {
 		int addressModeU,
 		int addressModeV,
 		int maxAnisotropy,
-		double maxLod
+		double maxLod,
+		double minLod
 	);
 
 	static native long nCreateRenderPipeline(
