@@ -9,7 +9,7 @@ This is a Minecraft mod which the entire purpose is to maximally optimize Minecr
 
 
 ## Testing:
-- Always use 16 render and simulation distance. Default graphics engine so that metal is used. 
+- Use 16 render and simulation distance for shaders testing. When doing LOD testing, use 128 render distance. Default graphics engine so that metal is used. 
 - Keep live in-game test runs to a minimum. Do not run unnecessarily long test. It wastes time. Only increase in-game test time/complexity when absolutely necessary.
 
 When implementing, reviewing, or validating water shader effects, read
