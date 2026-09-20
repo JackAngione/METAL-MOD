@@ -20,6 +20,8 @@ import net.minecraft.core.BlockPos;
 /** Same-camera 0/5/0 visual comparison on actual one-block steps in a NORMAL generated world. */
 final class MetalGeometricLodGameTest {
     static void run(ClientGameTestContext context) {
+        boolean pixelTest = Boolean.getBoolean("metalcraft.terrainResolutionTest");
+        boolean savedPixels = MetalCraftConfig.nativeLodPixels();
         int savedDistance = context.computeOnClient(c -> c.options.renderDistance().get());
         int savedSimulation = context.computeOnClient(c -> c.options.simulationDistance().get());
         int savedFov = context.computeOnClient(c -> c.options.fov().get());
@@ -33,7 +35,8 @@ final class MetalGeometricLodGameTest {
         try {
             context.runOnClient(c -> {
                 check("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()), "Metal selected");
-                c.options.renderDistance().set(16); c.options.simulationDistance().set(16);
+                c.options.renderDistance().set(pixelTest ? 128 : 16); c.options.simulationDistance().set(16);
+                if (pixelTest) MetalCraftConfig.setNativeLodPixels(true);
                 c.options.prioritizeChunkUpdates().set(PrioritizeChunkUpdates.NONE); c.options.fov().set(70);
                 MetalCraftConfig.setNativeQualityDistance(4);
                 MetalCraftConfig.setNativeTerrainLod(true); MetalCraftConfig.setNativeLodReduction(0);
@@ -72,7 +75,22 @@ final class MetalGeometricLodGameTest {
                         + " camera=" + c.gameRenderer.mainCamera().position() + " fov=" + c.gameRenderer.mainCamera().getFov()
                         + " stats=" + NativeTerrainLod.stats()));
                 check(selectedCell > 1, "fixture selects a coarser geometric tier");
-                context.waitFor(c -> uploaded(c, marker, selectedCell), 600);
+                try {
+                    context.waitFor(c -> uploaded(c, marker, selectedCell), 600);
+                } catch (AssertionError timeout) {
+                    context.runOnClient(c -> {
+                        long node = net.minecraft.core.SectionPos.of(marker).asLong();
+                        var section = c.levelRenderer.viewArea().getRenderSectionAt(marker);
+                        var tracker = ((dev.metalcraft.client.mixin.LevelExtractorAccessor)c.levelExtractor).metalcraft$sectionUpdateTracker();
+                        var dirty = tracker.getDirtyState(node);
+                        System.out.println("LOD transition timeout: selected=" + selectedCell + " desired=" + NativeTerrainLod.snapshotCellSize(node)
+                                + " installed=" + ((NativeLodState)mesh(c, marker)).metalcraft$cellSize()
+                                + " visible=" + c.levelRenderer.visibleSections().contains(section)
+                                + " dirty=" + dirty.isDirty() + " section=" + section.getSectionNode() + " expected=" + node
+                                + " stats=" + NativeTerrainLod.stats());
+                    });
+                    throw timeout;
+                }
                 context.waitTicks(10);
                 int coarseIndices = context.computeOnClient(c -> indices(c, marker));
                 check(coarseIndices < nativeIndices, "stepped fixture geometry reduced");
@@ -82,6 +100,41 @@ final class MetalGeometricLodGameTest {
                 report.put("coarseTextureMip",coarseMip);
                 check(NativeTerrainLod.stats().geometricBuilds() > before.geometricBuilds(), "actual clustering was uploaded");
                 context.takeScreenshot("geometric-lod-5-extreme");
+                if (pixelTest) {
+                    var stats = context.computeOnClient(c -> dev.metalcraft.client.metal.MetalGpuDevices.current().terrainResolutionStats());
+                    check(stats != null && stats.quarterDraws() > 0, "real chunk draws use reduced target");
+                    check(stats.quarterWidth() == (stats.sceneWidth()+3)/4 && stats.quarterHeight() == (stats.sceneHeight()+3)/4,
+                        "quarter target dimensions");
+                    report.put("pixelResolution",stats);
+                    context.runOnClient(c -> {
+                        var renderStore = ((dev.metalcraft.client.mixin.ViewAreaAccessor)c.levelRenderer.viewArea()).metalcraft$sections();
+                        var tracker = ((dev.metalcraft.client.mixin.LevelExtractorAccessor)c.levelExtractor).metalcraft$sectionUpdateTracker();
+                        var dirtyStore = ((dev.metalcraft.client.mixin.SectionUpdateTrackerAccessor)tracker).metalcraft$storage();
+                        check(renderStore instanceof dev.metalcraft.client.chunk.LazySectionStorage<?>, "render bookkeeping is lazy at 128");
+                        check(dirtyStore instanceof dev.metalcraft.client.chunk.LazySectionStorage<?>, "dirty bookkeeping is lazy at 128");
+                        var render = (dev.metalcraft.client.chunk.LazySectionStorage<?>)renderStore;
+                        var dirty = (dev.metalcraft.client.chunk.LazySectionStorage<?>)dirtyStore;
+                        check(render.residentEntries() < render.size() && dirty.residentEntries() < dirty.size(), "unloaded slots stay unallocated");
+                        report.put("logicalSectionSlots",render.size());
+                        report.put("residentRenderSections",render.residentEntries()); report.put("residentDirtyStates",dirty.residentEntries());
+                        report.put("renderStoragePages",render.allocatedPages()); report.put("dirtyStoragePages",dirty.allocatedPages());
+                    });
+                    context.runOnClient(c -> MetalCraftConfig.setNativeLodPixels(false));
+                    context.waitTicks(5);
+                    long stopped = context.computeOnClient(c -> dev.metalcraft.client.metal.MetalGpuDevices.current().terrainResolutionStats().quarterDraws());
+                    context.waitTicks(5);
+                    check(context.computeOnClient(c -> dev.metalcraft.client.metal.MetalGpuDevices.current().terrainResolutionStats().quarterDraws()) == stopped,
+                        "disabled shading stops reduced draws without rebuilding geometry");
+                    context.takeScreenshot("terrain-pixels-full");
+                    context.runOnClient(c -> MetalCraftConfig.setNativeLodPixels(true));
+                    context.getInput().resizeWindow(1279,719);
+                    context.waitTicks(8);
+                    var resized = context.computeOnClient(c -> dev.metalcraft.client.metal.MetalGpuDevices.current().terrainResolutionStats());
+                    check(resized.quarterDraws()>stopped && resized.quarterWidth()==(resized.sceneWidth()+3)/4, "resized targets and reenable");
+                    report.put("resizedPixelResolution",resized);
+                    context.takeScreenshot("terrain-pixels-reduced-resize");
+                    context.getInput().resizeWindow(1280,720);
+                }
                 // Keep LOD enabled: moving into the native radius must replace the
                 // already uploaded coarse mesh without a reload or block edit.
                 long approachStarted = System.nanoTime();
@@ -113,7 +166,7 @@ final class MetalGeometricLodGameTest {
                 context.waitTicks(5);
                 context.takeScreenshot("geometric-lod-0-restored");
                 report.put("world", "NORMAL / metalcraft"); report.put("backend", "Metal");
-                report.put("renderDistance", 16); report.put("simulationDistance", 16); report.put("chunkBuilder", "Threaded");
+                report.put("renderDistance", pixelTest ? 128 : 16); report.put("simulationDistance", 16); report.put("chunkBuilder", "Threaded");
                 report.put("sameCameraSequence", "0 -> 5 -> 0");
                 report.put("selectedCell", selectedCell);
                 report.put("nativeIndices", nativeIndices); report.put("coarseIndices", coarseIndices);
@@ -125,6 +178,7 @@ final class MetalGeometricLodGameTest {
             context.runOnClient(c -> {
                 c.options.renderDistance().set(savedDistance); c.options.simulationDistance().set(savedSimulation);
                 c.options.fov().set(savedFov); c.options.prioritizeChunkUpdates().set(savedBuilder);
+                MetalCraftConfig.setNativeLodPixels(savedPixels);
                 MetalCraftConfig.setNativeTerrainLod(savedEnabled); MetalCraftConfig.setNativeLodReduction(savedReduction);
                 MetalCraftConfig.setNativeQualityDistance(savedNativeDistance);
                 MetalCraftConfig.setClearDistanceFog(savedFog); ShaderPackRuntime.active().selectPack(savedPack);

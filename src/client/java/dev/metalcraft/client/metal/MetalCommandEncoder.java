@@ -169,7 +169,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.renderPassDescriptor = next;
 		RenderPass.RenderArea area = descriptor.renderArea;
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
-		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
+		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device, this);
 		MetalGpuTextureView sizeView = firstColorView != null ? firstColorView : depthView;
 		MetalLinearWorldSession session = this.device.linearWorldSession();
 		boolean hdrOwned = session != null && session.ownsTranslated(firstColorView, depthView);
@@ -179,6 +179,39 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 			hdrOwned);
 		return this.renderPassBackend;
 	}
+
+    /** Only stored, single-color world attachments may be suspended for distant shading. */
+    boolean supportsTerrainResolution() {
+        var d = this.renderPassDescriptor;
+        return d != null && d.colorAttachments().size() == 1 && d.colorAttachment() != null
+            && d.colorAttachment().storeAction() == MetalRenderPass.StoreAction.STORE
+            && d.colorAttachment().arraySlice() == 0 && d.colorAttachment().mipLevel() == 0
+            && d.depthAttachment() != null && d.depthAttachment().texture().descriptor().format() == MetalTexture.Format.DEPTH32_FLOAT
+            && d.depthAttachment().mipLevel() == 0
+            && d.depthAttachment().arraySlice() == 0
+            && d.depthAttachment().storeAction() == MetalRenderPass.StoreAction.STORE && !d.isLayered();
+    }
+
+    MetalRenderPass terrainBand(MetalTerrainResolution.Band band) {
+        this.renderPass.close();
+        this.renderPass = this.commands.beginRenderPass(band.descriptor, MetalPassCensus.kindFor("Terrain reduced shading"));
+        return this.renderPass;
+    }
+
+    MetalRenderPass resumeTerrainScene() {
+        this.renderPass.close();
+        var color = this.renderPassDescriptor.colorAttachment();
+        var depth = this.renderPassDescriptor.depthAttachment();
+        // The original clear already happened. Resuming must preserve both attachments.
+        var resumed = new MetalRenderPass.Descriptor(
+            new MetalRenderPass.ColorAttachment(color.target(), color.mipLevel(), MetalRenderPass.LoadAction.LOAD,
+                MetalRenderPass.StoreAction.STORE, 0, 0, 0, 0),
+            new MetalRenderPass.DepthAttachment(depth.texture(), depth.mipLevel(), MetalRenderPass.LoadAction.LOAD,
+                MetalRenderPass.StoreAction.STORE, 0));
+        this.renderPass = this.commands.beginRenderPass(resumed, MetalPassCensus.kindFor("Terrain reconstruction"));
+        this.renderPassDescriptor = resumed;
+        return this.renderPass;
+    }
 
 	@Override
 	public void submitRenderPass() {

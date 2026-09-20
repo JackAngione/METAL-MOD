@@ -86,6 +86,10 @@ public final class MetalCraftOptionsScreen extends Screen {
 			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.native_lod_reduction"),
 				(button, value) -> MetalCraftConfig.setNativeLodReduction(value)));
 		contents.addChild(nativeQualityDistanceSlider());
+        contents.addChild(CycleButton.onOffBuilder(MetalCraftConfig.nativeLodPixels())
+            .withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.native_lod_pixels.tooltip")))
+            .create(0, 0, 310, 20, Component.translatable("metalcraft.options.native_lod_pixels"),
+                (button, enabled) -> MetalCraftConfig.setNativeLodPixels(enabled)));
 		contents.addChild(new MultiLineTextWidget(Component.translatable("metalcraft.options.native_distance"), this.font)
 			.setMaxWidth(310).setCentered(true));
 

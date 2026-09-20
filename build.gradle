@@ -200,6 +200,7 @@ tasks.named('runClient') {
 		systemProperty 'metalcraft.lodHorizonTest', providers.gradleProperty('metalLodHorizonTest').getOrElse('false')
 		systemProperty 'metalcraft.nativeChunkDistanceTest', providers.gradleProperty('metalNativeChunkDistanceTest').getOrElse('false')
 		systemProperty 'metalcraft.nativeTerrainLodTest', providers.gradleProperty('metalNativeTerrainLodTest').getOrElse('false')
+		systemProperty 'metalcraft.terrainResolutionTest', providers.gradleProperty('metalTerrainResolutionTest').getOrElse('false')
 		systemProperty 'metalcraft.geometricLodTest', providers.gradleProperty('metalGeometricLodTest').getOrElse('false')
 		systemProperty 'metalcraft.lodGenerationTest', providers.gradleProperty('metalLodGenerationTest').getOrElse('false')
 		systemProperty 'metalcraft.lodExpectedRadius', providers.gradleProperty('metalLodExpectedRadius').getOrElse('-1')
@@ -265,3 +266,19 @@ tasks.register('nativeTerrainLodSmoke', JavaExec) {
     mainClass = 'dev.metalcraft.client.chunk.NativeTerrainLodSmoke'
 }
 tasks.named('check') { dependsOn tasks.named('nativeTerrainLodSmoke') }
+
+// Optional shader-cost probe; includes target stores and reconstruction, outside the build gate.
+tasks.register('terrainResolutionBenchmark', JavaExec) {
+    dependsOn tasks.named('clientClasses'), tasks.named('compileShaderSmokeJava')
+    onlyIf { isAppleSiliconBuild }
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.metal.TerrainResolutionBenchmark'
+}
+
+tasks.register('sectionStorageSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.chunk.SectionStorageSmoke'
+    maxHeapSize = '256m'
+}
+tasks.named('check') { dependsOn tasks.named('sectionStorageSmoke') }

@@ -1,8 +1,6 @@
 package dev.metalcraft.client.chunk;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.function.BiPredicate;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 /** Extraction-thread bookkeeping; the native dispatcher owns and cancels the actual jobs. */
 public final class NativeLodRebuildQueue {
@@ -10,7 +8,8 @@ public final class NativeLodRebuildQueue {
     private record Pending(Object mesh, int target, long started) { }
     private static final int CAPACITY = 128, COARSENING_LIMIT = 64;
     private static final long RETRY_NANOS = 10_000_000_000L;
-    private final Map<Long, Pending> pending = new HashMap<>();
+    private final Long2ObjectOpenHashMap<Pending> pending = new Long2ObjectOpenHashMap<>(CAPACITY);
+    @FunctionalInterface public interface Installed { boolean test(long section, Object mesh); }
 
     public boolean isPending(long section) { return pending.containsKey(section); }
 
@@ -33,9 +32,13 @@ public final class NativeLodRebuildQueue {
         pending.put(section, new Pending(mesh, target, now));
     }
 
-    public void prune(long now, BiPredicate<Long, Object> stillInstalled) {
-        pending.entrySet().removeIf(entry -> now - entry.getValue().started >= RETRY_NANOS
-                || !stillInstalled.test(entry.getKey(), entry.getValue().mesh));
+    public void prune(long now, Installed stillInstalled) {
+        var entries = pending.long2ObjectEntrySet().fastIterator();
+        while (entries.hasNext()) {
+            var entry = entries.next();
+            var request = entry.getValue();
+            if (now - request.started >= RETRY_NANOS || !stillInstalled.test(entry.getLongKey(),request.mesh)) entries.remove();
+        }
     }
 
     public void clear() { pending.clear(); }

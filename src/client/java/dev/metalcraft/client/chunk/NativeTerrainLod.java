@@ -16,7 +16,7 @@ import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.chunk.CompiledSectionMesh;
 import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.client.renderer.chunk.SectionMesh;
-import net.minecraft.core.BlockPos;
+import dev.metalcraft.client.mixin.ViewAreaAccessor;
 import net.minecraft.core.SectionPos;
 import org.lwjgl.system.MemoryUtil;
 
@@ -55,13 +55,13 @@ public final class NativeTerrainLod {
         long now = System.nanoTime();
         var area = client.levelRenderer.viewArea();
         rebuilds.prune(now, (node, mesh) -> {
-            var section = area == null ? null : area.getRenderSectionAt(new BlockPos(
-                    SectionPos.x(node) * 16, SectionPos.y(node) * 16, SectionPos.z(node) * 16));
+            var section = area == null ? null : ((ViewAreaAccessor)area).metalcraft$sections().getValue(node);
             return section != null && section.getSectionNode() == node && section.getSectionMesh() == mesh;
         });
         var visible = client.levelRenderer.visibleSections();
         int size = visible.size();
         if (size == 0) return;
+        cursor = Math.floorMod(cursor, size);
         // Visibility order can be stale after movement. Inspect all installed coarse
         // sections for refinement, keeping only the nearest eight eligible candidates.
         // Coarsening remains a rotating, bounded scan and has separate queue capacity.
@@ -73,7 +73,9 @@ public final class NativeTerrainLod {
             SectionMesh mesh = section.getSectionMesh();
             if (!(mesh instanceof NativeLodState state) || mesh == CompiledSectionMesh.UNCOMPILED) continue;
             int current = state.metalcraft$cellSize();
-            boolean scanCoarsening = Math.floorMod(index - cursor, size) < 512;
+            int scanOffset = index - cursor;
+            if (scanOffset < 0) scanOffset += size;
+            boolean scanCoarsening = scanOffset < 512;
             if (current == 1 && !scanCoarsening && !rebuilds.isPending(node)) continue;
             double distance = distanceSquared(camera,node);
             int desired = camera.policy.selectSquared(distance,current);
@@ -108,8 +110,7 @@ public final class NativeTerrainLod {
     /** Snapshot creation runs on the extraction thread, so workers never access live camera/world state. */
     public static int snapshotCellSize(long section) {
         var area = Minecraft.getInstance().levelRenderer.viewArea();
-        var renderSection = area == null ? null : area.getRenderSectionAt(new BlockPos(
-                SectionPos.x(section) * 16, SectionPos.y(section) * 16, SectionPos.z(section) * 16));
+        var renderSection = area == null ? null : ((ViewAreaAccessor)area).metalcraft$sections().getValue(section);
         int previous = renderSection != null && renderSection.getSectionMesh() instanceof NativeLodState state
                 ? state.metalcraft$cellSize() : 1;
         return select(section, previous);

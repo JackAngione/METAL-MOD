@@ -320,6 +320,7 @@ public final class MetalShaderTranslationSmoke {
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
 			assertDistantMipSampling(device);
+            TerrainResolutionSmoke.run(device);
 			assertBatchedResourceBindings(device);
 			assertQueriesAndLifetime(device, pipeline);
 			assertPassGpuTiming(device, pipeline);

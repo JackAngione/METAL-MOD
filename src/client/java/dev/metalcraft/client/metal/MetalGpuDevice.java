@@ -56,6 +56,40 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> linearPipelineCache = new IdentityHashMap<>();
 	private record LodPipelineKey(RenderPipeline pipeline, boolean linear) { }
 	private final Map<LodPipelineKey, java.util.Optional<MetalCompiledRenderPipeline>> lodPipelineCache = new HashMap<>();
+    private final Map<RenderPipeline, java.util.Optional<MetalCompiledRenderPipeline>> terrainResolutionPipelines = new IdentityHashMap<>();
+    private MetalTerrainResolution terrainResolution;
+
+    MetalTerrainResolution terrainResolution() {
+        if (terrainResolution == null) terrainResolution = new MetalTerrainResolution(this.metal);
+        return terrainResolution;
+    }
+    public MetalTerrainResolution.Stats terrainResolutionStats() { return terrainResolution == null ? null : terrainResolution.stats(); }
+
+    @Nullable MetalCompiledRenderPipeline terrainResolutionPipeline(RenderPipeline pipeline) {
+        return terrainResolutionPipelines.computeIfAbsent(pipeline, ignored -> {
+            if (pipeline != net.minecraft.client.renderer.RenderPipelines.SOLID_TERRAIN || nativePipelines.containsKey(pipeline)
+                || !pipeline.getVertexShader().equals(Identifier.parse("minecraft:core/terrain"))
+                || !pipeline.getFragmentShader().equals(Identifier.parse("minecraft:core/terrain"))
+                || dev.metalcraft.client.shader.WorldGeometryAdapter.isBlended(pipeline)) return java.util.Optional.empty();
+            try {
+                ShaderSource sources = reloadShaderSource == null ? defaultShaderSource : reloadShaderSource;
+                String vertex = sources.get(pipeline.getVertexShader(), ShaderType.VERTEX);
+                String fragment = sources.get(pipeline.getFragmentShader(), ShaderType.FRAGMENT);
+                LinearWorldShaders.verify(pipeline.getVertexShader(), ".vsh", vertex);
+                LinearWorldShaders.verify(pipeline.getFragmentShader(), ".fsh", fragment);
+                vertex = Blaze3DMetalMappings.vertexShaderWithLocations(Blaze3DMetalMappings.shaderWithResourceBindings(
+                    GlslPreprocessor.injectDefines(vertex, pipeline.getShaderDefines()), pipeline), pipeline.getVertexFormatBindings());
+                fragment = MetalTerrainResolution.reconstructFragment(Blaze3DMetalMappings.shaderWithResourceBindings(
+                    GlslPreprocessor.injectDefines(fragment, pipeline.getShaderDefines()), pipeline));
+                var shaders = MetalShaderTranslator.translatePipeline(vertex, "terrain_resolution_vertex", fragment, "terrain_resolution_fragment");
+                return java.util.Optional.of(MetalCompiledRenderPipeline.compile(metal, pipeline,
+                    Blaze3DMetalMappings.pipelineDescriptor(pipeline, shaders), shaders));
+            } catch (RuntimeException unsupported) {
+                LOGGER.warn("Reduced terrain shading unavailable for {}; ordinary rendering remains active", pipeline.getLocation(), unsupported);
+                return java.util.Optional.empty();
+            }
+        }).orElse(null);
+    }
 	private final Map<RenderPipeline, Map<LinearWorldPostShaders.Semantic, MetalCompiledRenderPipeline>>
 		linearPostPipelineCache = new IdentityHashMap<>();
 	private final Map<RenderPipeline, NativeProgram> nativePipelines = new IdentityHashMap<>();
@@ -699,6 +733,9 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	}
 
 	private void clearLodPipelines() {
+        this.terrainResolutionPipelines.values().forEach(value -> value.ifPresent(MetalCompiledRenderPipeline::close));
+        this.terrainResolutionPipelines.clear();
+        if (this.terrainResolution != null) { this.terrainResolution.close(); this.terrainResolution = null; }
 		this.lodPipelineCache.values().forEach(value -> value.ifPresent(MetalCompiledRenderPipeline::close));
 		this.lodPipelineCache.clear();
 	}

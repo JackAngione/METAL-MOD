@@ -71,6 +71,12 @@ public final class MetalCraftConfig {
 		return data.clearDistanceFog;
 	}
 
+	public static synchronized boolean nativeLodPixels() { return data.nativeLodPixels; }
+    public static synchronized void setNativeLodPixels(boolean enabled) {
+        if (data.nativeLodPixels == enabled) return;
+        data.nativeLodPixels = enabled; save();
+    }
+
 	public static synchronized boolean nativeTerrainLod() { return data.nativeTerrainLod; }
 
 	public static synchronized int nativeLodReduction() { return data.nativeLodReduction; }
@@ -126,7 +132,10 @@ public final class MetalCraftConfig {
 			var nativeLod = json.get("nativeTerrainLod");
 			loaded.nativeTerrainLod = nativeLod == null || !nativeLod.isJsonPrimitive()
 				|| !nativeLod.getAsJsonPrimitive().isBoolean() || nativeLod.getAsBoolean();
-			loaded.nativeLodReduction = NativeLodSettingsCodec.readReduction(json.get("nativeLodReduction"));
+			var pixels = json.get("nativeLodPixels");
+            loaded.nativeLodPixels = pixels == null || !pixels.isJsonPrimitive()
+                || !pixels.getAsJsonPrimitive().isBoolean() || pixels.getAsBoolean();
+            loaded.nativeLodReduction = NativeLodSettingsCodec.readReduction(json.get("nativeLodReduction"));
 			loaded.nativeQualityDistance = NativeLodSettingsCodec.readNativeDistance(json.get("nativeQualityDistance"));
 			loaded.lod = LodSettingsCodec.read(json.get("lod"));
 			return loaded;
@@ -169,6 +178,7 @@ public final class MetalCraftConfig {
 		private boolean unlockedFrameRate;
 		private boolean clearDistanceFog;
 		private boolean nativeTerrainLod = true;
+        private boolean nativeLodPixels = true;
 		private int nativeLodReduction = NativeLodSelection.DEFAULT_REDUCTION;
 		private int nativeQualityDistance = NativeLodSelection.DEFAULT_NATIVE_DISTANCE;
 		private LodSettings lod = LodSettings.defaults();

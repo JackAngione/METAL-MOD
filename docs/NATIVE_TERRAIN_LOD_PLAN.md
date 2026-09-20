@@ -1,5 +1,80 @@
 # Native terrain surface LOD
 
+## High-distance CPU and RAM cleanup — September 20
+
+Owner: Codex. Status: implemented and validated, following the report that reduced pixel
+resolution looks correct but does not improve game performance.
+
+- [x] Replace eager high-distance render/dirty bookkeeping with lazy storage,
+  preserving native slot indices, recycling, dirty tracking and mesh lifetime.
+- [x] Page the visibility graph's sparse slot table to avoid large per-rebuild
+  arrays; measure allocation and camera-movement work against native storage.
+- [x] Reduce avoidable LOD scheduling/draw-submission work while keeping the
+  accepted distant appearance and prompt near-detail restoration.
+- [x] Pass deterministic concurrency/lifecycle/equivalence checks and a full build;
+  use brief NORMAL-world, 128/16, Default/Metal checks for integration.
+
+Scope: bookkeeping and renderer overhead. Whole loaded chunks, server generation,
+initial tessellation and simulation are separate scaling costs; report measured
+allocation/CPU improvements separately from whole-game FPS or total resident RAM.
+
+Validation: the complete Metal-validation build passes in 20 seconds. Native
+storage parity, actual dirty-state construction, edits, negative coordinates,
+teleport recycling, concurrency and graph-array equivalence pass. The allocation
+probe measures 69,747,864 → 25,000 bytes for empty dirty bookkeeping, and
+6,340,720 → 24,824 bytes for an empty visibility table. A 4,356-resident-entry
+camera-movement fixture measures 4.338 → 0.034 ms median.
+
+Initial live attempts caught deferred native dirty-state positioning; creation now
+initializes the node explicitly, with regression coverage using the actual native
+class. The final 18.74-second NORMAL-world 128/16 route passes quarter-resolution
+shading, toggle, resize, approach, retreat, radius expansion and world close.
+It records 11,955 render entries and 18,185 dirty entries out of 1,585,176 logical
+slots. Images were inspected; no Metal validation error occurred. Whole-game FPS
+and fully loaded 128-distance RAM were not benchmarked. Travel can eventually
+populate the ring; native chunk memory remains. [Evidence](evidence/high-distance-cleanup/README.md).
+
+## Distant pixel resolution — September 20
+
+Owner: Codex. Status: implemented and validated for the None/default Metal path. The current task requires actual reduced
+shading resolution, beyond mesh simplification and atlas mip selection.
+
+- [x] Render eligible distant solid terrain into half/quarter linear-resolution
+  Metal targets, grouped by tier; retain full-resolution near terrain.
+- [x] Reconstruct color with native full-resolution geometry coverage/depth and
+  depth-checked fallback shading at discontinuities; restore on approach/zoom.
+- [x] Verify resize, odd sizes, resource lifetime, disabled/unsupported fallback,
+  and reduced pixel counts with Metal readback and the full build.
+- [x] Run one short standard-world route at render distance 128 using Default/Metal;
+  inspect images and record measured performance and remaining scaling limits.
+
+Engine reference: Unreal's screen-percentage rendering reduces shaded pixel count
+before reconstruction ([Epic documentation](https://dev.epicgames.com/documentation/unreal-engine/temporal-super-resolution-in-unreal-engine)). This design
+uses spatial reconstruction without temporal history or motion-vector dependencies.
+Native depth rasterization preserves terrain silhouettes and subsequent occlusion.
+
+
+Validation: `MTL_DEBUG_LAYER=1 ./gradlew build` passes in 21 seconds on Apple M4 Max.
+Metal readback proves half/quarter sample reuse at even, odd and 1×1 dimensions,
+exact full-resolution sloped depth, absent/wrong-depth fallback, and retirement
+before GPU completion. UV gradients are captured before divergent reconstruction
+so fallback texture filtering remains defined. The 20.04-second NORMAL-world route
+at 128/16, Threaded, Default/Metal confirms real 320×180 targets at 1280×720,
+1279×719 resize, disable/reenable, approach, expanded native radius and level zero.
+Images were inspected. The final derivative/guard hardening passed the GPU suite;
+no second live run was needed.
+
+The optional 4K actual-terrain-material probe uses equal mip floors, ten warmup
+pairs and 31 alternating measured pairs, including target clear/store/load and
+reconstruction. Quarter resolution with RGSS costs 0.1786 ms versus 0.2293 ms
+(22.1% lower); half costs 0.2453 ms (7.0% higher). Non-RGSS is cheaper than either
+reconstruction path. These results qualify a shader-work tradeoff, not a dense-128
+FPS gain or a universal speedup. The independent pixel-resolution toggle permits
+comparison without changing geometry. Other packs retain full-resolution shading;
+no memoryless G-buffer/deferred-lighting or water contract is changed. Native
+chunk loading, initial compilation, simulation and per-section draw submission
+still scale with distance. [Evidence](evidence/native-pixel-lod/README.md).
+
 ## Large-distance performance follow-up — September 19
 
 Owner: Codex. Status: implemented and validated. Changes target the active native chunk path;
