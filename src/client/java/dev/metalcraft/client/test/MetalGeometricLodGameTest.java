@@ -20,6 +20,7 @@ import net.minecraft.core.BlockPos;
 /** Same-camera 0/5/0 visual comparison on actual one-block steps in a NORMAL generated world. */
 final class MetalGeometricLodGameTest {
     static void run(ClientGameTestContext context) {
+        context.runOnClient(c -> LightStorageRuntimeCheck.run());
         boolean pixelTest = Boolean.getBoolean("metalcraft.terrainResolutionTest");
         boolean savedPixels = MetalCraftConfig.nativeLodPixels();
         int savedDistance = context.computeOnClient(c -> c.options.renderDistance().get());
@@ -58,6 +59,17 @@ final class MetalGeometricLodGameTest {
                 world.getServer().runCommand("time set noon"); world.getServer().runCommand("weather clear");
                 context.getInput().lookAt(-110, 10);
                 context.waitFor(c -> c.level.getChunkSource().hasChunk(center.x() + 9, center.z() + 1), 900);
+                // Exercise live publication/removal, not just map-level snapshot identity.
+                BlockPos lightProbe = new BlockPos(cameraX, 200, cameraZ);
+                world.getServer().runCommand("setblock " + cameraX + " 199 " + cameraZ + " minecraft:stone");
+                world.getServer().runCommand("setblock " + cameraX + " 200 " + cameraZ + " minecraft:torch");
+                context.waitFor(c -> c.level.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, lightProbe) == 14
+                        && c.level.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, lightProbe.above()) == 13, 100);
+                world.getServer().runCommand("setblock " + cameraX + " 200 " + cameraZ + " minecraft:air");
+                world.getServer().runCommand("setblock " + cameraX + " 199 " + cameraZ + " minecraft:air");
+                context.waitFor(c -> c.level.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, lightProbe) == 0
+                        && c.level.getBrightness(net.minecraft.world.level.LightLayer.SKY, lightProbe.below()) == 15, 100);
+                report.put("lightingPlacementRemovalAndSkyRestoration", true);
                 for (int x = 0; x < 32; x++) world.getServer().runCommand("fill " + (targetX + x) + " 145 " + (targetZ + 1)
                         + " " + (targetX + x) + " " + (145 + x) + " " + (targetZ + 30) + " minecraft:stone");
                 context.waitFor(c -> uploaded(c, marker, 1), 600);

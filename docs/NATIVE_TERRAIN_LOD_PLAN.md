@@ -1,5 +1,54 @@
 # Native terrain surface LOD
 
+## Heap-pressure correction — September 20
+
+Owner: Codex. Status: implemented and validated following real gameplay reaching
+its 16 GiB heap limit and missing-chunk reports after the frame-pacing patch.
+
+- [x] Roll back the frame-pacing patch's runtime changes and restore native rebuild intake.
+- [x] Profile a copy of the user's latest world at 128/16 and a 16 GiB heap.
+- [x] Replace whole lighting-map snapshot copies with isolated sharing of unchanged data.
+- [x] Verify snapshot mutation isolation, removals, concurrency/publication and allocation
+  scaling, then validate the real workload and renderer without increasing the heap.
+
+JFR identified sky/block lighting-map snapshot cloning as the dominant allocation
+source. A 30-second copied-save comparison at 3840×2160, Default/Metal, 128/16 and
+`-Xmx16G` reduced sampled peak used heap from 15.56 to 8.49 GiB, GC pause time from
+2.30 to 0.62 seconds, and worst frame from 380 to 130 ms. Average FPS was essentially
+unchanged (30.4 vs 29.7); 1% low improved from 5.2 to 9.1. The optimized run rendered
+4.4% more sections, so this is a loading/stutter comparison, not a fixed-workload FPS
+claim or a long-session memory ceiling.
+
+The full Metal-validation build and a 19.78-second NORMAL-world 128/16 route pass,
+including live torch edits, sky restoration, LOD approach/retreat/disable, resize and
+world close. Snapshot plus 64 edits at 262,144 entries allocates 98.1% less memory.
+No view-dependent chunk eviction was introduced. [Evidence](evidence/lighting-heap/README.md).
+
+## Gameplay frame pacing — September 20
+
+Owner: Codex. Status: rolled back after user-reported missing chunks and no real FPS
+improvement. Results below are historical, not evidence of a shipped improvement.
+
+- [x] Bound distant compiler snapshot intake and queue growth; retain dirty work
+  for later frames and prioritize nearby sections/player edits.
+- [x] Remove repeated terrain matrix/enum allocations and redundant vertex binds;
+  use Metal offset updates for successive uniforms in the same buffer.
+- [x] Verify scheduling limits, GPU output/state transitions, full build, and a
+  brief NORMAL-world 128/16 Default/Metal route with performance evidence.
+
+Off-screen terrain is already frustum culled. This change limits pending snapshot
+memory; it does not evict full world chunks or promise a fully loaded 128-distance
+FPS gain. Immediate mesh eviction on camera turns would force remeshing.
+
+Validation: full Metal-validation build passes in 20 seconds. A 32.70-second
+NORMAL-world 128/16 route passes restoration/lifecycle checks. Its fixed 827-section
+ABBA comparison measures 27.1% less command-submission CPU time, 33.1% fewer command
+bytes and 15.0% lower median CPU frame time. Invalidation intake falls from 827 to
+16 distant snapshots/frame; all 827 complete in each phase. Displayed FPS remains
+about 120, limited by presentation. The earlier growing-world timing is excluded
+from FPS comparison. No fully loaded 128-distance FPS or process-memory improvement
+is claimed. [Evidence and reproduction](evidence/terrain-frame-work/README.md).
+
 ## High-distance CPU and RAM cleanup — September 20
 
 Owner: Codex. Status: implemented and validated, following the report that reduced pixel

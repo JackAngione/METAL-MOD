@@ -1,0 +1,53 @@
+{
+  "lightingPlacementRemovalAndSkyRestoration": true,
+  "coarseTextureMip": 2,
+  "pixelResolution": {
+    "sceneWidth": 1280,
+    "sceneHeight": 720,
+    "halfWidth": 0,
+    "halfHeight": 0,
+    "quarterWidth": 320,
+    "quarterHeight": 180,
+    "halfDraws": 0,
+    "quarterDraws": 27731
+  },
+  "logicalSectionSlots": 1585176,
+  "residentRenderSections": 11685,
+  "residentDirtyStates": 17633,
+  "renderStoragePages": 583,
+  "dirtyStoragePages": 654,
+  "resizedPixelResolution": {
+    "sceneWidth": 1279,
+    "sceneHeight": 719,
+    "halfWidth": 0,
+    "halfHeight": 0,
+    "quarterWidth": 320,
+    "quarterHeight": 180,
+    "halfDraws": 0,
+    "quarterDraws": 44813
+  },
+  "approachNativeRestoredSeconds": 0.026234292,
+  "approachTextureRestored": true,
+  "retreatCoarseRestored": true,
+  "expandedRadiusRestoresNative": true,
+  "world": "NORMAL / metalcraft",
+  "backend": "Metal",
+  "renderDistance": 128,
+  "simulationDistance": 16,
+  "chunkBuilder": "Threaded",
+  "sameCameraSequence": "0 -\u003e 5 -\u003e 0",
+  "selectedCell": 4,
+  "nativeIndices": 4950,
+  "coarseIndices": 1206,
+  "nativeRestored": true,
+  "stats": {
+    "builds": 1350,
+    "originalQuads": 533350,
+    "outputQuads": 318113,
+    "workerNanos": 328540131,
+    "geometricBuilds": 875,
+    "movedVertices": 837658
+  },
+  "elapsedSeconds": 19.775097916,
+  "worldClosed": true
+}

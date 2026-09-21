@@ -282,3 +282,11 @@ tasks.register('sectionStorageSmoke', JavaExec) {
     maxHeapSize = '256m'
 }
 tasks.named('check') { dependsOn tasks.named('sectionStorageSmoke') }
+
+tasks.register('lightSectionSnapshotsSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.chunk.LightSectionSnapshotsSmoke'
+    maxHeapSize = '512m'
+}
+tasks.named('check') { dependsOn tasks.named('lightSectionSnapshotsSmoke') }
