@@ -1,0 +1,32 @@
+
+> Configure project :
+Fabric Loom: 1.17.21
+
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava UP-TO-DATE
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses UP-TO-DATE
+> Task :compileShaderSmokeJava UP-TO-DATE
+> Task :processShaderSmokeResources NO-SOURCE
+> Task :shaderSmokeClasses UP-TO-DATE
+
+> Task :terrainResolutionBenchmark
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by dev.metalcraft.client.metal.MetalNative in an unnamed module (file:/Users/jackangione/Desktop/VULKAN%20SHADERS/build/classes/java/client/)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.lwjgl.system.MemoryUtil (file:/Users/jackangione/.gradle/caches/modules-2/files-2.1/org.lwjgl/lwjgl/3.4.1/129e06a04f93992cb2a45172435b21fc4b60dd7d/lwjgl-3.4.1-unsafe.jar)
+WARNING: Please consider reporting this to the maintainers of class org.lwjgl.system.MemoryUtil
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+4K actual vanilla terrain material, RGSS=0 scale=1/2 native=0.1188 ms reduced=0.2420 ms change=103.8% samples=[0.09025, 0.090291, 0.090291, 0.090666, 0.091584, 0.094709, 0.117875, 0.118, 0.118291, 0.118334, 0.118416, 0.118459, 0.1185, 0.1185, 0.118541, 0.11875, 0.11875, 0.11875, 0.118834, 0.11925, 0.119625, 0.11975, 0.120125, 0.120291, 0.14325, 0.174416, 0.174541, 0.175291, 0.175459, 0.181666, 0.20025] reducedSamples=[0.20525, 0.205916, 0.212041, 0.233625, 0.234459, 0.235334, 0.235625, 0.23825, 0.238375, 0.238959, 0.239041, 0.239084, 0.239584, 0.240041, 0.241291, 0.242, 0.242625, 0.243791, 0.24575, 0.247875, 0.249916, 0.251375, 0.253791, 0.255334, 0.306584, 0.321166, 0.32225, 0.329625, 0.335209, 0.338375, 0.362375]
+4K actual vanilla terrain material, RGSS=0 scale=1/4 native=0.0901 ms reduced=0.1643 ms change=82.2% samples=[0.089375, 0.089584, 0.089709, 0.08975, 0.089834, 0.089875, 0.089875, 0.089875, 0.089916, 0.09, 0.09, 0.09, 0.09, 0.090041, 0.090125, 0.090125, 0.090125, 0.090375, 0.090459, 0.090584, 0.090666, 0.091, 0.091125, 0.091125, 0.091291, 0.091334, 0.0915, 0.0915, 0.092209, 0.162375, 0.208375] reducedSamples=[0.154, 0.15425, 0.1545, 0.156041, 0.156084, 0.15625, 0.156416, 0.156709, 0.157875, 0.158875, 0.159084, 0.1595, 0.159625, 0.16, 0.162125, 0.16425, 0.164959, 0.165334, 0.166125, 0.169459, 0.170291, 0.170541, 0.172041, 0.173625, 0.17575, 0.180625, 0.184916, 0.198875, 0.201584, 0.2295, 0.301584]
+4K actual vanilla terrain material, RGSS=1 scale=1/2 native=0.2293 ms reduced=0.2453 ms change=7.0% samples=[0.228375, 0.2285, 0.228625, 0.228625, 0.228625, 0.22875, 0.228791, 0.228875, 0.228875, 0.228916, 0.229084, 0.229125, 0.229125, 0.229209, 0.22925, 0.22925, 0.22925, 0.229334, 0.229375, 0.229416, 0.229625, 0.229625, 0.22975, 0.229916, 0.229959, 0.230209, 0.230375, 0.230459, 0.292, 0.314625, 0.353334] reducedSamples=[0.238584, 0.239166, 0.239625, 0.240209, 0.240709, 0.240916, 0.241166, 0.24175, 0.242041, 0.242375, 0.242625, 0.242625, 0.243959, 0.244375, 0.244625, 0.245334, 0.245625, 0.246459, 0.24675, 0.24725, 0.247625, 0.247834, 0.248709, 0.249416, 0.24975, 0.250125, 0.25175, 0.2835, 0.3135, 0.386334, 0.39675]
+4K actual vanilla terrain material, RGSS=1 scale=1/4 native=0.2293 ms reduced=0.1786 ms change=-22.1% samples=[0.228041, 0.228416, 0.228459, 0.2285, 0.2285, 0.228625, 0.228709, 0.228709, 0.228875, 0.228875, 0.228959, 0.229, 0.229, 0.229125, 0.229209, 0.22925, 0.22925, 0.22925, 0.229291, 0.229291, 0.229375, 0.229541, 0.229541, 0.229625, 0.229834, 0.229959, 0.23, 0.230084, 0.230125, 0.230875, 0.4095] reducedSamples=[0.163125, 0.16475, 0.165541, 0.165834, 0.166375, 0.167709, 0.167959, 0.168209, 0.168541, 0.171625, 0.174209, 0.175541, 0.176541, 0.177375, 0.178584, 0.178625, 0.179125, 0.17975, 0.181125, 0.18125, 0.183459, 0.18825, 0.189916, 0.193875, 0.200875, 0.204375, 0.210459, 0.215791, 0.252, 0.25725, 0.300875]
+
+BUILD SUCCESSFUL in 1s
+6 actionable tasks: 1 executed, 5 up-to-date

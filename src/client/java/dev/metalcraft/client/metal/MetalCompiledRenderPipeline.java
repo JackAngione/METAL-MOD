@@ -127,6 +127,14 @@ final class MetalCompiledRenderPipeline implements CompiledRenderPipeline, AutoC
 		return slot >= 0 && slot < this.textureStages.length ? this.textureStages[slot] : 0;
 	}
 
+    /** Pipeline changes preserve Metal argument tables. Reserved LOD slots are bound separately. */
+    boolean sharesTerrainBindings(MetalCompiledRenderPipeline other) {
+        if (other == null || this.info != other.info) return false;
+        for (int slot = 0; slot < 14; slot++)
+            if (this.bufferStages[slot] != other.bufferStages[slot] || this.textureStages[slot] != other.textureStages[slot]) return false;
+        return true;
+    }
+
 	RenderPipeline info() {
 		return this.info;
 	}

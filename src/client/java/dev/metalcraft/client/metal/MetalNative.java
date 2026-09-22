@@ -66,6 +66,10 @@ public final class MetalNative {
 	static native String nDeviceName(long handle);
 
 	static native long nRecommendedWorkingSet(long handle);
+	static native long nCurrentAllocatedSize(long handle);
+	static native void nStartAllocationProbe(long handle);
+	static native void nStopAllocationProbe(long handle);
+	static native long[] nAllocationProbe(long handle);
 
 	static native long nCreateCommandQueue(long deviceHandle);
 
@@ -73,6 +77,11 @@ public final class MetalNative {
 
 	/** Drains GPU busy time from completed command buffers into {@code destination} as {nanos, count}. */
 	static native void nTakeGpuWork(long[] destination);
+	static native void nBeginGpuFrameCapture();
+	static native void nBeginGpuCaptureFrame();
+	static native void nEndGpuCaptureFrame();
+	static native long[] nEndGpuFrameCapture();
+	static native long[] nProcessMemoryAndThermalState();
 
 	/**
 	 * Drains per-pass GPU time into {@code destination} as {nanos, count} for each pass kind.
@@ -156,6 +165,8 @@ public final class MetalNative {
 
 	static native void nBlitTextureToDrawable(long commandBufferHandle, long textureHandle, long drawableHandle);
 
+	static native int nWindowPresentationState(long cocoaWindow);
+
 	static native long nCreateFence(long deviceHandle);
 
 	static native void nSignalFence(long commandBufferHandle, long fenceHandle, long value);
@@ -200,7 +211,8 @@ public final class MetalNative {
 		int addressModeU,
 		int addressModeV,
 		int maxAnisotropy,
-		double maxLod
+		double maxLod,
+		double minLod
 	);
 
 	static native long nCreateRenderPipeline(

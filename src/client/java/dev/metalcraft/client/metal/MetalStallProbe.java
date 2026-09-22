@@ -167,7 +167,9 @@ public final class MetalStallProbe {
 		 * blocked acquire does, and without a column for it every such frame would be reported as
 		 * unattributed.
 		 */
-		JVM_GC;
+		JVM_GC,
+		/** Loaded-terrain selection and bounded uploads before dispatcher locking. */
+		LOD_PREPARE;
 
 		static final Source[] VALUES = values();
 

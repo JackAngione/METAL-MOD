@@ -335,6 +335,20 @@ public final class MetalRenderPass implements AutoCloseable {
 	}
 
 	public synchronized void setPipeline(final MetalRenderPipeline pipeline) {
+		this.validatePipeline(pipeline);
+		MetalNative.nSetRenderPipeline(this.requireOpenHandle(), pipeline.requireOpenHandle());
+		this.pipelineBound = true;
+	}
+
+	/** Preserve draw order without forcing an early JNI batch submission. */
+	synchronized void recordPipeline(final MetalCommandStream commands, final MetalRenderPipeline pipeline) {
+		this.requireOpenHandle();
+		this.requirePipeline();
+		this.validatePipeline(pipeline);
+		commands.setPipeline(pipeline);
+	}
+
+	private void validatePipeline(final MetalRenderPipeline pipeline) {
 		if (pipeline == null) {
 			throw new NullPointerException("pipeline");
 		}
@@ -361,8 +375,6 @@ public final class MetalRenderPass implements AutoCloseable {
 				);
 			}
 		}
-		MetalNative.nSetRenderPipeline(this.requireOpenHandle(), pipeline.requireOpenHandle());
-		this.pipelineBound = true;
 	}
 
 	public synchronized void setScissor(final int x, final int y, final int width, final int height) {

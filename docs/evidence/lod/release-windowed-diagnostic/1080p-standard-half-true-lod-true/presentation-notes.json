@@ -1,0 +1,59 @@
+{
+  "scope": "Observed interval/acquire behavior; matching requested controls do not prove matching presentation pacing",
+  "phases": [
+    {
+      "phase": "stationary#1",
+      "p50CpuMs": 5.444,
+      "p50IntervalMs": 8.301,
+      "averageAcquireMs": 2.5483475336322874
+    },
+    {
+      "phase": "pan#1",
+      "p50CpuMs": 4.591,
+      "p50IntervalMs": 8.3,
+      "averageAcquireMs": 3.3523839285714283
+    },
+    {
+      "phase": "traversal#1",
+      "p50CpuMs": 6.205,
+      "p50IntervalMs": 8.318,
+      "averageAcquireMs": 1.8645114155251141
+    },
+    {
+      "phase": "stationary#2",
+      "p50CpuMs": 5.915,
+      "p50IntervalMs": 8.308,
+      "averageAcquireMs": 2.133044843049327
+    },
+    {
+      "phase": "pan#2",
+      "p50CpuMs": 5.006,
+      "p50IntervalMs": 8.273,
+      "averageAcquireMs": 2.9785835189309577
+    },
+    {
+      "phase": "traversal#2",
+      "p50CpuMs": 6.248,
+      "p50IntervalMs": 8.323,
+      "averageAcquireMs": 1.7322171945701357
+    },
+    {
+      "phase": "stationary#3",
+      "p50CpuMs": 6.009,
+      "p50IntervalMs": 8.298,
+      "averageAcquireMs": 2.068807606263982
+    },
+    {
+      "phase": "pan#3",
+      "p50CpuMs": 5.052,
+      "p50IntervalMs": 8.291,
+      "averageAcquireMs": 3.006884187082405
+    },
+    {
+      "phase": "traversal#3",
+      "p50CpuMs": 6.288,
+      "p50IntervalMs": 8.315,
+      "averageAcquireMs": 1.738921524663677
+    }
+  ]
+}

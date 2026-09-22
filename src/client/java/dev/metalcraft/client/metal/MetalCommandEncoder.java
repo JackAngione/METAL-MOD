@@ -39,6 +39,8 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	private final List<AutoCloseable> temporaryResources = new ArrayList<>();
 	private final List<Runnable> completionCallbacks = new ArrayList<>();
 	private MetalCommandBuffer commands;
+	private @Nullable MetalFence resourceCompletion;
+	private long resourceSubmission;
 	private MetalRenderPass renderPass;
 	/** The attachments {@link #renderPass} was opened against, for {@link #canMerge}. */
 	private MetalRenderPass.Descriptor renderPassDescriptor;
@@ -80,6 +82,19 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	@Override
 	public TransientMemory transientMemory() {
 		return this.transientMemory;
+	}
+
+	/** Render-owner only. Reserving ownership must not split an active or merged render pass. */
+	long reserveResourceSubmission() {
+		if (this.closed) throw new IllegalStateException("Metal command encoder is closed");
+		if (this.resourceCompletion == null) this.resourceCompletion = this.device.metal().createFence();
+		if (this.resourceSubmission == 0) this.resourceSubmission = this.resourceCompletion.reserveValue();
+		return this.resourceSubmission;
+	}
+
+	long completedResourceSubmission() {
+		if (this.closed) throw new IllegalStateException("Metal command encoder is closed");
+		return this.resourceCompletion == null ? 0 : this.resourceCompletion.completedValue();
 	}
 
 	@Override
@@ -154,7 +169,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		this.renderPassDescriptor = next;
 		RenderPass.RenderArea area = descriptor.renderArea;
 		this.renderPass.setScissor(area.x(), area.y(), area.width(), area.height());
-		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device);
+		if (this.renderPassBackend == null) this.renderPassBackend = new MetalRenderPassBackend(this.device, this);
 		MetalGpuTextureView sizeView = firstColorView != null ? firstColorView : depthView;
 		MetalLinearWorldSession session = this.device.linearWorldSession();
 		boolean hdrOwned = session != null && session.ownsTranslated(firstColorView, depthView);
@@ -164,6 +179,39 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 			hdrOwned);
 		return this.renderPassBackend;
 	}
+
+    /** Only stored, single-color world attachments may be suspended for distant shading. */
+    boolean supportsTerrainResolution() {
+        var d = this.renderPassDescriptor;
+        return d != null && d.colorAttachments().size() == 1 && d.colorAttachment() != null
+            && d.colorAttachment().storeAction() == MetalRenderPass.StoreAction.STORE
+            && d.colorAttachment().arraySlice() == 0 && d.colorAttachment().mipLevel() == 0
+            && d.depthAttachment() != null && d.depthAttachment().texture().descriptor().format() == MetalTexture.Format.DEPTH32_FLOAT
+            && d.depthAttachment().mipLevel() == 0
+            && d.depthAttachment().arraySlice() == 0
+            && d.depthAttachment().storeAction() == MetalRenderPass.StoreAction.STORE && !d.isLayered();
+    }
+
+    MetalRenderPass terrainBand(MetalTerrainResolution.Band band) {
+        this.renderPass.close();
+        this.renderPass = this.commands.beginRenderPass(band.descriptor, MetalPassCensus.kindFor("Terrain reduced shading"));
+        return this.renderPass;
+    }
+
+    MetalRenderPass resumeTerrainScene() {
+        this.renderPass.close();
+        var color = this.renderPassDescriptor.colorAttachment();
+        var depth = this.renderPassDescriptor.depthAttachment();
+        // The original clear already happened. Resuming must preserve both attachments.
+        var resumed = new MetalRenderPass.Descriptor(
+            new MetalRenderPass.ColorAttachment(color.target(), color.mipLevel(), MetalRenderPass.LoadAction.LOAD,
+                MetalRenderPass.StoreAction.STORE, 0, 0, 0, 0),
+            new MetalRenderPass.DepthAttachment(depth.texture(), depth.mipLevel(), MetalRenderPass.LoadAction.LOAD,
+                MetalRenderPass.StoreAction.STORE, 0));
+        this.renderPass = this.commands.beginRenderPass(resumed, MetalPassCensus.kindFor("Terrain reconstruction"));
+        this.renderPassDescriptor = resumed;
+        return this.renderPass;
+    }
 
 	@Override
 	public void submitRenderPass() {
@@ -494,6 +542,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (!this.closed) {
 			this.finishSubmission(true);
 			this.transientMemory.close();
+			if (this.resourceCompletion != null) this.resourceCompletion.close();
 			this.closed = true;
 		}
 	}
@@ -561,6 +610,12 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	private void finishSubmission(final boolean wait) {
 		if (this.renderPass != null) throw new IllegalStateException("Cannot submit with an active Metal render pass");
 		this.endDeferredRenderPass();
+		// A reservation can outlive a declined draw. Signal even an otherwise empty
+		// submission, so retired resources never remain charged for an abandoned borrow.
+		if (this.resourceSubmission != 0) {
+			if (this.commands == null) this.commands = this.commandQueue.createCommandBuffer();
+			this.commands.signal(this.resourceCompletion, this.resourceSubmission);
+		}
 		MetalCommandBuffer submitted = this.commands;
 		boolean completed = wait || !this.completionCallbacks.isEmpty();
 		if (submitted != null) {
@@ -574,6 +629,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		boolean retainedByTransientMemory = this.transientMemory.finishSubmission(submitted, completed);
 		if (submitted != null && !retainedByTransientMemory) submitted.close();
 		this.commands = null;
+		this.resourceSubmission = 0;
 		for (Runnable callback : this.completionCallbacks) callback.run();
 		this.completionCallbacks.clear();
 		for (AutoCloseable resource : this.temporaryResources) close(resource);

@@ -1,0 +1,432 @@
+{
+  "scope": "Focused Standard/full preparation probe; paired stationary explored patches, not dense circles; three repeats; median of repeat percentiles",
+  "resourceScope": "GPU high-water is successful charged mesh payload including retired resources, not driver allocations; disk high-water includes temporary owned file payload before rename/trim, not filesystem metadata; store latency is completed worker batches, not queue wait",
+  "explorationElapsedNanos": 48682841292,
+  "exploredDiagnostics": {
+    "peakGpuPayloadBytes": 2205504,
+    "cache": {
+      "peakQueuedBytes": 9022268,
+      "store": {
+        "peakDiskPayloadBytes": 56267284,
+        "updateBatches": 160,
+        "updateNanos": 46455264664,
+        "maxUpdateNanos": 900420458
+      }
+    }
+  },
+  "readinessWaitNanos": {
+    "explore": [
+      42531649541
+    ],
+    "horizon 32": [
+      49952250
+    ],
+    "re-enabled distant ownership": [
+      354669667
+    ],
+    "horizon 64": [
+      43889375
+    ],
+    "horizon 128": [
+      46355000
+    ],
+    "benchmark warm cache": [
+      11399415708,
+      16791,
+      11501060625,
+      10003159958,
+      20458,
+      8948270167
+    ],
+    "horizon 256": [
+      48032708
+    ],
+    "edited leaf persistence": [
+      3493227417
+    ],
+    "revisited terrain repair": [
+      57846702709
+    ],
+    "repeated edit persistence": [
+      302876833,
+      342625834,
+      554920583
+    ],
+    "edited distant view": [
+      56750
+    ],
+    "resource reload": [
+      593633791
+    ],
+    "dimension return": [
+      243798459
+    ],
+    "persisted world reopen": [
+      350852958
+    ],
+    "clear cache": [
+      435129291
+    ]
+  },
+  "repeatedRepairs": [
+    {
+      "elapsedNanos": 305310625,
+      "stats": {
+        "cache": {
+          "ready": true,
+          "captured": 2224,
+          "saved": 2102,
+          "cacheReads": 20954,
+          "dropped": 0,
+          "failures": 0,
+          "queuedBytes": 0,
+          "queuedNodes": 0,
+          "diskBytes": 103264337,
+          "corrupt": 0,
+          "evictions": 0,
+          "indexedNodes": 3158
+        },
+        "draws": 4041778,
+        "triangles": 32096808064,
+        "uploads": 825,
+        "uploadBytes": 488156480,
+        "uploadFailures": 0,
+        "gpuBytes": 28184576,
+        "residentNodes": 24,
+        "frameDraws": 4,
+        "frameSections": 4,
+        "frameFarthestBlocks": 1547.287899637495
+      },
+      "entry": {
+        "receivedRevision": 131886,
+        "persistedRevision": 131886,
+        "stored": true
+      },
+      "block": "diamond_block",
+      "diagnostics": {
+        "peakGpuPayloadBytes": 122618048,
+        "cache": {
+          "peakQueuedBytes": 4305231,
+          "store": {
+            "peakDiskPayloadBytes": 103266301,
+            "updateBatches": 248,
+            "updateNanos": 75635513381,
+            "maxUpdateNanos": 1016808125
+          }
+        }
+      }
+    },
+    {
+      "elapsedNanos": 344272041,
+      "stats": {
+        "cache": {
+          "ready": true,
+          "captured": 2237,
+          "saved": 2115,
+          "cacheReads": 20958,
+          "dropped": 0,
+          "failures": 0,
+          "queuedBytes": 0,
+          "queuedNodes": 0,
+          "diskBytes": 103264333,
+          "corrupt": 0,
+          "evictions": 0,
+          "indexedNodes": 3158
+        },
+        "draws": 4041994,
+        "triangles": 32097851452,
+        "uploads": 825,
+        "uploadBytes": 488156480,
+        "uploadFailures": 0,
+        "gpuBytes": 28184576,
+        "residentNodes": 24,
+        "frameDraws": 4,
+        "frameSections": 4,
+        "frameFarthestBlocks": 1547.287899637495
+      },
+      "entry": {
+        "receivedRevision": 218931,
+        "persistedRevision": 218931,
+        "stored": true
+      },
+      "block": "emerald_block",
+      "diagnostics": {
+        "peakGpuPayloadBytes": 122618048,
+        "cache": {
+          "peakQueuedBytes": 4305231,
+          "store": {
+            "peakDiskPayloadBytes": 103266301,
+            "updateBatches": 250,
+            "updateNanos": 75919290047,
+            "maxUpdateNanos": 1016808125
+          }
+        }
+      }
+    },
+    {
+      "elapsedNanos": 556479334,
+      "stats": {
+        "cache": {
+          "ready": true,
+          "captured": 2254,
+          "saved": 2132,
+          "cacheReads": 20964,
+          "dropped": 0,
+          "failures": 0,
+          "queuedBytes": 0,
+          "queuedNodes": 0,
+          "diskBytes": 103263905,
+          "corrupt": 0,
+          "evictions": 0,
+          "indexedNodes": 3158
+        },
+        "draws": 4042334,
+        "triangles": 32099493822,
+        "uploads": 825,
+        "uploadBytes": 488156480,
+        "uploadFailures": 0,
+        "gpuBytes": 28184576,
+        "residentNodes": 24,
+        "frameDraws": 4,
+        "frameSections": 4,
+        "frameFarthestBlocks": 1547.287899637495
+      },
+      "entry": {
+        "receivedRevision": 306028,
+        "persistedRevision": 306028,
+        "stored": true
+      },
+      "block": "gold_block",
+      "diagnostics": {
+        "peakGpuPayloadBytes": 122618048,
+        "cache": {
+          "peakQueuedBytes": 4305231,
+          "store": {
+            "peakDiskPayloadBytes": 103266301,
+            "updateBatches": 253,
+            "updateNanos": 76445218714,
+            "maxUpdateNanos": 1016808125
+          }
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "horizon": 128,
+      "pack": "metalcraft-standard",
+      "halfResolution": false,
+      "drawable": [
+        3840,
+        2160
+      ],
+      "off": {
+        "p50CpuMs": 2.567,
+        "p95CpuMs": 2.832,
+        "p99CpuMs": 2.95,
+        "p50IntervalMs": 2.771,
+        "p99IntervalMs": 11.89,
+        "onePercentLowFps": 78.62,
+        "gpuP50Ms": 1.834125,
+        "gpuP95Ms": 2.198125,
+        "gpuP99Ms": 2.349041,
+        "minimumGpuSampleCoverage": 0.9989154013015185,
+        "representedSectionsRange": [
+          0,
+          0
+        ],
+        "maxSampledDistantGpuBytes": 0,
+        "maxSampledDiskBytes": 0,
+        "maxDistantGpuPayloadHighWaterBytes": 122618048,
+        "maxCompressedQueueHighWaterBytes": 0,
+        "maxDiskPayloadHighWaterBytes": 0,
+        "maxStoreUpdateMs": 0.0,
+        "maxProcessPeakPhysicalFootprintBytes": 5159423912,
+        "thermalStates": [
+          0,
+          0,
+          0
+        ],
+        "p95LodPrepareMs": 0.003625,
+        "prepareTimingScope": "Loaded and distant frame maintenance, selection, uniforms and uploads; excludes workers and GPU execution",
+        "discardedPresentationAttempts": 0,
+        "discardedPresentationFrames": 0,
+        "distantTrianglesPerCapturedFrameIncludingWarmup": 0.0,
+        "medianIntervalRangeMs": [
+          2.18,
+          2.81
+        ]
+      },
+      "on": {
+        "p50CpuMs": 2.987,
+        "p95CpuMs": 3.3,
+        "p99CpuMs": 3.701,
+        "p50IntervalMs": 3.249,
+        "p99IntervalMs": 12.507,
+        "onePercentLowFps": 75.39,
+        "gpuP50Ms": 2.10925,
+        "gpuP95Ms": 2.487375,
+        "gpuP99Ms": 2.6445,
+        "minimumGpuSampleCoverage": 0.9988023952095808,
+        "representedSectionsRange": [
+          1001,
+          1001
+        ],
+        "maxSampledDistantGpuBytes": 67108832,
+        "maxSampledDiskBytes": 76282979,
+        "maxDistantGpuPayloadHighWaterBytes": 122618048,
+        "maxCompressedQueueHighWaterBytes": 4267938,
+        "maxDiskPayloadHighWaterBytes": 76282979,
+        "maxStoreUpdateMs": 481.650334,
+        "maxProcessPeakPhysicalFootprintBytes": 5395451840,
+        "thermalStates": [
+          0,
+          0,
+          0
+        ],
+        "p95LodPrepareMs": 0.164958,
+        "prepareTimingScope": "Loaded and distant frame maintenance, selection, uniforms and uploads; excludes workers and GPU execution",
+        "discardedPresentationAttempts": 0,
+        "discardedPresentationFrames": 0,
+        "distantTrianglesPerCapturedFrameIncludingWarmup": 1241375.7799043062,
+        "medianIntervalRangeMs": [
+          3.244,
+          3.451
+        ]
+      },
+      "changePercent": {
+        "p50CpuMs": 16.361511492014014,
+        "p99CpuMs": 25.457627118644055,
+        "p50IntervalMs": 17.25009022013715,
+        "p99IntervalMs": 5.189234650967189,
+        "gpuP50Ms": 15.000340761943697,
+        "gpuP95Ms": 13.15894228035257,
+        "gpuP99Ms": 12.577856240057095
+      },
+      "pairedRepeatChangePercent": [
+        {
+          "p50IntervalMs": 49.03669724770641,
+          "p99IntervalMs": 5.189234650967189
+        },
+        {
+          "p50IntervalMs": 15.44483985765126,
+          "p99IntervalMs": 6.7125499192794535
+        },
+        {
+          "p50IntervalMs": 24.53987730061351,
+          "p99IntervalMs": 0.5091566067175979
+        }
+      ],
+      "withinProvisionalMedianBudget": true,
+      "withinProvisionalP99Budget": true
+    },
+    {
+      "horizon": 256,
+      "pack": "metalcraft-standard",
+      "halfResolution": false,
+      "drawable": [
+        3840,
+        2160
+      ],
+      "off": {
+        "p50CpuMs": 2.363,
+        "p95CpuMs": 2.684,
+        "p99CpuMs": 2.841,
+        "p50IntervalMs": 2.596,
+        "p99IntervalMs": 12.035,
+        "onePercentLowFps": 78.3,
+        "gpuP50Ms": 1.51775,
+        "gpuP95Ms": 2.002875,
+        "gpuP99Ms": 2.236125,
+        "minimumGpuSampleCoverage": 0.9989572471324296,
+        "representedSectionsRange": [
+          0,
+          0
+        ],
+        "maxSampledDistantGpuBytes": 0,
+        "maxSampledDiskBytes": 0,
+        "maxDistantGpuPayloadHighWaterBytes": 122618048,
+        "maxCompressedQueueHighWaterBytes": 0,
+        "maxDiskPayloadHighWaterBytes": 0,
+        "maxStoreUpdateMs": 0.0,
+        "maxProcessPeakPhysicalFootprintBytes": 5600104672,
+        "thermalStates": [
+          0,
+          0,
+          0
+        ],
+        "p95LodPrepareMs": 0.003708,
+        "prepareTimingScope": "Loaded and distant frame maintenance, selection, uniforms and uploads; excludes workers and GPU execution",
+        "discardedPresentationAttempts": 0,
+        "discardedPresentationFrames": 0,
+        "distantTrianglesPerCapturedFrameIncludingWarmup": 0.0,
+        "medianIntervalRangeMs": [
+          2.546,
+          2.608
+        ]
+      },
+      "on": {
+        "p50CpuMs": 2.74,
+        "p95CpuMs": 3.061,
+        "p99CpuMs": 3.202,
+        "p50IntervalMs": 3.008,
+        "p99IntervalMs": 12.039,
+        "onePercentLowFps": 77.64,
+        "gpuP50Ms": 1.892625,
+        "gpuP95Ms": 2.28475,
+        "gpuP99Ms": 2.48125,
+        "minimumGpuSampleCoverage": 0.9988505747126437,
+        "representedSectionsRange": [
+          1001,
+          1001
+        ],
+        "maxSampledDistantGpuBytes": 67108832,
+        "maxSampledDiskBytes": 83922983,
+        "maxDistantGpuPayloadHighWaterBytes": 122618048,
+        "maxCompressedQueueHighWaterBytes": 1932981,
+        "maxDiskPayloadHighWaterBytes": 83922983,
+        "maxStoreUpdateMs": 374.413167,
+        "maxProcessPeakPhysicalFootprintBytes": 5600104672,
+        "thermalStates": [
+          0,
+          0,
+          0
+        ],
+        "p95LodPrepareMs": 0.161334,
+        "prepareTimingScope": "Loaded and distant frame maintenance, selection, uniforms and uploads; excludes workers and GPU execution",
+        "discardedPresentationAttempts": 0,
+        "discardedPresentationFrames": 0,
+        "distantTrianglesPerCapturedFrameIncludingWarmup": 1238630.8577827548,
+        "medianIntervalRangeMs": [
+          2.969,
+          3.057
+        ]
+      },
+      "changePercent": {
+        "p50CpuMs": 15.954295387219641,
+        "p99CpuMs": 12.706793382611735,
+        "p50IntervalMs": 15.870570107858239,
+        "p99IntervalMs": 0.033236393851265866,
+        "gpuP50Ms": 24.69939054521497,
+        "gpuP95Ms": 14.073519315983262,
+        "gpuP99Ms": 10.962043714014214
+      },
+      "pairedRepeatChangePercent": [
+        {
+          "p50IntervalMs": 20.07069913589945,
+          "p99IntervalMs": 6.468041762159404
+        },
+        {
+          "p50IntervalMs": 15.337423312883436,
+          "p99IntervalMs": -4.358253390671529
+        },
+        {
+          "p50IntervalMs": 14.368258859784277,
+          "p99IntervalMs": 0.033236393851265866
+        }
+      ],
+      "withinProvisionalMedianBudget": true,
+      "withinProvisionalP99Budget": true
+    }
+  ]
+}

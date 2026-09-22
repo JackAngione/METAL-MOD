@@ -1,0 +1,119 @@
+
+> Configure project :
+Fabric Loom: 1.17.20
+
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava UP-TO-DATE
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses UP-TO-DATE
+> Task :compileShaderSmokeJava
+> Task :processShaderSmokeResources NO-SOURCE
+> Task :shaderSmokeClasses
+
+> Task :shaderTranslationSmoke FAILED
+[15:11:11] [main/ERROR]: MetalCraft shader extension dev.metalcraft.client.metal.MetalShaderTranslationSmoke$$Lambda/0x000001f001043618 failed to register; other extensions will still load
+java.lang.IllegalStateException: intentional extension failure
+	at dev.metalcraft.client.metal.MetalShaderTranslationSmoke.lambda$assertExtensionIsolation$0(MetalShaderTranslationSmoke.java:390)
+	at dev.metalcraft.client.MetalCraftClient.registerExtensions(MetalCraftClient.java:52)
+	at dev.metalcraft.client.metal.MetalShaderTranslationSmoke.assertExtensionIsolation(MetalShaderTranslationSmoke.java:393)
+	at dev.metalcraft.client.metal.MetalShaderTranslationSmoke.main(MetalShaderTranslationSmoke.java:247)
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by dev.metalcraft.client.metal.MetalNative in an unnamed module (file:/Users/jackangione/Desktop/VULKAN%20SHADERS/build/classes/java/client/)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.lwjgl.system.MemoryUtil (file:/Users/jackangione/.gradle/caches/modules-2/files-2.1/org.lwjgl/lwjgl/3.4.1/129e06a04f93992cb2a45172435b21fc4b60dd7d/lwjgl-3.4.1-unsafe.jar)
+WARNING: Please consider reporting this to the maintainers of class org.lwjgl.system.MemoryUtil
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+Exception in thread "main" java.lang.AssertionError: Texel-buffer translation must match native MTLTextureTypeTextureBuffer bindings:
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+// Returns 2D texture coords corresponding to 1D texel buffer coords
+static inline __attribute__((always_inline))
+uint2 spvTexelBufferCoord(uint tc)
+{
+    return uint2(tc % 4096, tc / 4096);
+}
+
+constant spvUnsafeArray<float2, 3> _18 = spvUnsafeArray<float2, 3>({ float2(-1.0), float2(3.0, -1.0), float2(-1.0, 3.0) });
+
+struct main0_out
+{
+    int m_41 [[user(locn0)]];
+    float4 gl_Position [[position]];
+};
+
+vertex main0_out main0(texture2d<int> _45 [[texture(0)]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    out.gl_Position = float4(_18[int(gl_VertexIndex)], 0.0, 1.0);
+    out.m_41 = _45.read(spvTexelBufferCoord(0)).x;
+    out.gl_Position.y = -(out.gl_Position.y);    // Invert Y-axis for Metal
+    return out;
+}
+
+
+	at dev.metalcraft.client.metal.MetalShaderTranslationSmoke.main(MetalShaderTranslationSmoke.java:279)
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':shaderTranslationSmoke' (registered in build file 'build.gradle').
+> Process 'command '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1s
+6 actionable tasks: 2 executed, 4 up-to-date

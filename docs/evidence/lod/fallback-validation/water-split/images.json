@@ -1,0 +1,435 @@
+{
+  "localArchive": "build/reports/lod-fallback-images/water-split",
+  "images": [
+    {
+      "name": "0000_metalcraft-water-horizon-explored.png",
+      "sha256": "fa101be22cc7caa0b2ab0a0dadca3a4784c6a6ba99d550ec5254d4f8058a4597",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0001_metalcraft-water-identity-baseline.png",
+      "sha256": "ae1b53e997ccd94f68a1e6a048396c0223a1eff897f09693a57b8c881e1aea55",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0002_metalcraft-water-identity-water.png",
+      "sha256": "e0d1fe28c8259f753a5d8c4a99995d2588cec4ff7cc69076b57d9fae08bf6cfa",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0003_metalcraft-water-identity-restored.png",
+      "sha256": "1374c4b782d4737f36a33c4a849d23d3f2e216bd82665926e67bcb6eeee0e149",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0004_metalcraft-water-surface-depth.png",
+      "sha256": "572a18449aa49c6d028e01865bdfc4d3b63a5759cce5c4aa8a00672c00bd087c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0005_metalcraft-water-opaque-depth.png",
+      "sha256": "06fc111e7435768f143ba50f51470a6dd95d4eda054d6a0502243a0b36fe85c6",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0006_metalcraft-world-grade-baseline.png",
+      "sha256": "8ec56d36bc1ae3c7dfb2ea6853622859b2e6c1f267866f65d654e443be78bb2d",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0007_metalcraft-world-grade-half-exposure-hud.png",
+      "sha256": "e2b10d9155af526b637ea34310316de926ce6003f62136930c0e4054ab76c2ec",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0008_metalcraft-water-identity-native.png",
+      "sha256": "351907bd41b053727c5da419492e6d0e5c5789bf7a26ccec354c68b398dcf1a1",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0009_metalcraft-water-identity-half.png",
+      "sha256": "fa111bda1cf8dfdacc111829fb9f6b9ac8145c1c2f92c2e160602c6ff99628fe",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0010_metalcraft-water-identity-native-restored.png",
+      "sha256": "f9da8c17eb2b6f754258733508967784c8c0e660e4cd86d0403785758e22ad88",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0011_metalcraft-water-identity-resized.png",
+      "sha256": "9139543028bccc45b94362c96a60af758c1d5f2e18758a40c9d9efefd95796f3",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0012_metalcraft-water-identity-world-change.png",
+      "sha256": "99cc09565793d91ecc6318513492aeffbf9e50e3675e76d76c69d2b0809ca032",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0013_metalcraft-water-w4-noon-baseline.png",
+      "sha256": "1e277e894c8f26d7295ffbe6803db3a6934b30e39ffaf45757cf3a9a52d1523e",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0014_metalcraft-water-w4-noon-effect-t0.png",
+      "sha256": "2e8e547d6608c8f46c5bc8cc631ab789e65b5a987a7b54ada8d0ca7e244317d4",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0015_metalcraft-water-w4-noon-normals-t0.png",
+      "sha256": "9dbcf2a3dc92bf671ec12c9f02fb060aeb5c0df79df93adc6fe3efc90c852663",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0016_metalcraft-water-w4-noon-effect-t1.png",
+      "sha256": "a97954639125b829066fc1ed3221531d8d270c892908387495d1c1dba6e9f741",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0017_metalcraft-water-w4-noon-normals-t1.png",
+      "sha256": "f3b10e4a9d0ae2da24b5cb1411371906b43145477f00dc65379fe5e85fd52a29",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0018_metalcraft-water-w4-camera-translated.png",
+      "sha256": "9ca3f7f0c5373755c09f7b743510ad65b4a87c9498874110db20f54541d4fe58",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0019_metalcraft-water-w4-camera-translated-normals.png",
+      "sha256": "34f98c361b8a4a37a054d4addf964c2a4f255ced6e114263eb414374a0afbde5",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0020_metalcraft-water-w4-grazing-baseline.png",
+      "sha256": "86fc2584d26a1f97f2802b246924d079601d4597ab45054920b25f101cc90cf4",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0021_metalcraft-water-w4-grazing-effect.png",
+      "sha256": "e891ffa8eaa7be48a8063b09f42576e6f95b6106ef66c1fb5d7d67bce2adefa7",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0022_metalcraft-water-w4-night-baseline.png",
+      "sha256": "fd3fe5829315239fe4a0bc390e47832e9de752453cf9316ff9d28ced09c6a470",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0023_metalcraft-water-w4-night-effect.png",
+      "sha256": "8e321d4d3ca9ded37e36b06732561e286f7f35f7ef3a582899422d115519e3d6",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0024_metalcraft-water-w4-cave-baseline.png",
+      "sha256": "320c27a9846bd5a880de76aa1e7e2c943b4abab8606f8ff2d03e28bb564c4cca",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0025_metalcraft-water-w4-cave-effect.png",
+      "sha256": "0583a0316dfea74b2642a229293c5262f2c191d4496d0e5b95d7afeeafe0c789",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0026_metalcraft-water-w5-refraction-off.png",
+      "sha256": "69f3cd82e9064416dafd494247514230df6fecf1698e165961ab75ce92469fb1",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0027_metalcraft-water-w5-refraction-absorption.png",
+      "sha256": "23c8638412361ebbbf01459232a3a3bb58145d9ab15ff4e9a6515edca85ffd88",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0028_metalcraft-water-w5-steep-border-sky.png",
+      "sha256": "9bc8241fd6e815446b6c50ff2e1c813b52d7a6b1004f595dd82853f053aea94c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0029_metalcraft-water-w5-underwater-refraction-off.png",
+      "sha256": "ab7b8d988b015118797461fa125167d843b1c00e98797a8852e398f4699b469e",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0030_metalcraft-water-w5-underwater-fallback.png",
+      "sha256": "1463320152579f54b19befd2451b5d3d5289d78b5a79cbd42a0c4d61ac31fdc8",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0031_metalcraft-water-w5-fabulous-refraction-off.png",
+      "sha256": "b021af9d158b3db0a86a2539b2cffc37421b2232f0ee4b4f649936bb10ac827a",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0032_metalcraft-water-w5-fabulous-fallback.png",
+      "sha256": "1abb89f7b46c0fc424699977d0cf4769b0ea3ecffb815657f321bca65f1af44b",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0033_metalcraft-water-w6-contact-foam-off.png",
+      "sha256": "91091e6ad43369509b421f2812b89634ac650b22d40bd9497821b67f6f61702a",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0034_metalcraft-water-w6-contact-foam-on.png",
+      "sha256": "91564098590e350b0e11e913238ed452ef111b260c4f743bc53dc0704206d6a4",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0035_metalcraft-water-w6-entry-air.png",
+      "sha256": "97c36c109173c751b24b0c66e4b51f6198219cc3b2c797d9488272de876d8d3c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0036_metalcraft-water-w6-partial-submersion.png",
+      "sha256": "b2fa7f7f1b1d35e8c1115c0fcbae527b4ca5ff7c0281aa3065bcdaa99ef6120c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0037_metalcraft-water-w6-underwater-distortion-off.png",
+      "sha256": "09c477d729be7544c260c8fcf469dcb6917cdfbb72d08533f411e91d7ad2d6b0",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0038_metalcraft-water-w6-underwater-entry.png",
+      "sha256": "0ccbf154bb934ec6cffac0dab3f7d5754966c428abed2483e5706ed4e7558076",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0039_metalcraft-water-wu-vanilla-bed.png",
+      "sha256": "9349bb0a4d78f3a5112968e92e0f647fa0423fa59b540d57c30de2600ea97d1f",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0040_metalcraft-water-wu-clear-bed.png",
+      "sha256": "5a10a08ed163d92dbe99e96efdf98d1fbbb1c1af1b66c885d112dd1f3a1d35e5",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0041_metalcraft-water-w6-underwater-looking-up.png",
+      "sha256": "d3259887392ff860987a8ff94bddd18dfe9a9dc505bc1875bf8f3e4dd8717375",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0042_metalcraft-water-w6-exit-air.png",
+      "sha256": "e33d7ea31e3f2ee1df060f3349dd1f91594bbf564fb2127d3383dbd458b29ae3",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0043_metalcraft-water-w6-underwater-cave-hud.png",
+      "sha256": "b1c6c86107604fdf988571ad9089c72b5412ffc4d047f3e6dc3a6b9f068b0010",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0044_metalcraft-water-detail-0.png",
+      "sha256": "0ce43fd949a73c39c6a39c411d962c843f5146003ff80669b495f0e354f7ce0a",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0045_metalcraft-water-detail-1.png",
+      "sha256": "1f9d17acbc5d20693a3e0a9ae690a448d679a74728f037d1758a692e981119df",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0046_metalcraft-water-detail-2.png",
+      "sha256": "7117faf95aa304a2426c9ae86c13154bf909d42a3bcf8c2b5cab90bb4f5c7565",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0047_metalcraft-water-detail-3.png",
+      "sha256": "225e56f9453fb82e9b23f233d9591bfb7c0976a15690f1cc712d536c1d8d1ebd",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0048_metalcraft-water-micro-close-0.png",
+      "sha256": "f4d95012b47f4a9695281ff77a748be2fc5a6d8de436c24d88a1e5007d3011f0",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0049_metalcraft-water-detail-route-0.png",
+      "sha256": "f4413b38bececc077969e86de329c7623d7ba38bebf8624c5bf49a8f54e54adf",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0050_metalcraft-water-micro-close-1.png",
+      "sha256": "d88d751aca38f718a58f17c7d1fee75d9b056fbfa66a87dd050e646e46feae54",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0051_metalcraft-water-micro-close-2.png",
+      "sha256": "c54762a1d56cdb2715a35812939a0c92762e02fc1803515086c39989f759aee0",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0052_metalcraft-water-micro-close-3.png",
+      "sha256": "5b442cf227dc40a48ab28bd50412f08bdba6d9ddd8d8444e2179c674bf00eef4",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0053_metalcraft-water-detail-route-3.png",
+      "sha256": "c153c16f7f6b87d73068687ebbfe27760692dd0c252fc5351ee11b5e56f7a81a",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0054_metalcraft-water-micro-close-normals-t0.png",
+      "sha256": "c153c16f7f6b87d73068687ebbfe27760692dd0c252fc5351ee11b5e56f7a81a",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0055_metalcraft-water-micro-close-normals-t1.png",
+      "sha256": "4426d0a0e527129d254dfed3bf6412bca9964b02aff7e9dc3bb4c9327c000e20",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0056_metalcraft-water-micro-close-moving.png",
+      "sha256": "58e048a7b87fef4f4e5a3d1ea15445761ac5e8db5bf7b95893dc01b95891a7bc",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0057_metalcraft-water-micro-grazing.png",
+      "sha256": "48db5dc139f17c0fb37574aedf4c4a3ce8f07d2a5fb05b753b3ca68b4a909496",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0058_metalcraft-water-micro-grazing-half.png",
+      "sha256": "edfe8b32eff9a2a2f24a4fe1d5c6dfed706fbe25865edfbbb2b99363df453265",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0059_metalcraft-water-w7-enabled.png",
+      "sha256": "97194a16c3db058dcfa543c33f768b1c79ce0658f89322e7ccb4f238f0e635c9",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0060_metalcraft-water-w7-disabled-first.png",
+      "sha256": "863871c9ff73ab9671174afe6c07d8f81364faa821a42572f6dd0bf980f9588c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0061_metalcraft-water-w7-vanilla-baseline.png",
+      "sha256": "354385433e5417bb1dd6e57ed4ea6f07e272c86da2563097e8d2e0fe1bf91016",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0062_metalcraft-water-w7-enabled-again.png",
+      "sha256": "702b5eb4de7fe54797e7f873b87b1405bf361d6d04e449967659aac6216a1b4e",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0063_metalcraft-water-w7-disabled-again.png",
+      "sha256": "183bda15064523319329b0add013ee2c919ee1cd3d9a0a67ed157d747d6de215",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0064_metalcraft-water-w7-vanilla-baseline-again.png",
+      "sha256": "f2449e595d44ba75f2502fdfd152fe033e3e2a99ef55a8fe9a39bbc069bcb99d",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0065_metalcraft-water-w7-zero-strengths.png",
+      "sha256": "ff10944afb1a960417cbd49d26e47e29491ae6238dc953f52dd198f07715c419",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0066_metalcraft-water-w7-zero-strengths-repeat.png",
+      "sha256": "ea8bab5461d547ff23d4aa98dcc7abb523f3ebc92941a62970e0e127f30031ba",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0067_metalcraft-water-w7-ssr-low.png",
+      "sha256": "5fc36d7bd16fbccedee9ab95fc9b5577218ff13f36d0b54cc8078d8d461fe883",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0068_metalcraft-water-w7-reflection-baseline.png",
+      "sha256": "3df8dfd3e9c92c9d5766a69dbb0053ea1c4bd9fe41647e0ebc1ef4895d0bcc46",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0069_metalcraft-water-w7-ssr-high.png",
+      "sha256": "5ca3bf36264334fd7fced28ccd3171ada47a9d9e8a20aea2ba6eb8198c4b4a88",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0070_metalcraft-water-w7-ssr-high-edge-offscreen.png",
+      "sha256": "b7228cd30bed25d105a0ff36337dd6a0501ee0a109745b203b189d87c469a663",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0071_metalcraft-water-w7-ssr-high-camera-moved.png",
+      "sha256": "3af0881c1b71bf4c8404577010d982281a39900c7166fefc8c2802c225cf5104",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0072_metalcraft-water-w7-ssr-high-half-resolution.png",
+      "sha256": "e5a4e2c3007a422d4be0dfc4b57e3ac806a7a011f60a2b6aae5719d68d1b3865",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0073_metalcraft-water-w7-failure-recovered.png",
+      "sha256": "c235b8d15768eaf9e8cca1e50fc8fa8d26214fa1111aa9155e9f1eb074ef3d7c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0074_metalcraft-water-natural-none.png",
+      "sha256": "4dd3b02144d268e248b4b7695352202bbe947089d1be1b800ce98db88b0fb79a",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0075_metalcraft-water-natural-high.png",
+      "sha256": "04d4001d3762d9f634370ec24450a42bf202fefdad1b017363276921caca5a95",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0076_metalcraft-water-natural-grazing.png",
+      "sha256": "fd945fba6d25e4a56ccbdd9f1dc4057758c24a3f71065d1a670dbcd87eacf57e",
+      "retainedInEvidence": true
+    },
+    {
+      "name": "0077_metalcraft-water-distance-2.png",
+      "sha256": "4b69ce45ac5e58194a3e1d571f342d28ab2817554637a3f882198c013afac82c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0078_metalcraft-water-distance-16.png",
+      "sha256": "c42c52044342c13d83d812bbd5aab056337761af56950a0f68a2f8e914c60ce7",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0079_metalcraft-water-crossing-0.png",
+      "sha256": "b5439aa1f9535ca4dd6dd14d4d0c2f86335c7d6ab9a6526717617daf339f84b1",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0080_metalcraft-water-crossing-1.png",
+      "sha256": "dbc754600cdcfbb652e05cb0a771964be73b637477298df69fdc01f40ca1edc1",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0081_metalcraft-water-crossing-2.png",
+      "sha256": "f885e3239ebb6b93b461d8409adafa57382074e96bcbd36bf6e80ba9c3cec02c",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0082_metalcraft-water-crossing-3.png",
+      "sha256": "f7199824cfb8ced9c326c32b061f290294b428daff9a327ecc850ce054c095c6",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0083_metalcraft-water-glints-flat.png",
+      "sha256": "92d570020d1f0ef325d6e8ac72de5eb0ac8e0f6fe6ad3af2aebf2b80eea7c9db",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0084_metalcraft-water-glints-waves.png",
+      "sha256": "086d38f2bd5495a81d3fd085032710cc8744b29b89e30dd1f5e86dd5e6a9fdde",
+      "retainedInEvidence": false
+    },
+    {
+      "name": "0085_metalcraft-water-identity-fabulous.png",
+      "sha256": "6b89fa230f2022a7d6aab391762a8948bec435f9587d3e9a7706531d51f00de9",
+      "retainedInEvidence": false
+    }
+  ]
+}

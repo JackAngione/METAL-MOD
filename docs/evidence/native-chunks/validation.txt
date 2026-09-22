@@ -1,0 +1,12 @@
+Final build: MTL_DEBUG_LAYER=1 ./gradlew build
+Native chunk distance smoke passed: 33/36/64/127/128/255/256, exact multi-source distances, move/teleport/remove/resize/drain, wire bounds
+BUILD SUCCESSFUL in 19s
+
+Live: ./gradlew runClient -PmetalLifecycleTest -PmetalNativeChunkDistanceTest=true -PmetalJvmArgs=-Xmx8G --args=--graphicsBackend default
+[22:25:13] [Render thread/INFO] (Minecraft) Using graphics backend Metal, using drivers: Mac OS X 27.0
+[22:25:22] [Server thread/INFO] (Minecraft) Changing view distance to 36, from 10
+[22:25:22] [Server thread/INFO] (Minecraft) Changing simulation distance to 16, from 0
+[22:26:18] [Server thread/INFO] (Minecraft) Changing view distance to 33, from 36
+[22:26:18] [Server thread/INFO] (Minecraft) Changing view distance to 36, from 33
+[22:26:23] [Test thread/INFO] (Minecraft) [STDOUT]: Native chunk distance passed: NORMAL world, Metal, 36/16, column 35 received/uploaded/visible, shrink/reload/close, byte compatibility through 256
+BUILD SUCCESSFUL in 1m 15s

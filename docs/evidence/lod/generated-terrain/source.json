@@ -1,0 +1,25 @@
+{
+  "baseCommit": "4ec1cdd84b9391c62c6585d40427a3d9c047af47",
+  "sha256": {
+    "build.gradle": "7f3e7a8535754fc1b7aa107726780b93b4765580e523af865c8f59663dfdebdd",
+    "src/client/java/dev/metalcraft/client/MetalCraftClient.java": "fd9f8588df6d929bdea342c9fb90a1d02ffacc62769ee09d353f297291a2ceed",
+    "src/client/java/dev/metalcraft/client/gui/MetalCraftLodOptionsScreen.java": "2b9aeda8fb73db918196bfbbf8b97be7e4c7183dce37d361cedfc420a82b8c8f",
+    "src/client/java/dev/metalcraft/client/lod/LodCapabilities.java": "446c322894bd9e43b476ff02b9a82858439ba55af76a23ebf5be0c6182550211",
+    "src/client/java/dev/metalcraft/client/lod/LodDistantCache.java": "5708f1c9df3f1cdd7c86985305fa2cd75257c35893077d711c832f0ab0fa7443",
+    "src/client/java/dev/metalcraft/client/lod/LodDistantRenderer.java": "24f01083df36bd95724653790eadbfb224c0228455d3f3bfbbe2f8716ec0ff39",
+    "src/client/java/dev/metalcraft/client/lod/LodGeneratedMesher.java": "36b9db16291df1c1a80bf016ac9831dfb5f68be47d12a0100a417011538f5077",
+    "src/client/java/dev/metalcraft/client/lod/LodGeneratedSnapshot.java": "53e6bc7cc048eaddf9a4e936fce490006f931e13585e5ac0e15311eb9cf4df8d",
+    "src/client/java/dev/metalcraft/client/lod/LodGenerationCursor.java": "9c931c602cdf4f85febee7e0a75245c52046c10dc72c04aba99dfb58446e8bca",
+    "src/client/java/dev/metalcraft/client/lod/LodSettings.java": "c765abf54e937ee828ce52c66dab090996595d017be38cf5963057764f1f8414",
+    "src/client/java/dev/metalcraft/client/lod/LodSettingsCodec.java": "37dd3241c4028f6cfd924a17f0ff30078cbfc3204acfcb62469789d799a08b4d",
+    "src/client/java/dev/metalcraft/client/lod/LodTerrainGeneration.java": "2e61a03d9462a443f47794ac844e13a15befe7665a40c1abfbb001a2935d6525",
+    "src/client/java/dev/metalcraft/client/test/MetalLifecycleGameTest.java": "4e12cf9fb0c4f065665c0665c5a6ba2d25abeaa7b97ba56939f748f2f8dba7fa",
+    "src/client/java/dev/metalcraft/client/test/MetalLodGenerationGameTest.java": "dc79fa69595e093e7c00e151dcd2a62d2f6703bd199b74b13c45d67668e54177",
+    "src/client/java/dev/metalcraft/client/test/MetalLodHorizonGameTest.java": "9d67ab312023af2ebde37f7125e45e1ffff6d46268ba0914fbcaf39848a4c387",
+    "src/client/java/dev/metalcraft/client/test/MetalLodSettingsGameTest.java": "4af194bf82b90943a14a3af4cc82356898df87dce5353c96cbbed964a7723d77",
+    "src/client/java/dev/metalcraft/client/test/MetalLodTestScope.java": "3a70d963e3e681a417d28f4a71f73164c418166242a42bcc336d93be24a5f0ed",
+    "src/client/resources/assets/metalcraft/lang/en_us.json": "eebeebb39ef059cafcb2d2ab871ae1b3a4bdc8edf234f5cecb4db26d1f19c81f",
+    "src/smoke/java/dev/metalcraft/client/lod/LodDistantSmoke.java": "9eee1266d2463f869a9782a9966cc55a01a67edb504b7d8f01eee3a1755819ab",
+    "src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java": "d59910ba89aae19540f17ebbaf0185ed250cba30612bdec5e404f31bf5f0fe7f"
+  }
+}

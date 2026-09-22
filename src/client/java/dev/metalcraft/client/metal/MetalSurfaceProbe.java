@@ -33,4 +33,9 @@ public final class MetalSurfaceProbe {
 	public static long generation() {
 		return generation;
 	}
+
+	/** AppKit/render-thread benchmark probe: active, visible, not minimized, not fully occluded. */
+	public static int presentationState(final long glfwWindow) {
+		return MetalNative.nWindowPresentationState(org.lwjgl.glfw.GLFWNativeCocoa.glfwGetCocoaWindow(glfwWindow));
+	}
 }

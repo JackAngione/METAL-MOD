@@ -1,0 +1,7 @@
+{
+  "action": "Activate Finder during first timed phase; the benchmark must discard and recapture it",
+  "trigger": "LOD horizon capturing: horizon-128-metalcraft-standard-half-false-lod-false#1 attempt=1",
+  "triggeredAtUnix": 1789256467.451623,
+  "exitCode": 0,
+  "stderr": ""
+}

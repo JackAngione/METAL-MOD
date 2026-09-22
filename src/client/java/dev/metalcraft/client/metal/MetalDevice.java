@@ -42,6 +42,25 @@ public final class MetalDevice implements AutoCloseable {
 		return MetalNative.nRecommendedWorkingSet(this.requireOpenHandle());
 	}
 
+	/** Driver-reported allocation footprint; querying it does not wait for GPU completion. */
+	public synchronized long currentAllocatedBytes() {
+		return MetalNative.nCurrentAllocatedSize(this.requireOpenHandle());
+	}
+
+    /** Reset opt-in, device-wide observations; call before a benchmark, outside timed phases. */
+    public synchronized void startAllocationProbe() {
+        MetalNative.nStartAllocationProbe(this.requireOpenHandle());
+    }
+
+    public synchronized void stopAllocationProbe() {
+        MetalNative.nStopAllocationProbe(this.requireOpenHandle());
+    }
+
+    /** Current bytes, observed peak bytes, observation count. No GPU synchronization. */
+    public synchronized long[] allocationProbe() {
+        return MetalNative.nAllocationProbe(this.requireOpenHandle());
+    }
+
 	public synchronized MetalCommandQueue createCommandQueue() {
 		long queueHandle = MetalNative.nCreateCommandQueue(this.requireOpenHandle());
 		if (queueHandle == 0L) {
@@ -111,7 +130,8 @@ public final class MetalDevice implements AutoCloseable {
 			descriptor.addressModeU().ordinal(),
 			descriptor.addressModeV().ordinal(),
 			descriptor.maxAnisotropy(),
-			descriptor.maxLod()
+			descriptor.maxLod(),
+			descriptor.minLod()
 		);
 		if (samplerHandle == 0L) {
 			throw new IllegalStateException("Metal did not create the requested sampler");

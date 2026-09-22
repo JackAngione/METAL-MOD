@@ -1,0 +1,15 @@
+{
+  "command": [
+    "./gradlew",
+    "runClient",
+    "-PmetalLifecycleTest",
+    "-PmetalLodHorizonTest=true",
+    "-PmetalLodHorizonBenchmark=true",
+    "-PmetalBenchmarkFullscreen=true",
+    "-PmetalBenchmarkUnlocked=true",
+    "-PmetalBenchmarkHalfResolution=false",
+    "--args=--graphicsBackend default"
+  ],
+  "elapsedSeconds": 225.69496297836304,
+  "exitCode": 1
+}

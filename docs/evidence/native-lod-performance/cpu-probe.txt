@@ -1,0 +1,7 @@
+selection-65536: beforeNs=762375 afterNs=417250 beforeBytes=32 afterBytes=32
+geometry-shape-0-100-builds: beforeNs=10991500 afterNs=5773500 beforeBytes=56580832 afterBytes=18411232
+geometry-shape-1-100-builds: beforeNs=10231291 afterNs=4999917 beforeBytes=55731232 afterBytes=18099232
+geometry-shape-2-100-builds: beforeNs=14103208 afterNs=7316916 beforeBytes=75550432 afterBytes=24248032
+geometry-shape-3-100-builds: beforeNs=11313875 afterNs=6102083 beforeBytes=61033632 afterBytes=19638432
+geometry-shape-4-100-builds: beforeNs=13820334 afterNs=7451625 beforeBytes=69785632 afterBytes=28313632
+Exact output parity: five shapes x four tiers; scalar selection parity: 65,536 sections

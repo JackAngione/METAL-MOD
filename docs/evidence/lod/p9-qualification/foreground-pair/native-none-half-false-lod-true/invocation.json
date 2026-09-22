@@ -1,0 +1,24 @@
+{
+  "command": [
+    "./gradlew",
+    "runClient",
+    "-PmetalLifecycleTest",
+    "-PmetalLifecycleBenchmark=true",
+    "-PmetalLodTerrainCensus=true",
+    "-PmetalBenchmarkLod=true",
+    "-PmetalBenchmarkPack=none",
+    "-PmetalBenchmarkRenderDistance=16",
+    "-PmetalBenchmarkSimulationDistance=16",
+    "-PmetalBenchmarkResolution=3840x2160",
+    "-PmetalBenchmarkFullscreen=true",
+    "-PmetalBenchmarkHalfResolution=false",
+    "-PmetalBenchmarkUnlocked=true",
+    "-PmetalBenchmarkPitch=30",
+    "-PmetalBenchmarkRepeats=3",
+    "-PmetalBenchmarkPhaseTicks=60",
+    "--args=--graphicsBackend default"
+  ],
+  "sourceSha256": "74133b618ea1bf590bc5aa00a6c8a1103f7a6bef7781e57f31e104aab03f3854",
+  "elapsedSeconds": 114.78858780860901,
+  "exitCode": 0
+}

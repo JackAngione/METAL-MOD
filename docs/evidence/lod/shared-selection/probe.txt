@@ -1,0 +1,28 @@
+Exact selector output matches: nodes=256 sparse=false
+before 46.280 us/pair 38453 bytes/pair
+after 12.320 us/pair 11832 bytes/pair
+after 6.274 us/pair 11832 bytes/pair
+before 10.127 us/pair 38448 bytes/pair
+before 11.228 us/pair 38448 bytes/pair
+after 7.392 us/pair 11832 bytes/pair
+Exact selector output matches: nodes=256 sparse=true
+before 15.919 us/pair 37488 bytes/pair
+after 6.866 us/pair 11832 bytes/pair
+after 6.731 us/pair 11832 bytes/pair
+before 13.318 us/pair 37488 bytes/pair
+before 10.286 us/pair 37488 bytes/pair
+after 5.359 us/pair 11832 bytes/pair
+Exact selector output matches: nodes=4096 sparse=false
+before 217.943 us/pair 744640 bytes/pair
+after 126.294 us/pair 219192 bytes/pair
+after 122.729 us/pair 219192 bytes/pair
+before 216.537 us/pair 744640 bytes/pair
+before 215.249 us/pair 744640 bytes/pair
+after 139.720 us/pair 219168 bytes/pair
+Exact selector output matches: nodes=4096 sparse=true
+before 182.391 us/pair 689584 bytes/pair
+after 113.439 us/pair 219168 bytes/pair
+after 111.657 us/pair 219168 bytes/pair
+before 186.183 us/pair 689584 bytes/pair
+before 181.502 us/pair 689584 bytes/pair
+after 114.760 us/pair 219168 bytes/pair

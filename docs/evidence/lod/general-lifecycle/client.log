@@ -1,0 +1,409 @@
+[16:42:51] [main/WARN] (FabricLoader/Knot) Class path entries reference missing files: /Users/jackangione/Desktop/VULKAN SHADERS/build/classes/java/main - the game may not load properly!
+[16:42:51] [main/INFO] (FabricLoader/GameProvider) Loading Minecraft 26.2 with Fabric Loader 0.19.3
+[16:42:51] [main/INFO] (FabricLoader/Mappings) Mappings not present!
+[16:42:51] [main/INFO] (FabricLoader) Loading 51 mods:
+	- fabric-api 0.157.0+26.2
+	- fabric-api-base 2.0.4+ece063239e
+	- fabric-api-lookup-api-v1 2.0.17+11e1c9a39e
+	- fabric-biome-api-v1 18.0.6+c7bd5b8e9e
+	- fabric-block-api-v1 3.0.3+ec56b6019e
+	- fabric-block-getter-api-v2 2.0.7+ec56b6019e
+	- fabric-client-gametest-api-v1 6.0.0+515ac5339e
+	- fabric-command-api-v2 3.1.0+00cb03469e
+	- fabric-content-registries-v0 11.3.1+37b1aa249e
+	- fabric-convention-tags-v2 4.7.0+1f023a9e9e
+	- fabric-crash-report-info-v1 1.0.5+086d547a9e
+	- fabric-creative-tab-api-v1 5.0.14+d871b99e9e
+	- fabric-data-attachment-api-v1 2.2.18+515ac5339e
+	- fabric-data-generation-api-v1 25.5.0+aed122aa9e
+	- fabric-debug-api-v1 1.0.2+c792624d9e
+	- fabric-dimensions-v1 5.1.11+515ac5339e
+	- fabric-entity-events-v1 5.0.5+06488ac19e
+	- fabric-events-interaction-v0 5.2.7+515ac5339e
+	- fabric-game-rule-api-v1 4.0.8+46a6d00c9e
+	- fabric-gametest-api-v1 4.0.21+4a7fa0819e
+	- fabric-item-api-v1 14.4.0+49a69a7b9e
+	- fabric-key-mapping-api-v1 2.0.5+e2bdee789e
+	- fabric-lifecycle-events-v1 4.1.3+4575b05f9e
+	- fabric-loot-api-v3 3.0.17+06488ac19e
+	- fabric-menu-api-v1 2.0.16+086d547a9e
+	- fabric-message-api-v1 7.0.8+bb2ed3f79e
+	- fabric-model-loading-api-v1 8.0.16+c80601bb9e
+	- fabric-networking-api-v1 6.3.3+72073ef09e
+	- fabric-object-builder-api-v1 24.1.0+6fcd5f039e
+	- fabric-particles-v1 5.0.18+d1756aa99e
+	- fabric-permission-api-v1 1.0.5+e442d8d09e
+	- fabric-recipe-api-v1 9.0.20+11e1c9a39e
+	- fabric-registry-sync-v0 7.1.0+c7bd5b8e9e
+	- fabric-renderer-api-v1 14.1.3+2b0d8a229e
+	- fabric-renderer-indigo 9.1.3+2b0d8a229e
+	- fabric-rendering-fluids-v1 6.0.4+06488ac19e
+	- fabric-rendering-v1 25.3.2+515ac5339e
+	- fabric-resource-conditions-api-v1 6.1.0+10e9a28b9e
+	- fabric-resource-loader-v0 3.3.20+4fc5413f9e
+	- fabric-resource-loader-v1 2.0.13+9edec1269e
+	- fabric-screen-api-v1 5.2.0+58e078ad9e
+	- fabric-serialization-api-v1 2.0.4+11a26f319e
+	- fabric-sound-api-v1 2.0.5+11a26f319e
+	- fabric-tag-api-v1 2.1.4+515ac5339e
+	- fabric-transfer-api-v1 8.0.12+11dbb7d79e
+	- fabric-transitive-access-wideners-v1 8.1.4+67c847259e
+	- fabricloader 0.19.3
+	- java 25
+	- metalcraft 0.2.0-dev.1
+	- minecraft 26.2
+	- mixinextras 0.5.4
+[16:42:51] [main/INFO] (FabricLoader/Mixin) SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/Users/jackangione/.gradle/caches/modules-2/files-2.1/net.fabricmc/sponge-mixin/0.17.3+mixin.0.8.7/41c4a3984a80f4679e759fb9f495587acc5cdac7/sponge-mixin-0.17.3+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
+[16:42:51] [main/INFO] (FabricLoader/Mixin) Compatibility level set to JAVA_25
+[16:42:51] [main/INFO] (MetalCraftPreLaunch) MetalCraft direct Metal bridge opened an owned device and command queue: Apple M4 Max (recommended working set: 53084 MiB)
+[16:42:51] [main/WARN] (MetalCraftPreLaunch) Direct Metal backend selection is active and experimental; Minecraft's OpenGL crash recovery remains available
+[16:42:51] [main/INFO] (FabricLoader/MixinExtras|Service) Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.4).
+[16:42:52] [Datafixer Bootstrap #0/INFO] (Minecraft) 295 Datafixer optimizations took 124 milliseconds
+[16:42:52] [main/WARN] (MacOperatingSystem) Unable to parse version 27.0 to a codename.
+[16:42:54] [Render thread/INFO] (Minecraft) Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[16:42:54] [Render thread/INFO] (Minecraft) Setting user: Player911
+[16:42:54] [Render thread/INFO] (Indigo) [Indigo] Registering Indigo renderer!
+[16:42:54] [Download-2/ERROR] (Minecraft) Failed to fetch user properties
+com.mojang.authlib.exceptions.InvalidCredentialsException: Status: 401
+	at knot//com.mojang.authlib.exceptions.MinecraftClientHttpException.toAuthenticationException(MinecraftClientHttpException.java:70)
+	at knot//com.mojang.authlib.yggdrasil.YggdrasilUserApiService.fetchProperties(YggdrasilUserApiService.java:173)
+	at knot//net.minecraft.client.Minecraft.lambda$new$1(Minecraft.java:418)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+Caused by: MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/attributes, error=null, errorMessage=null, details=null]]
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.readServiceResponse(MinecraftClient.java:147)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.getWithEtag(MinecraftClient.java:81)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.get(MinecraftClient.java:65)
+	at knot//com.mojang.authlib.yggdrasil.YggdrasilUserApiService.fetchProperties(YggdrasilUserApiService.java:123)
+	... 5 more
+[16:42:54] [Render thread/ERROR] (Minecraft) Illegal option value 0 for Anisotropic Filtering
+[16:42:54] [Render thread/INFO] (Minecraft) Backend library: LWJGL version 3.4.1-snapshot
+[16:42:54] [Render thread/WARN] (Minecraft) Graphics backend forced to default by launch argument, in-game preferred graphics backend setting is ignored
+[16:42:54] [Render thread/INFO] (Minecraft) Using graphics backend Metal, using drivers: Mac OS X 27.0
+[16:42:54] [Render thread/INFO] (Minecraft) Using graphics device: Apple M4 Max (Apple)
+[16:42:54] [Render thread/INFO] (Minecraft) Using graphics device extensions: Metal
+[16:42:54] [Download-1/INFO] (Minecraft) Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: FabricMC
+[16:42:54] [Download-1/ERROR] (Minecraft) Failed to fetch Realms feature flags
+com.mojang.realmsclient.exception.RealmsServiceException: Realms authentication error with message 'java.lang.RuntimeException: Failed to parse into SignedJWT: FabricMC'
+	at knot//com.mojang.realmsclient.client.RealmsClient.execute(RealmsClient.java:509)
+	at knot//com.mojang.realmsclient.client.RealmsClient.fetchFeatureFlags(RealmsClient.java:159)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[16:42:55] [Render thread/INFO] (Minecraft) Reloading ResourceManager: vanilla, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-getter-api-v2, fabric-client-gametest-api-v1, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-creative-tab-api-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-debug-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-gametest-api-v1, fabric-item-api-v1, fabric-key-mapping-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v3, fabric-menu-api-v1, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-permission-api-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, metalcraft
+[16:42:55] [Render thread/INFO] (MetalCraftClient) MetalCraft direct renderer active: Apple / Apple M4 Max using Metal
+[16:42:55] [Render thread/WARN] (Minecraft) Failed to find suitable monitor for fullscreen mode
+[16:42:55] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 1708x960 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[16:42:55] [Worker-Main-12/INFO] (Minecraft) Found unifont_pua-17.0.01.hex, loading
+[16:42:55] [Worker-Main-15/INFO] (Minecraft) Found unifont_all_no_pua-17.0.01.hex, loading
+[16:42:55] [Worker-Main-3/INFO] (Minecraft) Found unifont_jp_patch-17.0.01.hex, loading
+[16:42:55] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 1708x960 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[16:42:57] [Render thread/INFO] (Minecraft) OpenAL initialized on device DENON-AVR
+[16:42:57] [Render thread/INFO] (Minecraft) Sound engine started
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[16:42:57] [Render thread/INFO] (Minecraft) Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[16:42:57] [Download-1/INFO] (Minecraft) Could not authorize you against Realms server: java.lang.RuntimeException: Failed to parse into SignedJWT: FabricMC
+[16:42:57] [Download-1/ERROR] (Minecraft) Couldn't connect to realms
+com.mojang.realmsclient.exception.RealmsServiceException: Realms authentication error with message 'java.lang.RuntimeException: Failed to parse into SignedJWT: FabricMC'
+	at knot//com.mojang.realmsclient.client.RealmsClient.execute(RealmsClient.java:509)
+	at knot//com.mojang.realmsclient.client.RealmsClient.clientCompatible(RealmsClient.java:281)
+	at knot//com.mojang.realmsclient.RealmsAvailability.lambda$check$0(RealmsAvailability.java:47)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[16:43:00] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: Metal backend selected
+[16:43:00] [Render thread/INFO] (ShaderPackRuntime) Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 6558720 bytes
+[16:43:00] [Render thread/INFO] (Minecraft) Loaded 1585 recipes
+[16:43:00] [Render thread/INFO] (Minecraft) Loaded 1688 advancements
+[16:43:00] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.GenericMessageScreen@3f0ce5a5
+[16:43:00] [Render thread/INFO] (BiomeModificationImpl) Applied 0 biome modifications to 0 of 66 new biomes in 554.6 μs
+[16:43:00] [Server thread/INFO] (Minecraft) Starting integrated minecraft server version 26.2
+[16:43:00] [Server thread/INFO] (Minecraft) Generating keypair
+[16:43:00] [Server thread/INFO] (Minecraft) Selecting global world spawn...
+[16:43:01] [Server thread/INFO] (Minecraft) Loading 0 persistent chunks...
+[16:43:01] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[16:43:01] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[16:43:01] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[16:43:01] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[16:43:01] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[16:43:01] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[16:43:01] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[16:43:01] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[16:43:01] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:01] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Server thread/INFO] (Minecraft) Loading 48 chunks for player spawn...
+[16:43:02] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:02] [Server thread/INFO] (Minecraft) Preparing spawn area: 100%
+[16:43:02] [Server thread/INFO] (Minecraft) Time elapsed: 2046 ms
+[16:43:03] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:03] [Server thread/INFO] (Minecraft) Player911[local:E:6f4fb7c5] logged in with entity id 1 at (160.5, 78.0, 160.5)
+[16:43:03] [Server thread/INFO] (Minecraft) Player911 joined the game
+[16:43:03] [Render thread/INFO] (Minecraft) Loaded 2 advancements
+[16:43:03] [Server thread/INFO] (Minecraft) Changing view distance to 16, from 10
+[16:43:03] [Server thread/INFO] (Minecraft) Changing simulation distance to 16, from 0
+[16:43:03] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:03] [Download-1/ERROR] (Minecraft) Failed to retrieve profile key pair
+MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/certificates, error=null, errorMessage=null, details=null]]
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.readServiceResponse(MinecraftClient.java:147)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.post(MinecraftClient.java:89)
+	at knot//com.mojang.authlib.yggdrasil.YggdrasilUserApiService.getKeyPair(YggdrasilUserApiService.java:62)
+	at knot//net.minecraft.client.multiplayer.AccountProfileKeyPairManager.fetchProfileKeyPair(AccountProfileKeyPairManager.java:119)
+	at knot//net.minecraft.client.multiplayer.AccountProfileKeyPairManager.lambda$readOrFetchProfileKeyPair$0(AccountProfileKeyPairManager.java:72)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[16:43:05] [Render thread/INFO] (Minecraft) Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (Minecraft) Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (Minecraft) Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 2 reached during a single frame. New capacity will be 8.
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@5888cc86
+[16:43:05] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 16 reached during a single frame. New capacity will be 32.
+[16:43:05] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: null
+[16:43:06] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 32 reached during a single frame. New capacity will be 64.
+[16:43:06] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: singleplayer world loaded
+[16:43:06] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 64 reached during a single frame. New capacity will be 128.
+[16:43:06] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: resized to 1280x720
+[16:43:06] [Render thread/WARN] (Minecraft) Failed to find suitable monitor for fullscreen mode
+[16:43:06] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 2560x1440 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[16:43:07] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 2560x1440 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[16:43:08] [Render thread/WARN] (Minecraft) Failed to find suitable monitor for fullscreen mode
+[16:43:08] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 2560x1440 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[16:43:08] [Render thread/INFO] (MetalGpuSurface) MetalCraft surface configured: 2560x1440 presentMode=IMMEDIATE displaySync=false unlockedFrameRate=true
+[16:43:08] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: fullscreen round trip completed
+[16:43:08] [Render thread/INFO] (Minecraft) Reloading ResourceManager: vanilla, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-getter-api-v2, fabric-client-gametest-api-v1, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-creative-tab-api-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-debug-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-gametest-api-v1, fabric-item-api-v1, fabric-key-mapping-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v3, fabric-menu-api-v1, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-permission-api-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, metalcraft
+[16:43:08] [Worker-Main-14/INFO] (Minecraft) Found unifont_pua-17.0.01.hex, loading
+[16:43:08] [Worker-Main-13/INFO] (Minecraft) Found unifont_all_no_pua-17.0.01.hex, loading
+[16:43:08] [Worker-Main-7/INFO] (Minecraft) Found unifont_jp_patch-17.0.01.hex, loading
+[16:43:08] [Server thread/INFO] (Minecraft) Saving and pausing game...
+[16:43:08] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[16:43:08] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[16:43:08] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[16:43:08] [Render thread/INFO] (WorldGeometryAdapter) Shader pack 'metalcraft-standard' leaves 2 pipeline(s) outside the G-buffer: [minecraft:pipeline/translucent_terrain, minecraft:pipeline/entity_translucent]
+[16:43:08] [Render thread/INFO] (ShaderPackRuntime) Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 3686400 bytes
+[16:43:10] [Render thread/INFO] (ShaderPackRuntime) Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 3686400 bytes
+[16:43:10] [Render thread/INFO] (Minecraft) OpenAL initialized on device DENON-AVR
+[16:43:10] [Render thread/INFO] (Minecraft) Sound engine started
+[16:43:10] [Render thread/INFO] (Minecraft) Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[16:43:10] [Render thread/INFO] (Minecraft) Created: 128x128x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[16:43:10] [Render thread/INFO] (Minecraft) Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+[16:43:10] [Render thread/INFO] (Minecraft) Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[16:43:10] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[16:43:10] [Render thread/INFO] (Minecraft) Created: 2048x2048x4 minecraft:textures/atlas/blocks.png-atlas
+[16:43:11] [Render thread/INFO] (Minecraft) Created: 512x512x0 minecraft:textures/atlas/chest.png-atlas
+[16:43:11] [Render thread/INFO] (Minecraft) Created: 256x128x0 minecraft:textures/atlas/celestials.png-atlas
+[16:43:11] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[16:43:11] [Render thread/INFO] (Minecraft) Created: 1024x512x0 minecraft:textures/atlas/items.png-atlas
+[16:43:11] [Render thread/INFO] (Minecraft) Created: 1024x1024x0 minecraft:textures/atlas/gui.png-atlas
+[16:43:11] [Render thread/INFO] (Minecraft) Created: 128x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[16:43:11] [Render thread/INFO] (Minecraft) Created: 512x512x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[16:43:15] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 128 reached during a single frame. New capacity will be 256.
+[16:43:16] [Server thread/WARN] (Minecraft) Can't keep up! Is the server overloaded? Running 7336ms or 146 ticks behind
+[16:43:18] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 256 reached during a single frame. New capacity will be 512.
+[16:43:20] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: resource reload completed
+[16:43:20] [Render thread/INFO] (MetalLifecycleGameTest) Metal terrain shadows: 633 draws, 3228 rendered frames
+[16:43:20] [Render thread/INFO] (Minecraft) Resizing Chunk Sections UBO, capacity limit of 512 reached during a single frame. New capacity will be 1024.
+[16:43:20] [Render thread/INFO] (Minecraft) Resizing Dynamic Transforms UBO, capacity limit of 16 reached during a single frame. New capacity will be 32.
+[16:43:20] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: screenshot written to /Users/jackangione/Desktop/VULKAN SHADERS/run/screenshots/0000_metalcraft-world-metal.png
+[16:43:20] [Render thread/INFO] (WorldGeometryAdapter) Shader pack 'metalcraft-standard' leaves 2 pipeline(s) outside the G-buffer: [minecraft:pipeline/translucent_terrain, minecraft:pipeline/entity_translucent]
+[16:43:20] [Render thread/ERROR] (ShaderPackRuntime) MetalCraft shader pack 'metalcraft-lifecycle-missing-pack': Unknown shader pack 'metalcraft-lifecycle-missing-pack'
+dev.metalcraft.client.shader.ShaderPackLoader$LoadException: Unknown shader pack 'metalcraft-lifecycle-missing-pack'
+	at knot//dev.metalcraft.client.shader.ShaderPackRuntime.loadById(ShaderPackRuntime.java:447)
+	at knot//dev.metalcraft.client.shader.ShaderPackRuntime.loadSelected(ShaderPackRuntime.java:285)
+	at knot//dev.metalcraft.client.shader.ShaderPackRuntime.selectPack(ShaderPackRuntime.java:164)
+	at knot//dev.metalcraft.client.test.MetalLifecycleGameTest$ShaderLifecycleSelection.lambda$assertFailureRecovery$0(MetalLifecycleGameTest.java:261)
+	at knot//net.fabricmc.fabric.impl.client.gametest.context.ClientGameTestContextImpl.lambda$runOnClient$0(ClientGameTestContextImpl.java:536)
+	at knot//net.fabricmc.fabric.impl.client.gametest.threading.ThreadingImpl.runTaskOnThisThread(ThreadingImpl.java:229)
+	at knot//net.fabricmc.fabric.impl.client.gametest.threading.ThreadingImpl.lambda$runTaskOnOtherThread$0(ThreadingImpl.java:210)
+	at knot//net.minecraft.client.Minecraft.postRunTasks(Minecraft.java:7731)
+	at knot//net.minecraft.client.Minecraft.handler$bag000$fabric-client-gametest-api-v1$postRunTasksHook(Minecraft.java:7683)
+	at knot//net.minecraft.client.Minecraft.runTick(Minecraft.java:1175)
+	at knot//net.minecraft.client.Minecraft.run$mixinextras$wrapped$286(Minecraft.java:899)
+	at knot//net.minecraft.client.Minecraft.mixinextras$bridge$run$mixinextras$wrapped$286$287(Minecraft.java)
+	at knot//net.minecraft.client.Minecraft.wrapMethod$bag000$fabric-client-gametest-api-v1$onRun(Minecraft.java:7651)
+	at knot//net.minecraft.client.Minecraft.run(Minecraft.java)
+	at knot//net.minecraft.client.main.Main.main(Main.java:277)
+	at net.fabricmc.loader.impl.game.minecraft.MinecraftGameProvider.launch(MinecraftGameProvider.java:514)
+	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:72)
+	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
+	at net.fabricmc.devlaunchinjector.Main.main(Main.java:86)
+[16:43:20] [Render thread/INFO] (ShaderPackRuntime) Loaded MetalCraft shader pack 'MetalCraft Standard': 3 pass(es), 4 target(s), 18 option(s), 3686400 bytes
+[16:43:21] [Render thread/INFO] (MetalLifecycleGameTest) Metal terrain shadows: 629 draws, 142 rendered frames
+[16:43:21] [Test thread/INFO] (MetalLifecycleGameTest) Metal shader lifecycle validation: reload, resize, failure fallback and recovery passed
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle performance: backend=Metal phase=lifecycle frames=830 seconds=2.9 avgFps=288.2 onePercentLow=162.8 pointOnePercentLow=116.7 p50CpuMs=3.189 p95CpuMs=3.999 p99CpuMs=4.304 p50IntervalMs=3.266 p99IntervalMs=5.260 worstIntervalMs=8.566 p50AcquireMs=0.007 p99AcquireMs=0.019 p50OutsideLoopMs=0.035 p99OutsideLoopMs=0.071
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle whole-phase render_frame=2779.745ms/830 gpu_frame=2352.883ms/830 buffer_create=341.468ms/193903 447.6MiB command_batch=189.653ms/174552 144.4MiB buffer_map=154.280ms/995400 301.0MiB lod_prepare=77.922ms/1660 0.6MiB client_tick=33.477ms/57 client_post_tasks=18.693ms/830 client_packets=10.794ms/830 jvm_gc=10.000ms/5 resource_release=8.203ms/193852 445.7MiB acquire=6.539ms/830 submit=6.188ms/830 level_end_frame=4.847ms/830 client_post_render=4.549ms/830 client_pre_frame=3.935ms/830 upload_copy=2.743ms/2034 22.6MiB client_pre_render=1.010ms/830 present=0.456ms/830 harness_handoff=0.447ms/60 client_tasks=0.257ms/830 arena_wait=0.229ms/830 task_drain=0.182ms/830 client_gizmos=0.083ms/57 render_pass_merge=0.000ms/4980
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle worst-1% render_frame=43.459ms/8 gpu_frame=25.338ms/9 jvm_gc=10.000ms/4 client_tick=4.109ms/6 buffer_map=3.909ms/9620 2.9MiB buffer_create=3.482ms/1872 3.6MiB command_batch=2.053ms/1678 1.4MiB client_post_tasks=2.047ms/8 lod_prepare=1.116ms/16 resource_release=0.159ms/1879 5.4MiB acquire=0.116ms/8 submit=0.107ms/8 upload_copy=0.052ms/21 0.3MiB level_end_frame=0.048ms/8 harness_handoff=0.046ms/6 client_pre_frame=0.045ms/8 client_post_render=0.043ms/8 present=0.011ms/8 client_pre_render=0.011ms/8 client_gizmos=0.010ms/6 arena_wait=0.006ms/8 client_tasks=0.002ms/8 client_packets=0.002ms/8 task_drain=0.001ms/8 render_pass_merge=0.000ms/48
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle tasks total=0.008ms/4 dev.metalcraft.client.test.MetalLifecycleGameTest$$Lambda=0.008ms/4
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle gpuPassSpans sumOfSpans=8927.034ms/9040 MetalCraft shader: shadow_terrain=1689.240ms/859 Section layers for opaque=1351.691ms/859 Section layers for translucent=1266.357ms/859 MetalCraft shader: grade=1208.155ms/859 Immediate draw with minecraft:pipeline/entity_translucent=1207.294ms/859 (depth clear)=1124.877ms/1718 Particles - Solid=1010.137ms/859 Sky disc=48.472ms/859 GUI before blur=16.334ms/859 Animate minecraft:textures/atlas/blocks.png=3.217ms/300 Animate minecraft:textures/atlas/particles.png=0.515ms/60 Update light=0.456ms/60
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle frame=693 intervalMs=8.566 cpuMs=7.633 outsideLoopMs=0.031 render_frame=7.686ms/1 gpu_frame=5.843ms/2 jvm_gc=3.000ms/1 client_tick=0.567ms/1 buffer_create=0.450ms/237 0.0MiB command_batch=0.281ms/211 0.2MiB client_post_tasks=0.272ms/1 buffer_map=0.218ms/1236 0.4MiB lod_prepare=0.101ms/2 resource_release=0.039ms/244 1.8MiB submit=0.014ms/1 acquire=0.012ms/1 harness_handoff=0.008ms/1 level_end_frame=0.005ms/1 upload_copy=0.004ms/2 0.0MiB client_pre_frame=0.003ms/1 client_post_render=0.003ms/1 present=0.003ms/1 client_gizmos=0.002ms/1 client_pre_render=0.001ms/1 arena_wait=0.001ms/1 client_tasks=0.000ms/1 task_drain=0.000ms/1 client_packets=0.000ms/1 render_pass_merge=0.000ms/6 unphasedMs=-0.001
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle frame=442 intervalMs=7.415 cpuMs=6.412 outsideLoopMs=0.037 render_frame=6.460ms/1 jvm_gc=3.000ms/1 gpu_frame=2.866ms/1 buffer_map=2.487ms/1223 0.4MiB client_tick=0.569ms/1 buffer_create=0.440ms/236 0.5MiB client_post_tasks=0.339ms/1 command_batch=0.294ms/211 0.2MiB lod_prepare=0.156ms/2 resource_release=0.016ms/236 0.5MiB acquire=0.015ms/1 submit=0.013ms/1 harness_handoff=0.008ms/1 upload_copy=0.006ms/2 0.0MiB client_pre_frame=0.006ms/1 level_end_frame=0.006ms/1 client_post_render=0.005ms/1 client_pre_render=0.002ms/1 client_gizmos=0.001ms/1 arena_wait=0.001ms/1 present=0.001ms/1 client_tasks=0.000ms/1 client_packets=0.000ms/1 task_drain=0.000ms/1 render_pass_merge=0.000ms/6 unphasedMs=-0.005
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle frame=710 intervalMs=6.523 cpuMs=6.427 outsideLoopMs=0.043 render_frame=6.473ms/1 jvm_gc=3.000ms/1 gpu_frame=2.853ms/1 buffer_create=0.509ms/247 0.5MiB command_batch=0.236ms/211 0.2MiB buffer_map=0.206ms/1274 0.4MiB lod_prepare=0.101ms/2 resource_release=0.021ms/247 0.5MiB submit=0.012ms/1 level_end_frame=0.007ms/1 acquire=0.007ms/1 client_pre_frame=0.004ms/1 upload_copy=0.004ms/5 0.0MiB client_post_render=0.003ms/1 present=0.003ms/1 client_pre_render=0.001ms/1 client_post_tasks=0.001ms/1 arena_wait=0.000ms/1 client_packets=0.000ms/1 client_tasks=0.000ms/1 task_drain=0.000ms/1 render_pass_merge=0.000ms/6 unphasedMs=-0.002
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle frame=716 intervalMs=5.921 cpuMs=4.387 outsideLoopMs=0.041 render_frame=4.443ms/1 gpu_frame=2.973ms/1 client_tick=1.076ms/1 buffer_create=0.447ms/248 0.5MiB client_post_tasks=0.350ms/1 command_batch=0.271ms/211 0.2MiB buffer_map=0.224ms/1278 0.4MiB lod_prepare=0.166ms/2 acquire=0.019ms/1 resource_release=0.018ms/248 0.5MiB submit=0.014ms/1 harness_handoff=0.011ms/1 client_pre_frame=0.007ms/1 upload_copy=0.006ms/2 0.0MiB level_end_frame=0.006ms/1 client_post_render=0.004ms/1 client_gizmos=0.002ms/1 client_pre_render=0.001ms/1 arena_wait=0.001ms/1 present=0.001ms/1 client_packets=0.000ms/1 client_tasks=0.000ms/1 task_drain=0.000ms/1 render_pass_merge=0.000ms/6 unphasedMs=-0.003
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle frame=234 intervalMs=5.499 cpuMs=5.405 outsideLoopMs=0.044 render_frame=5.447ms/1 gpu_frame=2.710ms/1 jvm_gc=1.000ms/1 buffer_create=0.341ms/228 0.5MiB command_batch=0.220ms/209 0.2MiB buffer_map=0.168ms/1161 0.3MiB lod_prepare=0.112ms/2 resource_release=0.013ms/228 0.5MiB submit=0.010ms/1 upload_copy=0.010ms/4 0.3MiB acquire=0.010ms/1 level_end_frame=0.006ms/1 client_post_render=0.005ms/1 client_pre_frame=0.004ms/1 client_pre_render=0.002ms/1 present=0.001ms/1 client_post_tasks=0.001ms/1 client_tasks=0.000ms/1 client_packets=0.000ms/1 task_drain=0.000ms/1 arena_wait=0.000ms/1 render_pass_merge=0.000ms/6 unphasedMs=-0.005
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle frame=729 intervalMs=5.409 cpuMs=4.304 outsideLoopMs=0.041 render_frame=4.364ms/1 gpu_frame=2.915ms/1 client_tick=0.623ms/1 buffer_create=0.454ms/248 0.5MiB client_post_tasks=0.369ms/1 command_batch=0.267ms/211 0.2MiB buffer_map=0.216ms/1278 0.4MiB lod_prepare=0.166ms/2 acquire=0.018ms/1 resource_release=0.017ms/248 0.5MiB submit=0.015ms/1 upload_copy=0.008ms/2 0.0MiB harness_handoff=0.008ms/1 client_pre_frame=0.007ms/1 level_end_frame=0.006ms/1 client_post_render=0.004ms/1 client_gizmos=0.002ms/1 client_pre_render=0.002ms/1 present=0.001ms/1 arena_wait=0.001ms/1 client_tasks=0.000ms/1 task_drain=0.000ms/1 client_packets=0.000ms/1 render_pass_merge=0.000ms/6 unphasedMs=-0.003
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle frame=8 intervalMs=5.391 cpuMs=4.257 outsideLoopMs=0.040 render_frame=4.312ms/1 gpu_frame=2.602ms/1 client_tick=0.700ms/1 buffer_create=0.417ms/214 0.5MiB client_post_tasks=0.328ms/1 command_batch=0.236ms/207 0.2MiB buffer_map=0.195ms/1083 0.3MiB lod_prepare=0.151ms/2 acquire=0.019ms/1 resource_release=0.018ms/214 0.5MiB submit=0.013ms/1 client_post_render=0.009ms/1 client_pre_frame=0.007ms/1 level_end_frame=0.006ms/1 upload_copy=0.005ms/2 0.0MiB harness_handoff=0.005ms/1 client_gizmos=0.001ms/1 client_pre_render=0.001ms/1 present=0.001ms/1 arena_wait=0.001ms/1 client_packets=0.000ms/1 client_tasks=0.000ms/1 task_drain=0.000ms/1 render_pass_merge=0.000ms/6 unphasedMs=-0.008
+[16:43:24] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle stall: phase=lifecycle frame=35 intervalMs=5.287 cpuMs=4.217 outsideLoopMs=0.039 render_frame=4.275ms/1 gpu_frame=2.575ms/1 client_tick=0.574ms/1 buffer_create=0.424ms/214 0.5MiB client_post_tasks=0.388ms/1 command_batch=0.247ms/207 0.2MiB buffer_map=0.194ms/1087 0.3MiB lod_prepare=0.162ms/2 acquire=0.018ms/1 resource_release=0.017ms/214 0.5MiB submit=0.014ms/1 client_post_render=0.008ms/1 upload_copy=0.008ms/2 0.0MiB harness_handoff=0.007ms/1 client_pre_frame=0.006ms/1 level_end_frame=0.005ms/1 client_gizmos=0.002ms/1 arena_wait=0.002ms/1 present=0.001ms/1 client_pre_render=0.001ms/1 client_packets=0.000ms/1 client_tasks=0.000ms/1 task_drain=0.000ms/1 render_pass_merge=0.000ms/6 unphasedMs=-0.007
+[16:43:24] [Server thread/INFO] (Minecraft) Player911 lost connection: Disconnected
+[16:43:24] [Server thread/INFO] (Minecraft) Player911 left the game
+[16:43:24] [Server thread/INFO] (Minecraft) Stopping singleplayer server as player logged out
+[16:43:24] [Server thread/INFO] (Minecraft) Stopping server
+[16:43:24] [Server thread/INFO] (Minecraft) Saving players
+[16:43:24] [Server thread/INFO] (Minecraft) Saving worlds
+[16:43:24] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[16:43:25] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[16:43:25] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[16:43:25] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[16:43:25] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[16:43:25] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[16:43:25] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[16:43:25] [Render thread/INFO] (WorldGeometryAdapter) Shader pack 'metalcraft-standard' leaves 2 pipeline(s) outside the G-buffer: [minecraft:pipeline/translucent_terrain, minecraft:pipeline/entity_translucent]
+[16:43:25] [Test thread/INFO] (MetalLifecycleGameTest) Metal lifecycle validation: world closed; clean client shutdown requested
+[16:43:25] [Render thread/INFO] (Minecraft) Loaded 1585 recipes
+[16:43:25] [Render thread/INFO] (Minecraft) Loaded 1688 advancements
+[16:43:25] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.GenericMessageScreen@475b6fb2
+[16:43:25] [Render thread/INFO] (BiomeModificationImpl) Applied 0 biome modifications to 0 of 66 new biomes in 163.7 μs
+[16:43:25] [Server thread/INFO] (Minecraft) Starting integrated minecraft server version 26.2
+[16:43:25] [Server thread/INFO] (Minecraft) Generating keypair
+[16:43:25] [Server thread/INFO] (Minecraft) Selecting global world spawn...
+[16:43:25] [Server thread/INFO] (Minecraft) Loading 0 persistent chunks...
+[16:43:25] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[16:43:25] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[16:43:25] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[16:43:25] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[16:43:25] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[16:43:25] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[16:43:25] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[16:43:25] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[16:43:25] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:25] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:25] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:25] [Server thread/INFO] (Minecraft) Loading 48 chunks for player spawn...
+[16:43:25] [Server thread/INFO] (Minecraft) Preparing spawn area: 16%
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Server thread/INFO] (Minecraft) Preparing spawn area: 58%
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Server thread/INFO] (Minecraft) Time elapsed: 1093 ms
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Server thread/INFO] (Minecraft) Player911[local:E:8317ce08] logged in with entity id 265 at (160.5, 70.0, 160.5)
+[16:43:26] [Server thread/INFO] (Minecraft) Player911 joined the game
+[16:43:26] [Server thread/INFO] (Minecraft) Changing view distance to 16, from 10
+[16:43:26] [Server thread/INFO] (Minecraft) Changing simulation distance to 16, from 0
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: null screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (Minecraft) Loaded 2 advancements
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Download-1/ERROR] (Minecraft) Failed to retrieve profile key pair
+MinecraftClientHttpException[type=HTTP_ERROR, status=401, response=ErrorResponse[path=/player/certificates, error=null, errorMessage=null, details=null]]
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.buildHttpException(MinecraftClient.java:170)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.readServiceResponse(MinecraftClient.java:147)
+	at knot//com.mojang.authlib.minecraft.client.MinecraftClient.post(MinecraftClient.java:89)
+	at knot//com.mojang.authlib.yggdrasil.YggdrasilUserApiService.getKeyPair(YggdrasilUserApiService.java:62)
+	at knot//net.minecraft.client.multiplayer.AccountProfileKeyPairManager.fetchProfileKeyPair(AccountProfileKeyPairManager.java:119)
+	at knot//net.minecraft.client.multiplayer.AccountProfileKeyPairManager.lambda$readOrFetchProfileKeyPair$0(AccountProfileKeyPairManager.java:72)
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1789)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:26] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: net.minecraft.client.gui.screens.LevelLoadingScreen@258d255b
+[16:43:27] [Render thread/INFO] (fabric-client-gametest-api-v1) World loading finished: ClientLevel screen: null
+[16:43:28] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: world loaded
+[16:43:28] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: creative screen open
+[16:43:29] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: search tab selected, rendered clean
+[16:43:29] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: rendered results for "s"
+[16:43:29] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: rendered results for "st"
+[16:43:30] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: rendered results for "sto"
+[16:43:30] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: rendered results for "ston"
+[16:43:30] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: rendered results for "stone"
+[16:43:31] [Test thread/INFO] (MetalCreativeSearchGameTest) Metal creative search validation: item atlas survived a full query
+[16:43:31] [Server thread/INFO] (Minecraft) Player911 lost connection: Disconnected
+[16:43:31] [Server thread/INFO] (Minecraft) Player911 left the game
+[16:43:31] [Server thread/INFO] (Minecraft) Stopping singleplayer server as player logged out
+[16:43:31] [Server thread/INFO] (Minecraft) Stopping server
+[16:43:31] [Server thread/INFO] (Minecraft) Saving players
+[16:43:31] [Server thread/INFO] (Minecraft) Saving worlds
+[16:43:31] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[16:43:32] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[16:43:32] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[16:43:32] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[16:43:32] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[16:43:32] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[16:43:32] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[16:43:32] [Test thread/INFO] (Minecraft) [STDOUT]: LOD compatibility ownership passed: Stats[uploads=614, uploadedBytes=75450672, draws=425827, originalTriangles=389609974, replacementTriangles=366518428, staleFallbacks=0, uploadFailures=0, chargedBytes=0, residentMeshes=0, retiredMeshes=0, frameUploadBytes=0, prepareNanos=2750, frameSelected=0, tier1Draws=355587, tier2Draws=69267, tier3Draws=973, tier4Draws=0, shadowDraws=418090, shadowOriginalTriangles=382973868, shadowReplacementTriangles=360204626, terrainDraws=2712935, terrainInputTriangles=3066701330, terrainRenderedTriangles=3043609784, distantDraws=2482916, distantInputTriangles=2682624708, distantRenderedTriangles=2659533162]
+[16:43:32] [Render thread/INFO] (Minecraft) Stopping!

@@ -21,7 +21,10 @@ public final class MetalCraftClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		dev.metalcraft.client.horizon.NativeHorizon.initialize();
 		ClientLifecycleEvents.CLIENT_STARTED.register(client -> initializeRendererExtensions());
+		if (Integer.getInteger("metalcraft.memoryProbeSeconds", 0) > 0)
+			dev.metalcraft.client.test.MetalMemoryProbe.register();
 	}
 
 	private static void initializeRendererExtensions() {

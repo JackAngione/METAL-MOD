@@ -1,0 +1,87 @@
+
+> Configure project :
+Fabric Loom: 1.17.20
+
+> Task :compileLodTileShadingProbe
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava UP-TO-DATE
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses UP-TO-DATE
+> Task :compileShaderSmokeJava UP-TO-DATE
+> Task :processShaderSmokeResources NO-SOURCE
+> Task :shaderSmokeClasses UP-TO-DATE
+
+> Task :lodShadingBenchmark
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by dev.metalcraft.client.metal.MetalNative in an unnamed module (file:/Users/jackangione/Desktop/VULKAN%20SHADERS/build/classes/java/client/)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.joml.MemUtil$MemUtilUnsafe (file:/Users/jackangione/.gradle/caches/modules-2/files-2.1/org.joml/joml/1.10.8/fc0a71dad90a2cf41d82a76156a0e700af8e4f8d/joml-1.10.8.jar)
+WARNING: Please consider reporting this to the maintainers of class org.joml.MemUtil$MemUtilUnsafe
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+P6 shadows=96 1279x719 repeat=1 GPU medians: merged=0.1100 bands=0.2098 fused=0.1340 quad=0.1168 ms
+P6 shadows=96 1279x719 repeat=2 GPU medians: merged=0.1096 bands=0.2087 fused=0.1338 quad=0.1169 ms
+P6 shadows=96 1279x719 repeat=3 GPU medians: merged=0.1101 bands=0.2092 fused=0.1334 quad=0.1163 ms
+P6 shadows=96 1920x1080 repeat=1 GPU medians: merged=0.2114 bands=0.4160 fused=0.2545 quad=0.2249 ms
+P6 shadows=96 1920x1080 repeat=2 GPU medians: merged=0.2117 bands=0.4171 fused=0.2554 quad=0.2250 ms
+P6 shadows=96 1920x1080 repeat=3 GPU medians: merged=0.2117 bands=0.4172 fused=0.2547 quad=0.2246 ms
+P6 shadows=96 3840x2160 repeat=1 GPU medians: merged=0.7695 bands=1.6290 fused=0.9437 quad=0.8175 ms
+P6 shadows=96 3840x2160 repeat=2 GPU medians: merged=0.7711 bands=1.6297 fused=0.9442 quad=0.8175 ms
+P6 shadows=96 3840x2160 repeat=3 GPU medians: merged=0.7714 bands=1.6308 fused=0.9453 quad=0.8183 ms
+P6 shadows=256 1279x719 repeat=1 GPU medians: merged=0.1351 bands=0.2167 fused=0.1824 quad=0.1470 ms
+P6 shadows=256 1279x719 repeat=2 GPU medians: merged=0.1343 bands=0.2168 fused=0.1818 quad=0.1475 ms
+P6 shadows=256 1279x719 repeat=3 GPU medians: merged=0.1350 bands=0.2168 fused=0.1827 quad=0.1469 ms
+P6 shadows=256 1920x1080 repeat=1 GPU medians: merged=0.2664 bands=0.4294 fused=0.3685 quad=0.2910 ms
+P6 shadows=256 1920x1080 repeat=2 GPU medians: merged=0.2660 bands=0.4288 fused=0.3679 quad=0.2907 ms
+P6 shadows=256 1920x1080 repeat=3 GPU medians: merged=0.2665 bands=0.4296 fused=0.3682 quad=0.2910 ms
+P6 shadows=256 3840x2160 repeat=1 GPU medians: merged=0.9894 bands=1.6585 fused=1.3972 quad=1.0780 ms
+P6 shadows=256 3840x2160 repeat=2 GPU medians: merged=0.9889 bands=1.6598 fused=1.3973 quad=1.0777 ms
+P6 shadows=256 3840x2160 repeat=3 GPU medians: merged=0.9895 bands=1.6590 fused=1.3989 quad=1.0775 ms
+
+> Task :lodTileShadingBenchmark
+P6 tile direct shadows=96 1279x719 repeat=1 GPU medians merged=0.1105 tile=0.1284 ms
+P6 tile direct shadows=96 1279x719 repeat=2 GPU medians merged=0.1096 tile=0.1277 ms
+P6 tile direct shadows=96 1279x719 repeat=3 GPU medians merged=0.1098 tile=0.1277 ms
+P6 tile direct shadows=96 1920x1080 repeat=1 GPU medians merged=0.2215 tile=0.2579 ms
+P6 tile direct shadows=96 1920x1080 repeat=2 GPU medians merged=0.2210 tile=0.2581 ms
+P6 tile direct shadows=96 1920x1080 repeat=3 GPU medians merged=0.2212 tile=0.2580 ms
+P6 tile direct shadows=96 3840x2160 repeat=1 GPU medians merged=0.8154 tile=0.9551 ms
+P6 tile direct shadows=96 3840x2160 repeat=2 GPU medians merged=0.8150 tile=0.9552 ms
+P6 tile direct shadows=96 3840x2160 repeat=3 GPU medians merged=0.8150 tile=0.9551 ms
+P6 tile direct shadows=256 1279x719 repeat=1 GPU medians merged=0.1322 tile=0.1525 ms
+P6 tile direct shadows=256 1279x719 repeat=2 GPU medians merged=0.1330 tile=0.1522 ms
+P6 tile direct shadows=256 1279x719 repeat=3 GPU medians merged=0.1328 tile=0.1525 ms
+P6 tile direct shadows=256 1920x1080 repeat=1 GPU medians merged=0.2686 tile=0.3126 ms
+P6 tile direct shadows=256 1920x1080 repeat=2 GPU medians merged=0.2707 tile=0.3105 ms
+P6 tile direct shadows=256 1920x1080 repeat=3 GPU medians merged=0.2703 tile=0.3110 ms
+P6 tile direct shadows=256 3840x2160 repeat=1 GPU medians merged=1.0060 tile=1.1648 ms
+P6 tile direct shadows=256 3840x2160 repeat=2 GPU medians merged=1.0060 tile=1.1649 ms
+P6 tile direct shadows=256 3840x2160 repeat=3 GPU medians merged=1.0064 tile=1.1645 ms
+
+> Task :lodPackedTileShadingBenchmark
+P6 tile packed shadows=96 1279x719 repeat=1 GPU medians merged=0.1060 tile=0.1511 ms
+P6 tile packed shadows=96 1279x719 repeat=2 GPU medians merged=0.1102 tile=0.1555 ms
+P6 tile packed shadows=96 1279x719 repeat=3 GPU medians merged=0.1104 tile=0.1523 ms
+P6 tile packed shadows=96 1920x1080 repeat=1 GPU medians merged=0.2123 tile=0.3049 ms
+P6 tile packed shadows=96 1920x1080 repeat=2 GPU medians merged=0.2108 tile=0.3036 ms
+P6 tile packed shadows=96 1920x1080 repeat=3 GPU medians merged=0.2121 tile=0.3045 ms
+P6 tile packed shadows=96 3840x2160 repeat=1 GPU medians merged=0.7706 tile=1.1520 ms
+P6 tile packed shadows=96 3840x2160 repeat=2 GPU medians merged=0.7701 tile=1.1509 ms
+P6 tile packed shadows=96 3840x2160 repeat=3 GPU medians merged=0.7710 tile=1.1520 ms
+P6 tile packed shadows=256 1279x719 repeat=1 GPU medians merged=0.1343 tile=0.1879 ms
+P6 tile packed shadows=256 1279x719 repeat=2 GPU medians merged=0.1345 tile=0.1885 ms
+P6 tile packed shadows=256 1279x719 repeat=3 GPU medians merged=0.1344 tile=0.1882 ms
+P6 tile packed shadows=256 1920x1080 repeat=1 GPU medians merged=0.2657 tile=0.3889 ms
+P6 tile packed shadows=256 1920x1080 repeat=2 GPU medians merged=0.2665 tile=0.3891 ms
+P6 tile packed shadows=256 1920x1080 repeat=3 GPU medians merged=0.2660 tile=0.3870 ms
+P6 tile packed shadows=256 3840x2160 repeat=1 GPU medians merged=0.9867 tile=1.4756 ms
+P6 tile packed shadows=256 3840x2160 repeat=2 GPU medians merged=0.9857 tile=1.4727 ms
+P6 tile packed shadows=256 3840x2160 repeat=3 GPU medians merged=0.9863 tile=1.4743 ms
+
+BUILD SUCCESSFUL in 30s
+9 actionable tasks: 4 executed, 5 up-to-date

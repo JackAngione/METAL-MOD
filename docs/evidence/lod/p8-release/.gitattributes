@@ -1,0 +1,3 @@
+# Preserve raw unified-diff context and emitted shader text byte for byte.
+*.patch -whitespace
+validation/texel-schema-red.txt -whitespace

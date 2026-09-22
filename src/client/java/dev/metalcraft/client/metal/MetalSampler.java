@@ -19,8 +19,13 @@ public final class MetalSampler implements AutoCloseable {
 		AddressMode addressModeU,
 		AddressMode addressModeV,
 		int maxAnisotropy,
-		double maxLod
+		double maxLod,
+		double minLod
 	) {
+		public Descriptor(final Filter minFilter, final Filter magFilter, final AddressMode addressModeU,
+			final AddressMode addressModeV, final int maxAnisotropy, final double maxLod) {
+			this(minFilter, magFilter, addressModeU, addressModeV, maxAnisotropy, maxLod, 0.0);
+		}
 		public Descriptor(final Filter minFilter, final Filter magFilter, final AddressMode addressMode) {
 			this(minFilter, magFilter, addressMode, addressMode, 1, Double.POSITIVE_INFINITY);
 		}
@@ -29,7 +34,8 @@ public final class MetalSampler implements AutoCloseable {
 			if (minFilter == null || magFilter == null || addressModeU == null || addressModeV == null) {
 				throw new NullPointerException("Metal sampler descriptor fields cannot be null");
 			}
-			if (maxAnisotropy < 1 || maxAnisotropy > 16 || Double.isNaN(maxLod) || maxLod < 0.0) {
+			if (maxAnisotropy < 1 || maxAnisotropy > 16 || Double.isNaN(maxLod) || maxLod < 0.0
+				|| !Double.isFinite(minLod) || minLod < 0.0 || minLod > maxLod) {
 				throw new IllegalArgumentException("Metal sampler anisotropy or maximum LOD is out of range");
 			}
 		}

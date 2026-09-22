@@ -1,0 +1,525 @@
+diff --git a/build.gradle b/build.gradle
+index 1fc6bd0..b621fd3 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -81,6 +81,13 @@ tasks.register('lodSmoke', JavaExec) {
+ 	mainClass = 'dev.metalcraft.client.lod.LodSmoke'
+ }
+ 
++tasks.register('lodDenseProbe', JavaExec) {
++	dependsOn tasks.named('compileShaderSmokeJava')
++	classpath = sourceSets.shaderSmoke.runtimeClasspath
++	mainClass = 'dev.metalcraft.client.lod.LodDenseProbe'
++	maxHeapSize = '1G'
++}
++
+ tasks.named('check') {
+ 	dependsOn tasks.named('lodSmoke')
+ }
+diff --git a/src/client/java/dev/metalcraft/client/lod/LodCapturedMesh.java b/src/client/java/dev/metalcraft/client/lod/LodCapturedMesh.java
+index da854a1..fdd9e6c 100644
+--- a/src/client/java/dev/metalcraft/client/lod/LodCapturedMesh.java
++++ b/src/client/java/dev/metalcraft/client/lod/LodCapturedMesh.java
+@@ -41,6 +41,15 @@ public final class LodCapturedMesh implements AutoCloseable {
+         return ticket.current() && atlas == LodAtlas.current() && current != null ? current.get(tier - 1) : null;
+     }
+ 
++    /** Alias only identical immutable meshes, never merely equal triangle counts. */
++    public int residencyTier(int tier) {
++        if (tier < 1 || tier > 4) throw new IllegalArgumentException("LOD tier must be 1–4");
++        var current = meshes;
++        if (current != null) for (int index = 0; index < tier - 1; index++)
++            if (current.get(index) == current.get(tier - 1)) return index + 1;
++        return tier;
++    }
++
+     @Override public synchronized void close() {
+         if (meshes == null) return;
+         meshes = null;
+diff --git a/src/client/java/dev/metalcraft/client/lod/LodCompilerCapture.java b/src/client/java/dev/metalcraft/client/lod/LodCompilerCapture.java
+index c0f1a25..fa1bc26 100644
+--- a/src/client/java/dev/metalcraft/client/lod/LodCompilerCapture.java
++++ b/src/client/java/dev/metalcraft/client/lod/LodCompilerCapture.java
+@@ -115,14 +115,13 @@ public final class LodCompilerCapture {
+             }
+             // All construction stays on the admitted compiler worker. Uploading and
+             // selection never rerun simplification while the renderer holds a lock.
+-            var tiers = LodCapabilities.GEOMETRY_AVAILABLE
+-                    ? List.of(baked.simplify(1), baked.simplify(2), baked.simplify(3), simplified)
+-                    : java.util.Collections.nCopies(4, simplified);
+-            // Retained graph: four source vertices/quad, immutable quad/list, at most
+-            // four rectangles and four list references. 1 KiB per input quad bounds
+-            // this even with uncompressed references; temporary merge maps are charged
+-            // separately by the larger build reservation and do not escape the worker.
+-            long retainedBytes = 4096L + count * 1024L;
++            // Every merge preserves positions, flat appearance and unit boundary strips.
++            // The smaller rectangle limits do not improve geometric error or seams;
++            // all selection tiers can therefore share the maximal exact merge.
++            var tiers = java.util.Collections.nCopies(4, simplified);
++            // One source graph and one rectangle list (instead of four). This bound
++            // includes uncompressed references and immutable list/vertex overhead.
++            long retainedBytes = 4096L + count * 768L;
+             long used;
+             do {
+                 used = retained.get();
+diff --git a/src/client/java/dev/metalcraft/client/lod/LodLoadedRenderer.java b/src/client/java/dev/metalcraft/client/lod/LodLoadedRenderer.java
+index 96b6769..41551a0 100644
+--- a/src/client/java/dev/metalcraft/client/lod/LodLoadedRenderer.java
++++ b/src/client/java/dev/metalcraft/client/lod/LodLoadedRenderer.java
+@@ -131,7 +131,7 @@ public final class LodLoadedRenderer {
+             double nearestDepth = -(x * view.m02() + y * view.m12() + z * view.m22())
+                     - 8 * (Math.abs(view.m02()) + Math.abs(view.m12()) + Math.abs(view.m22()));
+             Draw last = previous.get(section);
+-            before[index] = last != null && last.owner == mesh ? last.key.tier() : 0;
++            before[index] = last != null && last.owner == mesh ? last.tier : 0;
+             desired[index] = LodSelector.select(true, nearestDepth, distance, .05, height, fov, settings,
+                     EXACT_SURFACE_ERRORS, before[index]);
+             if (desired[index] > 0) candidates.add(new Candidate(index, section, mesh, capture, distance));
+@@ -159,7 +159,7 @@ public final class LodLoadedRenderer {
+             for (int tier = 1; tier <= usefulTiers[candidate.index()]; tier++) {
+                 var mesh = capture.mesh(tier);
+                 if (mesh == null || mesh.quads() == 0 || mesh.quads() >= mesh.originalQuads()) continue;
+-                var key = new LodMeshResidency.Key(capture.key(), tier);
++                var key = new LodMeshResidency.Key(capture.key(), capture.residencyTier(tier));
+                 if (!residency.contains(key) && remaining > 0) {
+                     long bytes = LodWorldMesh.bytes(mesh);
+                     if (bytes <= allowance - frameUploadBytes) {
+@@ -175,7 +175,7 @@ public final class LodLoadedRenderer {
+         }
+         // Resolve availability after all admission/eviction, then relax every visible boundary.
+         for (var candidate : candidates) for (int tier = 1; tier <= 4; tier++) {
+-            if (residency.contains(new LodMeshResidency.Key(candidate.capture().key(), tier)))
++            if (residency.contains(new LodMeshResidency.Key(candidate.capture().key(), candidate.capture().residencyTier(tier))))
+                 available[candidate.index()] |= 1 << tier;
+         }
+         int[] resolved = LodSelector.resolveLoaded(desired, before, available, adjacency, settings.smoothTransitions());
+@@ -188,8 +188,8 @@ public final class LodLoadedRenderer {
+         for (var candidate : candidates) {
+             int tier = resolved[candidate.index()];
+             if (tier > 0) {
+-                var key = new LodMeshResidency.Key(candidate.capture().key(), tier);
+-                selected.put(candidate.section(), new Draw(this, candidate.section(), candidate.owner(), candidate.capture(), key));
++                var key = new LodMeshResidency.Key(candidate.capture().key(), candidate.capture().residencyTier(tier));
++                selected.put(candidate.section(), new Draw(this, candidate.section(), candidate.owner(), candidate.capture(), key, tier));
+             }
+         }
+         // Admission may have evicted an earlier selection. It must retain its ordinary draw.
+@@ -239,8 +239,8 @@ public final class LodLoadedRenderer {
+         var capture = source.metalcraft$lodCandidate();
+         if (capture == null || capture.currentMesh() == null) return null;
+         for (int tier = 4; tier > 0; tier--) {
+-            var key = new LodMeshResidency.Key(capture.key(), tier);
+-            if (active.residency.contains(key)) return new Draw(active, section, mesh, capture, key).borrow(device);
++            var key = new LodMeshResidency.Key(capture.key(), capture.residencyTier(tier));
++            if (active.residency.contains(key)) return new Draw(active, section, mesh, capture, key, tier).borrow(device);
+         }
+         return null;
+     }
+@@ -259,8 +259,9 @@ public final class LodLoadedRenderer {
+         private final SectionMesh owner;
+         private final LodCapturedMesh capture;
+         private final LodMeshResidency.Key key;
+-        private Draw(LodLoadedRenderer renderer, RenderSection section, SectionMesh owner, LodCapturedMesh capture, LodMeshResidency.Key key) {
+-            this.renderer = renderer; this.section = section; this.owner = owner; this.capture = capture; this.key = key;
++        private final int tier;
++        private Draw(LodLoadedRenderer renderer, RenderSection section, SectionMesh owner, LodCapturedMesh capture, LodMeshResidency.Key key, int tier) {
++            this.renderer = renderer; this.section = section; this.owner = owner; this.capture = capture; this.key = key; this.tier = tier;
+         }
+ 
+         /** Pipeline/binding preflight precedes this final identity check and timeline reservation. */
+@@ -280,7 +281,7 @@ public final class LodLoadedRenderer {
+         public void encoded(LodWorldMesh mesh) {
+             encodedTerrain(mesh.originalIndexCount(), mesh.indexCount(), true);
+             renderer.draws++;
+-            switch (key.tier()) { case 1 -> renderer.tier1Draws++; case 2 -> renderer.tier2Draws++;
++            switch (tier) { case 1 -> renderer.tier1Draws++; case 2 -> renderer.tier2Draws++;
+                 case 3 -> renderer.tier3Draws++; case 4 -> renderer.tier4Draws++; }
+             renderer.originalTriangles += mesh.originalIndexCount() / 3;
+             renderer.replacementTriangles += mesh.indexCount() / 3;
+diff --git a/src/client/java/dev/metalcraft/client/metal/MetalDevice.java b/src/client/java/dev/metalcraft/client/metal/MetalDevice.java
+index a2f7784..8f27eba 100644
+--- a/src/client/java/dev/metalcraft/client/metal/MetalDevice.java
++++ b/src/client/java/dev/metalcraft/client/metal/MetalDevice.java
+@@ -47,6 +47,20 @@ public final class MetalDevice implements AutoCloseable {
+ 		return MetalNative.nCurrentAllocatedSize(this.requireOpenHandle());
+ 	}
+ 
++    /** Reset opt-in, device-wide observations; call before a benchmark, outside timed phases. */
++    public synchronized void startAllocationProbe() {
++        MetalNative.nStartAllocationProbe(this.requireOpenHandle());
++    }
++
++    public synchronized void stopAllocationProbe() {
++        MetalNative.nStopAllocationProbe(this.requireOpenHandle());
++    }
++
++    /** Current bytes, observed peak bytes, observation count. No GPU synchronization. */
++    public synchronized long[] allocationProbe() {
++        return MetalNative.nAllocationProbe(this.requireOpenHandle());
++    }
++
+ 	public synchronized MetalCommandQueue createCommandQueue() {
+ 		long queueHandle = MetalNative.nCreateCommandQueue(this.requireOpenHandle());
+ 		if (queueHandle == 0L) {
+diff --git a/src/client/java/dev/metalcraft/client/metal/MetalNative.java b/src/client/java/dev/metalcraft/client/metal/MetalNative.java
+index 1c64eba..f8454e1 100644
+--- a/src/client/java/dev/metalcraft/client/metal/MetalNative.java
++++ b/src/client/java/dev/metalcraft/client/metal/MetalNative.java
+@@ -67,6 +67,9 @@ public final class MetalNative {
+ 
+ 	static native long nRecommendedWorkingSet(long handle);
+ 	static native long nCurrentAllocatedSize(long handle);
++	static native void nStartAllocationProbe(long handle);
++	static native void nStopAllocationProbe(long handle);
++	static native long[] nAllocationProbe(long handle);
+ 
+ 	static native long nCreateCommandQueue(long deviceHandle);
+ 
+diff --git a/src/client/java/dev/metalcraft/client/test/MetalBenchmarkEnvironment.java b/src/client/java/dev/metalcraft/client/test/MetalBenchmarkEnvironment.java
+index 0b2e66b..2cff621 100644
+--- a/src/client/java/dev/metalcraft/client/test/MetalBenchmarkEnvironment.java
++++ b/src/client/java/dev/metalcraft/client/test/MetalBenchmarkEnvironment.java
+@@ -27,6 +27,10 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
+ 
+     MetalBenchmarkEnvironment(ClientGameTestContext context) {
+         this.context = context;
++        context.runOnClient(c -> {
++            var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).metalcraft$backend();
++            if (backend instanceof MetalGpuDevice metal) metal.metal().startAllocationProbe();
++        });
+         fullscreen = context.computeOnClient(c -> c.getWindow().isFullscreen());
+         String requestedPack = System.getProperty("metalcraft.benchmarkPack");
+         if (requestedPack != null && !requestedPack.equals("none") && !requestedPack.equals("standard")) {
+@@ -77,6 +81,10 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
+         var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).metalcraft$backend();
+         if (backend instanceof MetalGpuDevice metal) {
+             value.addProperty("metalAllocatedBytes", metal.metal().currentAllocatedBytes());
++            long[] allocation = metal.metal().allocationProbe();
++            value.addProperty("metalObservedPeakAllocatedBytes", allocation[1]);
++            value.addProperty("metalAllocationObservations", allocation[2]);
++            value.addProperty("metalAllocationPeakScope", "Device-wide allocation/view/drawable events since environment start; hidden driver transients excluded");
+             value.addProperty("metalWorkingSetBytes", metal.metal().recommendedWorkingSetBytes());
+         }
+         return value;
+@@ -175,6 +183,8 @@ final class MetalBenchmarkEnvironment implements AutoCloseable {
+ 
+     @Override public void close() {
+         context.runOnClient(c -> {
++            var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).metalcraft$backend();
++            if (backend instanceof MetalGpuDevice metal) metal.metal().stopAllocationProbe();
+             if (c.getWindow().isFullscreen() != fullscreen) c.getWindow().toggleFullScreen();
+             MetalCraftConfig.setHalfResolution(half);
+             MetalCraftConfig.setUnlockedFrameRate(unlocked);
+diff --git a/src/native/metalcraft.m b/src/native/metalcraft.m
+index 5aabd33..170f6c8 100644
+--- a/src/native/metalcraft.m
++++ b/src/native/metalcraft.m
+@@ -12,6 +12,33 @@
+ 
+ #define MC_EXPORT __attribute__((visibility("default")))
+ 
++// Opt-in driver observations at allocation/acquisition boundaries. Per MTLDevice,
++// not logical LOD payload accounting; hidden driver-only transients can be missed.
++@interface MCAllocationProbe : NSObject {
++@public
++    atomic_uint_fast64_t peak;
++    atomic_uint_fast64_t samples;
++}
++@end
++@implementation MCAllocationProbe
++- (instancetype)init {
++    self = [super init];
++    if (self) { atomic_init(&peak, 0); atomic_init(&samples, 0); }
++    return self;
++}
++@end
++static char MCAllocationProbeKey;
++static uint64_t mc_sample_allocation(id<MTLDevice> device) {
++    MCAllocationProbe *probe = objc_getAssociatedObject(device, &MCAllocationProbeKey);
++    if (probe == nil) return 0;
++    uint64_t bytes = device.currentAllocatedSize;
++    uint_fast64_t before = atomic_load_explicit(&probe->peak, memory_order_relaxed);
++    while (before < bytes && !atomic_compare_exchange_weak_explicit(&probe->peak,
++            &before, bytes, memory_order_relaxed, memory_order_relaxed)) { }
++    atomic_fetch_add_explicit(&probe->samples, 1, memory_order_relaxed);
++    return bytes;
++}
++
+ /**
+  * Shader stages a resource binding applies to, matching MetalRenderPass.STAGE_*.
+  *
+@@ -1638,6 +1665,42 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
+ 	}
+ }
+ 
++MC_EXPORT JNIEXPORT void JNICALL
++Java_dev_metalcraft_client_metal_MetalNative_nStartAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
++    @autoreleasepool {
++        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
++        if (device == nil) return;
++        objc_setAssociatedObject(device, &MCAllocationProbeKey, [MCAllocationProbe new], OBJC_ASSOCIATION_RETAIN);
++        mc_sample_allocation(device);
++    }
++}
++
++MC_EXPORT JNIEXPORT void JNICALL
++Java_dev_metalcraft_client_metal_MetalNative_nStopAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
++    @autoreleasepool {
++        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
++        if (device != nil) objc_setAssociatedObject(device, &MCAllocationProbeKey, nil, OBJC_ASSOCIATION_RETAIN);
++    }
++}
++
++MC_EXPORT JNIEXPORT jlongArray JNICALL
++Java_dev_metalcraft_client_metal_MetalNative_nAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
++    @autoreleasepool {
++        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
++        if (device == nil) return NULL;
++        MCAllocationProbe *probe = objc_getAssociatedObject(device, &MCAllocationProbeKey);
++        jlong values[3] = {0, 0, 0};
++        if (probe != nil) {
++            values[0] = (jlong)mc_sample_allocation(device);
++            values[1] = (jlong)atomic_load_explicit(&probe->peak, memory_order_relaxed);
++            values[2] = (jlong)atomic_load_explicit(&probe->samples, memory_order_relaxed);
++        }
++        jlongArray result = (*env)->NewLongArray(env, 3);
++        if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, 3, values);
++        return result;
++    }
++}
++
+ MC_EXPORT JNIEXPORT jlong JNICALL
+ Java_dev_metalcraft_client_metal_MetalNative_nCreateCommandQueue(JNIEnv *env, jclass type, jlong deviceHandle) {
+ 	@autoreleasepool {
+@@ -1745,6 +1808,7 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
+ 			return 0;
+ 		}
+ 		id<CAMetalDrawable> drawable = [surface.layer nextDrawable];
++		mc_sample_allocation(surface.layer.device);
+ 		return drawable == nil ? 0 : mc_register_object(drawable, MCObjectTypeDrawable, surfaceHandle);
+ 	}
+ }
+@@ -1942,6 +2006,7 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
+ 			mc_throw_state(env, @"Metal could not allocate the requested buffer");
+ 			return 0;
+ 		}
++		mc_sample_allocation(device);
+ 		buffer.label = @"MetalCraft buffer";
+ 		return mc_register_object(buffer, MCObjectTypeBuffer, deviceHandle);
+ 	}
+@@ -2649,6 +2714,7 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
+ 			mc_throw_state(env, @"Metal could not allocate the requested texture");
+ 			return 0;
+ 		}
++		mc_sample_allocation(device);
+ 		texture.label = @"MetalCraft texture";
+ 		return mc_register_object(texture, MCObjectTypeTexture, deviceHandle);
+ 	}
+@@ -2683,6 +2749,7 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
+ 			mc_throw_state(env, @"Metal could not create a texture view");
+ 			return 0;
+ 		}
++		mc_sample_allocation(texture.device);
+ 		textureView.label = @"MetalCraft texture view";
+ 		return mc_register_object(textureView, MCObjectTypeTextureView, textureHandle);
+ 	}
+@@ -3448,6 +3515,7 @@ static void mc_release_object(JNIEnv *env, jlong handle, MCObjectType expectedTy
+ 				mc_throw_state(env, @"Metal could not create a texture-buffer view");
+ 				return;
+ 			}
++			mc_sample_allocation(buffer.device);
+ 			texture.label = @"MetalCraft texel-buffer view";
+ 			[viewCache storeView:texture offset:(NSUInteger)offset length:logicalBytes format:pixelFormat];
+ 		}
+diff --git a/src/smoke/java/dev/metalcraft/client/lod/LodMetalSmoke.java b/src/smoke/java/dev/metalcraft/client/lod/LodMetalSmoke.java
+index 75a9700..69aec8a 100644
+--- a/src/smoke/java/dev/metalcraft/client/lod/LodMetalSmoke.java
++++ b/src/smoke/java/dev/metalcraft/client/lod/LodMetalSmoke.java
+@@ -17,6 +17,16 @@ public final class LodMetalSmoke {
+         dev.metalcraft.client.shader.LodShadingBenchmark.verifyDistanceLighting();
+         dev.metalcraft.client.metal.MetalLodTimelineSmoke.run();
+         dev.metalcraft.client.metal.MetalLodWorldSmoke.run();
++        try (MetalDevice probe = MetalNative.openDefaultDevice().orElseThrow()) {
++            probe.startAllocationProbe();
++            long baseline = probe.allocationProbe()[0];
++            try (var allocation = probe.createBuffer(8L << 20, MetalBuffer.StorageMode.SHARED)) {
++                long[] live = probe.allocationProbe();
++                check(live[1] >= live[0] && live[0] >= baseline + (8L << 20) && live[2] >= 3,
++                        "driver allocation event contributes to device high-water mark");
++            }
++            check(probe.allocationProbe()[1] >= baseline + (8L << 20), "released transient retains observed peak");
++        }
+         var empty = new TerrainSnapshot.Material(0,TerrainSnapshot.Policy.EMPTY,-1,0);
+         var solid = new TerrainSnapshot.Material(1,TerrainSnapshot.Policy.OPAQUE_CUBE,-1,0);
+         var key = new TerrainSnapshot.Key(1,"fixture",0,0,0,1,1);
+diff --git a/src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java b/src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java
+index 038f656..f3618d6 100644
+--- a/src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java
++++ b/src/smoke/java/dev/metalcraft/client/lod/LodSmoke.java
+@@ -60,6 +60,15 @@ public final class LodSmoke {
+         var releases = new java.util.concurrent.atomic.AtomicInteger();
+         var candidate = new LodCapturedMesh(first, mesh, releases::incrementAndGet);
+         check(candidate.currentMesh() == mesh, "current captured payload available");
++        for (int tier = 1; tier <= 4; tier++)
++            check(candidate.residencyTier(tier) == 1 && candidate.mesh(tier) == mesh,
++                    "exact shared tiers use one GPU residency owner");
++        var other = new LodBakedMesh.Simplified(true, List.of(), List.of(), 0);
++        try (var distinct = new LodCapturedMesh(tracker.capture(7, 2, 3),
++                List.of(mesh, other, mesh, other), LodAtlas.current(), () -> { })) {
++            check(distinct.residencyTier(2) == 2 && distinct.residencyTier(3) == 1
++                    && distinct.residencyTier(4) == 2, "only identity-equal meshes alias residency");
++        }
+         tracker.dirty(1, 2, 3);
+         check(!first.current() && candidate.currentMesh() == null, "dirty section revokes captured payload before replacement upload");
+         check(releases.get() == 1, "revocation releases CPU bytes without waiting for vanilla mesh retirement");
+diff --git a/src/smoke/java/dev/metalcraft/client/lod/LodDenseProbe.java b/src/smoke/java/dev/metalcraft/client/lod/LodDenseProbe.java
+new file mode 100644
+index 0000000..a11eeea
+--- /dev/null
++++ b/src/smoke/java/dev/metalcraft/client/lod/LodDenseProbe.java
+@@ -0,0 +1,145 @@
++package dev.metalcraft.client.lod;
++
++import java.nio.ByteBuffer;
++import java.nio.ByteOrder;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.util.ArrayDeque;
++import java.util.ArrayList;
++import java.util.List;
++
++/** Bounded synthetic production-store stress; does not claim generated-world or GPU coverage. */
++public final class LodDenseProbe {
++    private static final long BUDGET = 512L << 20;
++
++    public static void main(String[] args) throws Exception {
++        Path root = Files.createTempDirectory("metalcraft-dense-probe");
++        var report = new com.google.gson.JsonObject();
++        report.addProperty("scope", "Synthetic opaque sections through production disk/cache worker; no live terrain or GPU performance claim");
++        try {
++            var rows = new com.google.gson.JsonArray();
++            for (int quads : new int[]{1, 640}) rows.add(run(root.resolve("quads-" + quads), quads));
++            report.add("cases", rows);
++        } finally {
++            try (var paths = Files.walk(root)) {
++                for (var path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
++            }
++        }
++        Path output = Path.of("build/reports/lod-dense-probe.json");
++        Files.createDirectories(output.getParent());
++        Files.writeString(output, new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(report));
++        System.out.println(report);
++    }
++
++    private static com.google.gson.JsonObject run(Path root, int quads) throws Exception {
++        var keys = new ArrayList<LodDistantNode.Key>();
++        // A contiguous 32x32-section patch entirely outside the ordinary loaded square.
++        // 640 quads/section exceeds the 64 MiB result budget while remaining disk-bounded.
++        long started = System.nanoTime();
++        try (var store = new LodDistantStore(root, "fixture", "dimension", "atlas", BUDGET)) {
++            for (int z = 32; z < 64; z++) {
++                var row = new ArrayList<LodDistantNode>();
++                for (int x = 32; x < 64; x++) {
++                    var key = new LodDistantNode.Key(0, x, 0, z);
++                    keys.add(key);
++                    row.add(node(key, quads, 0));
++                }
++                store.updateLeaves(row.subList(0, 16), java.util.Set.of());
++                store.updateLeaves(row.subList(16, 32), java.util.Set.of());
++            }
++        }
++        long constructionNanos = System.nanoTime() - started;
++        var work = new ArrayDeque<Runnable>();
++        var revisions = new LodRevisionTracker(4096);
++        var cache = new LodDistantCache(budget -> new LodDistantStore(root, "fixture", "dimension", "atlas", budget), work::add);
++        var result = new com.google.gson.JsonObject();
++        try {
++            cache.view(new LodDistantCache.View(0, 8, 0, 16, 128, BUDGET, 0, 0, 1, 1, k -> true));
++            drain(work);
++            var selected = cache.takeResult();
++            result.addProperty("quadsPerSection", quads);
++            result.addProperty("exploredFixtureSections", keys.size());
++            result.addProperty("constructionNanos", constructionNanos);
++            result.addProperty("representedSections", coverage(selected, keys, cache));
++            result.addProperty("selectedNodes", selected.nodes().size());
++            result.addProperty("selectedBytes", selected.nodes().stream().mapToLong(c -> c.node().bytes()).sum());
++            var repairNanos = new com.google.gson.JsonArray();
++            // Continuous producer: submit the next batch before the previous batch drains.
++            // Same leaves coalesce to their latest revision; worker admission remains bounded.
++            for (int round = 0; round < 24; round++) {
++                long begin = System.nanoTime();
++                for (int i = 0; i < 32; i++) {
++                    var key = keys.get(i);
++                    revisions.dirty(key.x(), key.y(), key.z());
++                    cache.invalidate(key);
++                    cache.capture(node(key, quads, round + 1), revisions.capture(key.x(), key.y(), key.z()));
++                }
++                check(work.size() == 1, "one scheduled worker under producer churn");
++                work.remove().run();
++                var partial = cache.takeResult();
++                if (partial != null) coverage(partial, keys, cache);
++                check(cache.stats().queuedBytes() <= LodDistantCache.QUEUE_BYTES
++                        && cache.stats().queuedNodes() <= 32, "coalesced repair backlog bounded");
++                check(cache.stats().failures() == 0 && cache.stats().dropped() == 0, "repair churn lost data");
++                repairNanos.add(System.nanoTime() - begin);
++            }
++            long settleStarted = System.nanoTime();
++            drain(work);
++            result.addProperty("finalDrainNanos", System.nanoTime() - settleStarted);
++            for (var key : keys.subList(0, 32)) {
++                var entry = cache.entry(key);
++                check(entry.stored() && entry.receivedRevision() == entry.persistedRevision(), "latest edit persisted");
++            }
++            var finalResult = cache.takeResult();
++            result.addProperty("finalRepresentedSections", coverage(finalResult, keys, cache));
++            result.add("producerRoundNanos", repairNanos);
++            result.add("stats", new com.google.gson.Gson().toJsonTree(cache.stats()));
++            result.add("diagnostics", new com.google.gson.Gson().toJsonTree(cache.diagnostics()));
++            check(cache.stats().diskBytes() <= BUDGET, "disk budget");
++            if (quads == 1) check(coverage(finalResult, keys, cache) == keys.size(), "unconstrained dense patch has complete coverage");
++        } finally {
++            cache.close();
++            drain(work);
++        }
++        try (var store = new LodDistantStore(root, "fixture", "dimension", "atlas", BUDGET)) {
++            for (var key : keys.subList(0, 32))
++                check(store.read(key).layers().getFirst().buffer().getInt(12) == 24, "reopen retains final edit payload");
++        }
++        return result;
++    }
++
++    private static int coverage(LodDistantCache.Result result, List<LodDistantNode.Key> keys, LodDistantCache cache) {
++        check(result != null && result.nodes().size() <= LodDistantCache.MAX_NODES, "bounded published result");
++        check(result.nodes().stream().mapToLong(c -> c.node().bytes()).sum() <= LodDistantCache.RESULT_BYTES, "result byte budget");
++        int covered = 0;
++        for (var candidate : result.nodes()) check(candidate.version() == cache.version(candidate.node().key()), "no stale repair selection");
++        for (var key : keys) {
++            long owners = result.nodes().stream().filter(c -> c.node().key().contains(key)).count();
++            check(owners <= 1, "no overlapping parent/child owners");
++            covered += owners;
++        }
++        return covered;
++    }
++
++    private static LodDistantNode node(LodDistantNode.Key key, int quads, int revision) {
++        var bytes = ByteBuffer.allocate(quads * 112).order(ByteOrder.LITTLE_ENDIAN);
++        for (int q = 0; q < quads; q++) for (int corner : new int[]{0, 1, 3, 2}) {
++            bytes.putFloat((q % 16) + (corner & 1)).putFloat(q / 256f)
++                    .putFloat((q / 16 % 16) + (corner >> 1)).putInt(revision)
++                    .putFloat(corner & 1).putFloat(corner >> 1).putInt(240);
++        }
++        return new LodDistantNode(key, List.of(new LodDistantNode.Layer(0, bytes.array())), 0, 1);
++    }
++
++    private static void drain(ArrayDeque<Runnable> work) {
++        int count = 0;
++        while (!work.isEmpty()) {
++            check(++count < 1000, "worker made bounded progress");
++            work.remove().run();
++        }
++    }
++
++    private static void check(boolean condition, String message) {
++        if (!condition) throw new AssertionError(message);
++    }
++}

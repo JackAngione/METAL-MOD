@@ -8,8 +8,36 @@
 #import <stdatomic.h>
 #import <float.h>
 #import <math.h>
+#import <mach/mach.h>
 
 #define MC_EXPORT __attribute__((visibility("default")))
+
+// Opt-in driver observations at allocation/acquisition boundaries. Per MTLDevice,
+// not logical LOD payload accounting; hidden driver-only transients can be missed.
+@interface MCAllocationProbe : NSObject {
+@public
+    atomic_uint_fast64_t peak;
+    atomic_uint_fast64_t samples;
+}
+@end
+@implementation MCAllocationProbe
+- (instancetype)init {
+    self = [super init];
+    if (self) { atomic_init(&peak, 0); atomic_init(&samples, 0); }
+    return self;
+}
+@end
+static char MCAllocationProbeKey;
+static uint64_t mc_sample_allocation(id<MTLDevice> device) {
+    MCAllocationProbe *probe = objc_getAssociatedObject(device, &MCAllocationProbeKey);
+    if (probe == nil) return 0;
+    uint64_t bytes = device.currentAllocatedSize;
+    uint_fast64_t before = atomic_load_explicit(&probe->peak, memory_order_relaxed);
+    while (before < bytes && !atomic_compare_exchange_weak_explicit(&probe->peak,
+            &before, bytes, memory_order_relaxed, memory_order_relaxed)) { }
+    atomic_fetch_add_explicit(&probe->samples, 1, memory_order_relaxed);
+    return bytes;
+}
 
 /**
  * Shader stages a resource binding applies to, matching MetalRenderPass.STAGE_*.
@@ -63,7 +91,8 @@ enum {
 	MCCommandSetUniformBuffer = 2,
 	MCCommandSetTexture = 3,
 	MCCommandSetSampler = 4,
-	MCCommandDrawIndexed = 5
+	MCCommandDrawIndexed = 5,
+	MCCommandSetPipeline = 6
 };
 
 /** 'MCMD'. */
@@ -577,6 +606,49 @@ typedef struct {
  */
 static _Atomic uint64_t mc_gpu_nanos;
 static _Atomic uint64_t mc_gpu_command_buffers;
+
+// Benchmark-only frame aggregation. Slots are phase-owned; late callbacks cannot
+// contaminate the next capture. Disabled rendering allocates nothing and takes no lock.
+#define MC_GPU_CAPTURE_FRAMES 32768
+typedef struct {
+	uint64_t start, end, submitted, pending;
+	BOOL sealed, invalid;
+} MCGpuCaptureFrame;
+static MCGpuCaptureFrame mc_gpu_capture_frames[MC_GPU_CAPTURE_FRAMES];
+static os_unfair_lock mc_gpu_capture_lock = OS_UNFAIR_LOCK_INIT;
+static uint64_t mc_gpu_capture_epoch, mc_gpu_capture_count;
+static BOOL mc_gpu_capture_active;
+static _Thread_local uint64_t mc_gpu_thread_epoch, mc_gpu_thread_frame;
+
+static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
+	if (mc_gpu_thread_frame == 0) return;
+	uint64_t epoch = mc_gpu_thread_epoch, index = mc_gpu_thread_frame - 1;
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	BOOL admitted = mc_gpu_capture_active && epoch == mc_gpu_capture_epoch && index < MC_GPU_CAPTURE_FRAMES;
+	if (admitted) {
+		mc_gpu_capture_frames[index].submitted++;
+		mc_gpu_capture_frames[index].pending++;
+	}
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+	if (!admitted) return;
+	[buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+		CFTimeInterval start = completed.GPUStartTime, end = completed.GPUEndTime;
+		BOOL valid = completed.status == MTLCommandBufferStatusCompleted
+			&& isfinite(start) && isfinite(end) && start > 0 && end > start;
+		os_unfair_lock_lock(&mc_gpu_capture_lock);
+		if (mc_gpu_capture_active && epoch == mc_gpu_capture_epoch) {
+			MCGpuCaptureFrame *frame = &mc_gpu_capture_frames[index];
+			frame->pending--;
+			if (!valid) frame->invalid = YES;
+			else {
+				uint64_t startNs = (uint64_t)(start * 1e9), endNs = (uint64_t)(end * 1e9);
+				frame->start = frame->start == 0 ? startNs : MIN(frame->start, startNs);
+				frame->end = MAX(frame->end, endNs);
+			}
+		}
+		os_unfair_lock_unlock(&mc_gpu_capture_lock);
+	}];
+}
 
 @implementation MCMetalCommandBuffer {
 	MCInFlightResources *_resources;
@@ -1586,6 +1658,50 @@ Java_dev_metalcraft_client_metal_MetalNative_nRecommendedWorkingSet(JNIEnv *env,
 }
 
 MC_EXPORT JNIEXPORT jlong JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nCurrentAllocatedSize(JNIEnv *env, jclass type, jlong handle) {
+	@autoreleasepool {
+		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+		return device == nil ? 0 : (jlong)device.currentAllocatedSize;
+	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nStartAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
+    @autoreleasepool {
+        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+        if (device == nil) return;
+        objc_setAssociatedObject(device, &MCAllocationProbeKey, [MCAllocationProbe new], OBJC_ASSOCIATION_RETAIN);
+        mc_sample_allocation(device);
+    }
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nStopAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
+    @autoreleasepool {
+        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+        if (device != nil) objc_setAssociatedObject(device, &MCAllocationProbeKey, nil, OBJC_ASSOCIATION_RETAIN);
+    }
+}
+
+MC_EXPORT JNIEXPORT jlongArray JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nAllocationProbe(JNIEnv *env, jclass type, jlong handle) {
+    @autoreleasepool {
+        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+        if (device == nil) return NULL;
+        MCAllocationProbe *probe = objc_getAssociatedObject(device, &MCAllocationProbeKey);
+        jlong values[3] = {0, 0, 0};
+        if (probe != nil) {
+            values[0] = (jlong)mc_sample_allocation(device);
+            values[1] = (jlong)atomic_load_explicit(&probe->peak, memory_order_relaxed);
+            values[2] = (jlong)atomic_load_explicit(&probe->samples, memory_order_relaxed);
+        }
+        jlongArray result = (*env)->NewLongArray(env, 3);
+        if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, 3, values);
+        return result;
+    }
+}
+
+MC_EXPORT JNIEXPORT jlong JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nCreateCommandQueue(JNIEnv *env, jclass type, jlong deviceHandle) {
 	@autoreleasepool {
 		id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, deviceHandle, MCObjectTypeDevice);
@@ -1692,6 +1808,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nAcquireDrawable(JNIEnv *env, jclas
 			return 0;
 		}
 		id<CAMetalDrawable> drawable = [surface.layer nextDrawable];
+		mc_sample_allocation(surface.layer.device);
 		return drawable == nil ? 0 : mc_register_object(drawable, MCObjectTypeDrawable, surfaceHandle);
 	}
 }
@@ -1724,6 +1841,92 @@ Java_dev_metalcraft_client_metal_MetalNative_nTakeGpuWork(JNIEnv *env, jclass ty
 	values[0] = (jlong)atomic_exchange_explicit(&mc_gpu_nanos, 0, memory_order_relaxed);
 	values[1] = (jlong)atomic_exchange_explicit(&mc_gpu_command_buffers, 0, memory_order_relaxed);
 	(*env)->SetLongArrayRegion(env, destination, 0, 2, values);
+}
+
+// Called only by the benchmark on the AppKit/render thread, never by normal frames.
+MC_EXPORT JNIEXPORT jint JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nWindowPresentationState(JNIEnv *env, jclass type, jlong cocoaWindow) {
+	if (cocoaWindow == 0 || !NSThread.isMainThread) return 0;
+	NSWindow *window = (__bridge NSWindow *)(void *)(uintptr_t)cocoaWindow;
+	return (NSApp.isActive ? 1 : 0) | (window.isVisible ? 2 : 0)
+		| (!window.isMiniaturized ? 4 : 0)
+		| ((window.occlusionState & NSWindowOcclusionStateVisible) != 0 ? 8 : 0);
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nBeginGpuFrameCapture(JNIEnv *env, jclass type) {
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	mc_gpu_capture_epoch++;
+	mc_gpu_capture_count = 0;
+	memset(mc_gpu_capture_frames, 0, sizeof(mc_gpu_capture_frames));
+	mc_gpu_capture_active = YES;
+	mc_gpu_thread_epoch = mc_gpu_capture_epoch;
+	mc_gpu_thread_frame = 0;
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+}
+
+MC_EXPORT JNIEXPORT jlongArray JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nProcessMemoryAndThermalState(JNIEnv *env, jclass type) {
+	task_vm_info_data_t info;
+	mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+	jlong values[5] = {-1, -1, -1, -1, (jlong)NSProcessInfo.processInfo.thermalState};
+	if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+		values[0] = (jlong)info.resident_size;
+		values[1] = (jlong)info.resident_size_peak;
+		if (count >= TASK_VM_INFO_REV1_COUNT) values[2] = (jlong)info.phys_footprint;
+		if (count >= TASK_VM_INFO_REV3_COUNT) values[3] = (jlong)info.ledger_phys_footprint_peak;
+	}
+	jlongArray result = (*env)->NewLongArray(env, 5);
+	if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, 5, values);
+	return result;
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nBeginGpuCaptureFrame(JNIEnv *env, jclass type) {
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	if (mc_gpu_capture_active && mc_gpu_thread_epoch == mc_gpu_capture_epoch) {
+		mc_gpu_thread_frame = ++mc_gpu_capture_count;
+	}
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nEndGpuCaptureFrame(JNIEnv *env, jclass type) {
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	if (mc_gpu_capture_active && mc_gpu_thread_epoch == mc_gpu_capture_epoch
+		&& mc_gpu_thread_frame > 0 && mc_gpu_thread_frame <= MC_GPU_CAPTURE_FRAMES) {
+		mc_gpu_capture_frames[mc_gpu_thread_frame - 1].sealed = YES;
+	}
+	mc_gpu_thread_frame = 0;
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+}
+
+MC_EXPORT JNIEXPORT jlongArray JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nEndGpuFrameCapture(JNIEnv *env, jclass type) {
+	// Bounded temporary allocation occurs only when the benchmark stops, outside its samples.
+	jlong *values = calloc(5 + MC_GPU_CAPTURE_FRAMES * 2, sizeof(jlong));
+	if (values == NULL) { mc_throw_state(env, @"Cannot allocate GPU capture report"); return NULL; }
+	jsize length = 5;
+	os_unfair_lock_lock(&mc_gpu_capture_lock);
+	mc_gpu_capture_active = NO;
+	mc_gpu_thread_frame = 0;
+	values[0] = (jlong)mc_gpu_capture_count;
+	values[4] = (jlong)(mc_gpu_capture_count > MC_GPU_CAPTURE_FRAMES ? mc_gpu_capture_count - MC_GPU_CAPTURE_FRAMES : 0);
+	for (uint64_t i = 0; i < MIN(mc_gpu_capture_count, MC_GPU_CAPTURE_FRAMES); i++) {
+		MCGpuCaptureFrame *frame = &mc_gpu_capture_frames[i];
+		if (!frame->sealed || frame->pending > 0) values[1]++;
+		else if (frame->invalid) values[2]++;
+		else if (frame->submitted == 0 || frame->end <= frame->start) values[3]++;
+		else {
+			values[length++] = (jlong)(frame->end - frame->start);
+			values[length++] = (jlong)frame->submitted;
+		}
+	}
+	os_unfair_lock_unlock(&mc_gpu_capture_lock);
+	jlongArray result = (*env)->NewLongArray(env, length);
+	if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, length, values);
+	free(values);
+	return result;
 }
 
 MC_EXPORT JNIEXPORT void JNICALL
@@ -1762,6 +1965,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCommitCommandBuffer(JNIEnv *env, j
 	@autoreleasepool {
 		MCMetalCommandBuffer *commandBuffer = (MCMetalCommandBuffer *)mc_get_object(env, handle, MCObjectTypeCommandBuffer);
 		[commandBuffer endBlitEncoding];
+		mc_capture_command_buffer(commandBuffer.commandBuffer);
 		[commandBuffer.commandBuffer commit];
 	}
 }
@@ -1802,6 +2006,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateBuffer(
 			mc_throw_state(env, @"Metal could not allocate the requested buffer");
 			return 0;
 		}
+		mc_sample_allocation(device);
 		buffer.label = @"MetalCraft buffer";
 		return mc_register_object(buffer, MCObjectTypeBuffer, deviceHandle);
 	}
@@ -2509,6 +2714,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 			mc_throw_state(env, @"Metal could not allocate the requested texture");
 			return 0;
 		}
+		mc_sample_allocation(device);
 		texture.label = @"MetalCraft texture";
 		return mc_register_object(texture, MCObjectTypeTexture, deviceHandle);
 	}
@@ -2543,6 +2749,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTextureView(
 			mc_throw_state(env, @"Metal could not create a texture view");
 			return 0;
 		}
+		mc_sample_allocation(texture.device);
 		textureView.label = @"MetalCraft texture view";
 		return mc_register_object(textureView, MCObjectTypeTextureView, textureHandle);
 	}
@@ -2558,12 +2765,14 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateSampler(
 	jint addressModeU,
 	jint addressModeV,
 	jint maxAnisotropy,
-	jdouble maxLod
+	jdouble maxLod,
+	jdouble minLod
 ) {
 	@autoreleasepool {
 		if ((minFilter != 0 && minFilter != 1) || (magFilter != 0 && magFilter != 1)
 			|| addressModeU < 0 || addressModeU > 2 || addressModeV < 0 || addressModeV > 2
-			|| maxAnisotropy < 1 || maxAnisotropy > 16 || isnan(maxLod) || maxLod < 0.0) {
+			|| maxAnisotropy < 1 || maxAnisotropy > 16 || isnan(maxLod) || maxLod < 0.0
+			|| !isfinite(minLod) || minLod < 0.0 || minLod > maxLod) {
 			mc_throw_state(env, @"Unsupported Metal sampler configuration");
 			return 0;
 		}
@@ -2586,6 +2795,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateSampler(
 		descriptor.mipFilter = maxLod > 0.25 ? MTLSamplerMipFilterLinear : MTLSamplerMipFilterNearest;
 		descriptor.maxAnisotropy = (NSUInteger)maxAnisotropy;
 		descriptor.lodMaxClamp = isinf(maxLod) ? FLT_MAX : (float)maxLod;
+		descriptor.lodMinClamp = (float)minLod;
 		descriptor.label = @"MetalCraft sampler";
 		id<MTLSamplerState> sampler = [device newSamplerStateWithDescriptor:descriptor];
 		if (sampler == nil) {
@@ -3308,6 +3518,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexelBuffer(
 				mc_throw_state(env, @"Metal could not create a texture-buffer view");
 				return;
 			}
+			mc_sample_allocation(buffer.device);
 			texture.label = @"MetalCraft texel-buffer view";
 			[viewCache storeView:texture offset:(NSUInteger)offset length:logicalBytes format:pixelFormat];
 		}
@@ -3754,6 +3965,8 @@ static MCObjectType mc_command_operand_type(int32_t opcode) {
 			return MCObjectTypeTextureView;
 		case MCCommandSetSampler:
 			return MCObjectTypeSampler;
+		case MCCommandSetPipeline:
+			return MCObjectTypeRenderPipeline;
 		default:
 			return (MCObjectType)0;
 	}
@@ -3778,6 +3991,12 @@ static BOOL mc_validate_command(JNIEnv *env, const MCCommand *command, int32_t i
 		problem = @"resource handle or reserved field";
 	} else {
 		switch (command->opcode) {
+			case MCCommandSetPipeline:
+				if (command->slot != 0 || command->stages != 0 || command->offset != 0
+					|| command->count != 0 || command->instanceCount != 0 || command->baseVertex != 0 || command->baseInstance != 0) {
+					problem = @"pipeline command fields";
+				}
+				break;
 			case MCCommandSetVertexBuffer:
 				if (command->slot < 0 || command->slot >= 31 || command->offset < 0) {
 					problem = @"vertex-buffer binding index or offset";
@@ -3941,6 +4160,16 @@ static void mc_encode_commands(
 		}
 		NSUInteger slot = (NSUInteger)command->slot;
 		switch (command->opcode) {
+			case MCCommandSetPipeline: {
+				MCMetalRenderPipeline *pipeline = object;
+				[encoder setRenderPipelineState:pipeline.pipelineState];
+				[encoder setDepthStencilState:pipeline.depthStencilState];
+				[encoder setFrontFacingWinding:MTLWindingClockwise];
+				[encoder setCullMode:pipeline.cullMode];
+				[encoder setTriangleFillMode:pipeline.fillMode];
+				[encoder setDepthBias:pipeline.depthBiasConstant slopeScale:pipeline.depthBiasSlopeScale clamp:0.0F];
+				break;
+			}
 			case MCCommandSetVertexBuffer:
 				[encoder setVertexBuffer:object offset:(NSUInteger)command->offset atIndex:slot];
 				break;

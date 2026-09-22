@@ -39,6 +39,20 @@ fragment ResolveTargets resolve_fragment(
         return out;
     }
     float viewDepth = mc_unpack_view_depth(previous.normal, previous.light);
+    // Outside the shadow volume visibility is exactly one. Lighting then reconstructs
+    // the existing fogged seed unchanged, so retain that seed without normal/position
+    // reconstruction or fog decode/re-encode. This reduces work, never pixel resolution.
+    // Large shadow volumes rarely leave eligible loaded terrain: keep their original
+    // program with no per-pixel branch. shadow_distance already recompiles the pack.
+#ifndef MC_REDUCE_DISTANT_LIGHTING
+#define MC_REDUCE_DISTANT_LIGHTING 1
+#endif
+#if MC_REDUCE_DISTANT_LIGHTING && defined(MC_OPTION_SHADOW_DISTANCE) && MC_OPTION_SHADOW_DISTANCE < 128
+    if (options.debugView == 0 && isfinite(viewDepth) && viewDepth >= shadowFrame.shadowDistance) {
+        out.albedo.a = 0.0;
+        return out;
+    }
+#endif
     bool validDepth = isfinite(viewDepth) && viewDepth > 0.0 && viewDepth < 1024.0;
     float2 uv = in.position.xy / max(camera.screenSize, float2(1.0));
     float3 viewPos = validDepth

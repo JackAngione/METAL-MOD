@@ -75,11 +75,93 @@ tasks.named('check') {
 	dependsOn tasks.named('shaderTranslationSmoke')
 }
 
+tasks.register('lodSmoke', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava')
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.lod.LodSmoke'
+}
+
+tasks.register('lodDenseProbe', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava')
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.lod.LodDenseProbe'
+	maxHeapSize = '1G'
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('lodSmoke')
+}
+
+tasks.register('lodMetalSmoke', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava')
+	dependsOn tasks.named('processClientResources')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.lod.LodMetalSmoke'
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('lodMetalSmoke')
+}
+
+tasks.register('metalFrameMetricsSmoke', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.metal.MetalGpuFrameCaptureSmoke'
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('metalFrameMetricsSmoke')
+}
+
+// Isolated P6 cost experiment; timings are evidence, never a machine-dependent build gate.
+tasks.register('lodShadingBenchmark', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.shader.LodShadingBenchmark'
+}
+
+// Tile feasibility stays outside the runtime JNI library until P6 acceptance passes.
+def lodTileProbe = layout.buildDirectory.file('native/macos-arm64/lod-shading-tile')
+tasks.register('compileLodTileShadingProbe', Exec) {
+	onlyIf { isAppleSiliconBuild }
+	inputs.file('src/smoke/native/lod-shading-tile.m')
+	outputs.file(lodTileProbe)
+	doFirst { lodTileProbe.get().asFile.parentFile.mkdirs() }
+	commandLine 'xcrun', 'clang', '-O2', '-fobjc-arc', '-framework', 'Foundation',
+		'-framework', 'Metal', 'src/smoke/native/lod-shading-tile.m', '-o', lodTileProbe.get().asFile.absolutePath
+}
+tasks.register('lodTileShadingBenchmark', Exec) {
+	dependsOn tasks.named('lodShadingBenchmark'), tasks.named('compileLodTileShadingProbe')
+	onlyIf { isAppleSiliconBuild }
+	commandLine lodTileProbe.get().asFile.absolutePath, 'build/reports/lod-shading'
+}
+tasks.register('lodPackedTileShadingBenchmark', Exec) {
+	dependsOn tasks.named('lodTileShadingBenchmark')
+	onlyIf { isAppleSiliconBuild }
+	commandLine lodTileProbe.get().asFile.absolutePath, 'build/reports/lod-shading', 'packed'
+}
+
 // Benchmark knobs, forwarded from -P<gradle property> to -D<system property>.
 def benchmarkProperties = [
 	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
 	metalWaterDetailProbe: 'metalcraft.waterDetailProbe',
+	metalWaterW5Probe: 'metalcraft.waterW5Probe',
 	metalBenchmarkSeed: 'metalcraft.benchmarkSeed',
+	metalBenchmarkPitch: 'metalcraft.benchmarkPitch',
+	metalBenchmarkPack: 'metalcraft.benchmarkPack',
+	metalBenchmarkLod: 'metalcraft.benchmarkLod',
+	metalTestLod: 'metalcraft.testLod',
+	metalTestLodHorizon: 'metalcraft.testLodHorizon',
+	metalBenchmarkUnlocked: 'metalcraft.benchmarkUnlocked',
+	metalBenchmarkHalfResolution: 'metalcraft.benchmarkHalfResolution',
+	metalBenchmarkFullscreen: 'metalcraft.benchmarkFullscreen',
+	metalLodHorizonBenchmark: 'metalcraft.lodHorizonBenchmark',
+	metalLodHorizonCostProbe: 'metalcraft.lodHorizonCostProbe',
+	metalLodTerrainCensus: 'metalcraft.lodTerrainCensus',
+	metalLodHorizonToggleProbe: 'metalcraft.lodHorizonToggleProbe',
 	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
 	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',
 	metalBenchmarkResolution: 'metalcraft.benchmarkResolution',
@@ -97,6 +179,10 @@ def benchmarkProperties = [
 ]
 
 tasks.named('runClient') {
+	def experimentalLod = providers.gradleProperty('metalLodExperimental')
+	if (experimentalLod.isPresent()) systemProperty 'metalcraft.lodExperimental', experimentalLod.get()
+	def experimentalHorizon = providers.gradleProperty('metalLodHorizonExperimental')
+	if (experimentalHorizon.isPresent()) systemProperty 'metalcraft.lodHorizonExperimental', experimentalHorizon.get()
 	// Lets a benchmark vary the JVM it measures. Heap pressure shows up in the frame-time tail as
 	// collection pauses, so a run that cannot state its heap size cannot be compared with another.
 	def extraJvmArgs = providers.gradleProperty('metalJvmArgs')
@@ -108,6 +194,16 @@ tasks.named('runClient') {
 		systemProperty 'metalcraft.waterIdentityTest', providers.gradleProperty('metalWaterIdentityTest').getOrElse('false')
 		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
+		systemProperty 'metalcraft.lodSettingsTest', providers.gradleProperty('metalLodSettingsTest').getOrElse('false')
+		systemProperty 'metalcraft.lodCompilerTest', providers.gradleProperty('metalLodCompilerTest').getOrElse('false')
+		systemProperty 'metalcraft.lodRenderTest', providers.gradleProperty('metalLodRenderTest').getOrElse('false')
+		systemProperty 'metalcraft.lodHorizonTest', providers.gradleProperty('metalLodHorizonTest').getOrElse('false')
+		systemProperty 'metalcraft.nativeChunkDistanceTest', providers.gradleProperty('metalNativeChunkDistanceTest').getOrElse('false')
+		systemProperty 'metalcraft.nativeTerrainLodTest', providers.gradleProperty('metalNativeTerrainLodTest').getOrElse('false')
+		systemProperty 'metalcraft.terrainResolutionTest', providers.gradleProperty('metalTerrainResolutionTest').getOrElse('false')
+		systemProperty 'metalcraft.geometricLodTest', providers.gradleProperty('metalGeometricLodTest').getOrElse('false')
+		systemProperty 'metalcraft.lodGenerationTest', providers.gradleProperty('metalLodGenerationTest').getOrElse('false')
+		systemProperty 'metalcraft.lodExpectedRadius', providers.gradleProperty('metalLodExpectedRadius').getOrElse('-1')
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')
 		systemProperty 'metalcraft.lifecycleShaders', providers.gradleProperty('metalShaderLifecycleTest').getOrElse('false')
@@ -154,3 +250,43 @@ publishing {
 		}
 	}
 }
+
+// Native distance correctness without generating or rendering a 256-chunk world.
+tasks.register('nativeChunkDistanceSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.chunk.NativeChunkDistanceSmoke'
+    maxHeapSize = '1G'
+}
+tasks.named('check') { dependsOn tasks.named('nativeChunkDistanceSmoke') }
+
+tasks.register('nativeTerrainLodSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.chunk.NativeTerrainLodSmoke'
+}
+tasks.named('check') { dependsOn tasks.named('nativeTerrainLodSmoke') }
+
+// Optional shader-cost probe; includes target stores and reconstruction, outside the build gate.
+tasks.register('terrainResolutionBenchmark', JavaExec) {
+    dependsOn tasks.named('clientClasses'), tasks.named('compileShaderSmokeJava')
+    onlyIf { isAppleSiliconBuild }
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.metal.TerrainResolutionBenchmark'
+}
+
+tasks.register('sectionStorageSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.chunk.SectionStorageSmoke'
+    maxHeapSize = '256m'
+}
+tasks.named('check') { dependsOn tasks.named('sectionStorageSmoke') }
+
+tasks.register('lightSectionSnapshotsSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.chunk.LightSectionSnapshotsSmoke'
+    maxHeapSize = '512m'
+}
+tasks.named('check') { dependsOn tasks.named('lightSectionSnapshotsSmoke') }

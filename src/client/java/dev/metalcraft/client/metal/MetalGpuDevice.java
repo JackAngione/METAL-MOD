@@ -54,6 +54,42 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private final DeviceInfo deviceInfo;
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> pipelineCache = new IdentityHashMap<>();
 	private final Map<RenderPipeline, MetalCompiledRenderPipeline> linearPipelineCache = new IdentityHashMap<>();
+	private record LodPipelineKey(RenderPipeline pipeline, boolean linear) { }
+	private final Map<LodPipelineKey, java.util.Optional<MetalCompiledRenderPipeline>> lodPipelineCache = new HashMap<>();
+    private final Map<RenderPipeline, java.util.Optional<MetalCompiledRenderPipeline>> terrainResolutionPipelines = new IdentityHashMap<>();
+    private MetalTerrainResolution terrainResolution;
+
+    MetalTerrainResolution terrainResolution() {
+        if (terrainResolution == null) terrainResolution = new MetalTerrainResolution(this.metal);
+        return terrainResolution;
+    }
+    public MetalTerrainResolution.Stats terrainResolutionStats() { return terrainResolution == null ? null : terrainResolution.stats(); }
+
+    @Nullable MetalCompiledRenderPipeline terrainResolutionPipeline(RenderPipeline pipeline) {
+        return terrainResolutionPipelines.computeIfAbsent(pipeline, ignored -> {
+            if (pipeline != net.minecraft.client.renderer.RenderPipelines.SOLID_TERRAIN || nativePipelines.containsKey(pipeline)
+                || !pipeline.getVertexShader().equals(Identifier.parse("minecraft:core/terrain"))
+                || !pipeline.getFragmentShader().equals(Identifier.parse("minecraft:core/terrain"))
+                || dev.metalcraft.client.shader.WorldGeometryAdapter.isBlended(pipeline)) return java.util.Optional.empty();
+            try {
+                ShaderSource sources = reloadShaderSource == null ? defaultShaderSource : reloadShaderSource;
+                String vertex = sources.get(pipeline.getVertexShader(), ShaderType.VERTEX);
+                String fragment = sources.get(pipeline.getFragmentShader(), ShaderType.FRAGMENT);
+                LinearWorldShaders.verify(pipeline.getVertexShader(), ".vsh", vertex);
+                LinearWorldShaders.verify(pipeline.getFragmentShader(), ".fsh", fragment);
+                vertex = Blaze3DMetalMappings.vertexShaderWithLocations(Blaze3DMetalMappings.shaderWithResourceBindings(
+                    GlslPreprocessor.injectDefines(vertex, pipeline.getShaderDefines()), pipeline), pipeline.getVertexFormatBindings());
+                fragment = MetalTerrainResolution.reconstructFragment(Blaze3DMetalMappings.shaderWithResourceBindings(
+                    GlslPreprocessor.injectDefines(fragment, pipeline.getShaderDefines()), pipeline));
+                var shaders = MetalShaderTranslator.translatePipeline(vertex, "terrain_resolution_vertex", fragment, "terrain_resolution_fragment");
+                return java.util.Optional.of(MetalCompiledRenderPipeline.compile(metal, pipeline,
+                    Blaze3DMetalMappings.pipelineDescriptor(pipeline, shaders), shaders));
+            } catch (RuntimeException unsupported) {
+                LOGGER.warn("Reduced terrain shading unavailable for {}; ordinary rendering remains active", pipeline.getLocation(), unsupported);
+                return java.util.Optional.empty();
+            }
+        }).orElse(null);
+    }
 	private final Map<RenderPipeline, Map<LinearWorldPostShaders.Semantic, MetalCompiledRenderPipeline>>
 		linearPostPipelineCache = new IdentityHashMap<>();
 	private final Map<RenderPipeline, NativeProgram> nativePipelines = new IdentityHashMap<>();
@@ -124,6 +160,18 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 
 	public MetalDevice metal() {
 		return this.metal;
+	}
+
+	/** Reserve before encoding a borrowed mesh on this device's world queue. Render-owner only. */
+	public long reserveResourceSubmission() {
+		this.requireOpen();
+		return this.commandEncoder.reserveResourceSubmission();
+	}
+
+	/** Nonblocking completion poll for mesh residency; never submits, flushes, or waits. */
+	public long completedResourceSubmission() {
+		this.requireOpen();
+		return this.commandEncoder.completedResourceSubmission();
 	}
 
 	/** Encodes a scoped native pass on the world's queue, after any deferred Blaze3D pass. */
@@ -321,6 +369,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	public void setReloadShaderSource(final @Nullable ShaderSource source) {
 		this.requireOpen();
 		if (this.reloadShaderSource == source) return;
+		this.clearLodPipelines();
 		this.reloadShaderSource = source;
 		this.shaderGeneration++;
 		this.poisonLinearWorldSession();
@@ -456,6 +505,11 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	}
 
 	private void retirePipeline(final RenderPipeline pipeline) {
+		this.lodPipelineCache.entrySet().removeIf(entry -> {
+			if (entry.getKey().pipeline() != pipeline) return false;
+			entry.getValue().ifPresent(MetalCompiledRenderPipeline::close);
+			return true;
+		});
 		MetalCompiledRenderPipeline legacy = this.pipelineCache.remove(pipeline);
 		if (legacy != null) legacy.close();
 		MetalCompiledRenderPipeline linear = this.linearPipelineCache.remove(pipeline);
@@ -586,6 +640,9 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		long allocationSize = (usage & GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER) != 0
 			? Math.addExact(size, 255L)
 			: size;
+		// MSL rounds uniform struct tails to 16 bytes, even when the last GLSL member
+		// ends at byte 12 or 56. Preserve the logical range while backing the padded type.
+		if ((usage & GpuBuffer.USAGE_UNIFORM) != 0) allocationSize = Math.addExact(allocationSize, 15L) & ~15L;
 		return new MetalGpuBuffer(usage, size, this.metal.createBuffer(allocationSize, storageMode));
 	}
 
@@ -610,6 +667,77 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	public CompiledRenderPipeline precompilePipeline(final RenderPipeline pipeline, final @Nullable ShaderSource shaderSource) {
 		ShaderSource selected = shaderSource == null ? this.defaultShaderSource : shaderSource;
 		return this.pipelineCache.computeIfAbsent(pipeline, ignored -> this.compilePipeline(pipeline, selected));
+	}
+
+	/** Optional terrain variant with exactly the original target, depth, color and uniform contract. */
+	public boolean preflightLodTerrain() {
+		RenderPipeline info = net.minecraft.client.renderer.RenderPipelines.SOLID_TERRAIN;
+		var runtime = ShaderPackRuntime.active();
+		var geometry = dev.metalcraft.client.shader.WorldGeometryAdapter.active();
+		if (runtime != null && runtime.isActive()) {
+			if (geometry == null) return false;
+			info = geometry.preflightLodTerrain(info);
+			if (info == null) return false;
+		}
+		var nativeProgram = this.nativePipelines.get(info);
+		boolean linear = nativeProgram != null && nativeProgram.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB;
+		var compiled = this.lodPipeline(info, linear);
+		if (compiled == null) return false;
+		compiled.metal(true, linear ? MetalTexture.Format.RGBA16_FLOAT : MetalTexture.Format.RGBA8_UNORM);
+		return true;
+	}
+
+	/** Optional terrain variant with exactly the original target, depth, color and uniform contract. */
+	@Nullable MetalCompiledRenderPipeline lodPipeline(final RenderPipeline pipeline, final boolean linear) {
+		return this.lodPipelineCache.computeIfAbsent(new LodPipelineKey(pipeline, linear), ignored -> {
+			if (!pipeline.getVertexShader().equals(Identifier.parse("minecraft:core/terrain"))
+				|| !pipeline.getFragmentShader().equals(Identifier.parse("minecraft:core/terrain"))
+				|| dev.metalcraft.client.shader.WorldGeometryAdapter.isBlended(pipeline)) return java.util.Optional.empty();
+			try {
+				NativeProgram nativeProgram = this.nativePipelines.get(pipeline);
+				MetalCompiledRenderPipeline result;
+				if (nativeProgram != null) {
+					ShaderPackRuntime runtime = ShaderPackRuntime.active();
+					if (runtime == null || !ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId())
+						|| !nativeProgram.vertexFunction().equals("gbuffer_terrain_vertex")
+						|| !nativeProgram.fragmentFunction().equals("gbuffer_terrain_fragment")
+						|| nativeProgram.source().contains("#define MC_WATER_FORWARD 1")
+						|| !nativeProgram.source().contains("struct McLodVertex")
+						|| linear && nativeProgram.colorEncoding() != FrameBindings.ColorEncoding.LINEAR_SRGB)
+						return java.util.Optional.empty();
+					result = this.compileNativePipeline(pipeline, new NativeProgram("#define MC_TERRAIN_LOD 1\n" + nativeProgram.source(),
+						nativeProgram.vertexFunction(), nativeProgram.fragmentFunction(), nativeProgram.colorEncoding()));
+				} else {
+					// Custom/replaced sources decline via the same canonical source verification as HDR.
+					if (linear) return java.util.Optional.empty();
+					ShaderSource sources = this.reloadShaderSource == null ? this.defaultShaderSource : this.reloadShaderSource;
+					String vertex = sources.get(pipeline.getVertexShader(), ShaderType.VERTEX);
+					String fragment = sources.get(pipeline.getFragmentShader(), ShaderType.FRAGMENT);
+					if (vertex == null || fragment == null) return java.util.Optional.empty();
+					vertex = LodShaderSources.vertex(pipeline.getVertexShader(), vertex);
+					fragment = LodShaderSources.fragment(pipeline.getFragmentShader(), fragment);
+					var shaders = MetalShaderTranslator.translatePipeline(
+						Blaze3DMetalMappings.vertexShaderWithLocations(Blaze3DMetalMappings.shaderWithResourceBindings(
+							GlslPreprocessor.injectDefines(vertex, pipeline.getShaderDefines()), pipeline), pipeline.getVertexFormatBindings()),
+						"lod_terrain_vertex", Blaze3DMetalMappings.shaderWithResourceBindings(
+							GlslPreprocessor.injectDefines(fragment, pipeline.getShaderDefines()), pipeline), "lod_terrain_fragment");
+					result = MetalCompiledRenderPipeline.compile(this.metal, pipeline, Blaze3DMetalMappings.pipelineDescriptor(pipeline, shaders), shaders);
+				}
+				if (result.isValid()) return java.util.Optional.of(result);
+				result.close();
+			} catch (RuntimeException unsupported) {
+				LOGGER.warn("LOD terrain pipeline declined {}; ordinary geometry remains active", pipeline.getLocation(), unsupported);
+			}
+			return java.util.Optional.empty();
+		}).orElse(null);
+	}
+
+	private void clearLodPipelines() {
+        this.terrainResolutionPipelines.values().forEach(value -> value.ifPresent(MetalCompiledRenderPipeline::close));
+        this.terrainResolutionPipelines.clear();
+        if (this.terrainResolution != null) { this.terrainResolution.close(); this.terrainResolution = null; }
+		this.lodPipelineCache.values().forEach(value -> value.ifPresent(MetalCompiledRenderPipeline::close));
+		this.lodPipelineCache.clear();
 	}
 
 	/**
@@ -674,6 +802,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	@Override
 	public void clearPipelineCache() {
 		this.commandEncoder.finishPendingWork();
+		this.clearLodPipelines();
 		if (this.linearWorldSession != null) {
 			this.linearWorldSession.poison();
 			this.linearWorldSession.close();
@@ -712,6 +841,10 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			this.closed = true;
 			if (this.linearWorldSession != null) this.linearWorldSession.close();
 			this.commandEncoder.close();
+			dev.metalcraft.client.lod.LodLoadedRenderer.close(this);
+			dev.metalcraft.client.lod.LodDistantRenderer.close(this);
+			dev.metalcraft.client.horizon.HorizonRenderer.close(this);
+			this.clearLodPipelines();
 			if (this.shaderPackRuntime != null) {
 				this.shaderPackRuntime.close();
 			}

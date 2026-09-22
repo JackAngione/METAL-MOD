@@ -43,6 +43,7 @@ public final class MetalCommandStream {
 	static final int OP_SET_TEXTURE = 3;
 	static final int OP_SET_SAMPLER = 4;
 	static final int OP_DRAW_INDEXED = 5;
+	static final int OP_SET_PIPELINE = 6;
 
 	/** Asks the decoder to re-validate every command against the Metal objects it names. */
 	static final int FLAG_CHECKED = 1;
@@ -115,6 +116,11 @@ public final class MetalCommandStream {
 		this.bytes.putInt(8, this.count);
 		this.bytes.putInt(12, checked ? FLAG_CHECKED : 0);
 		return this.bytes;
+	}
+
+	/** Only the owning pass records this, after checking its attachment formats. */
+	void setPipeline(final MetalRenderPipeline pipeline) {
+		this.claim(OP_SET_PIPELINE, pipeline.requireOpenHandle());
 	}
 
 	/** @see MetalRenderPass#setVertexBuffer(int, MetalBuffer, long) */

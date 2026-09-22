@@ -1,0 +1,38 @@
+Starting a Gradle Daemon, 1 busy and 2 stopped Daemons could not be reused, use --status for details
+
+> Configure project :
+Fabric Loom: 1.17.20
+
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava UP-TO-DATE
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses UP-TO-DATE
+> Task :compileShaderSmokeJava
+> Task :processShaderSmokeResources NO-SOURCE
+> Task :shaderSmokeClasses
+
+> Task :lodSmoke FAILED
+Solid fixture: 3072 -> 732 triangles; world error 0
+Exception in thread "main" java.lang.AssertionError: initial chunk arrival preserves unrelated persisted nodes: Stats[ready=true, captured=0, saved=0, cacheReads=0, dropped=1, failures=0, queuedBytes=0, queuedNodes=0, diskBytes=0, corrupt=0, evictions=0, indexedNodes=0]
+	at dev.metalcraft.client.lod.LodDistantSmoke.check(LodDistantSmoke.java:197)
+	at dev.metalcraft.client.lod.LodDistantSmoke.scheduling(LodDistantSmoke.java:132)
+	at dev.metalcraft.client.lod.LodDistantSmoke.run(LodDistantSmoke.java:23)
+	at dev.metalcraft.client.lod.LodSmoke.main(LodSmoke.java:27)
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':lodSmoke' (registered in build file 'build.gradle').
+> Process 'command '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 4s
+6 actionable tasks: 2 executed, 4 up-to-date

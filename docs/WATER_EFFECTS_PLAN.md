@@ -41,6 +41,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
+| [x] | WL | Distant water shell geometry | W1, W3, W7 | /root | done | September 21: direct fluid shells and detached horizon water implemented. Full Metal build passes; 20.24-second section route reduces pond 2,700 → 480 indices and restores native water exactly. Final 28.29-second NORMAL 128/16 route passes model-only water, edit/handoff/lifecycle checks; None, Standard, falling-water and native underwater images inspected. Fractional closure and metadata covered by geometry checks. See evidence/fluid-shell and evidence/compact-horizon. |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
 | [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
 | [x] | W3 | Water routing and stable frame inputs | W1, W2 | grok | done | 2026-09-07: surface/opaque depth debug views, GPU reconstruction at native and odd half extents, live native/half identity, resize/world-change snapshot extents, and ordinary vs forced Fabulous water routing. See W3 completion evidence. |
@@ -54,9 +55,18 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [x] | WD4 | Crossing wave motion and scattered reflections | WD3 | /root | done | 2026-09-10: independent crossing layers and bounded local sun glints; GPU, full NORMAL-world Metal 16/16 motion/appearance and lifecycle checks pass. See WD4 completion evidence. |
 | [x] | WD5 | Water detail render distance | WD4 | /root | done | 2026-09-10: 2–32 chunk slider/default 16, filtered distant waves, persistence/GPU and natural-ocean distance comparison pass; build and NORMAL/Metal/16/16 lifecycle pass. See WD5 completion evidence. |
 | [x] | WU | Clearer natural underwater appearance | W6, W7 | /root | done | 2026-09-10: tuned single water fog, removed screen veil, reduced submerged surface tint/opacity; build/Metal checks, NORMAL-world full/focused visual tests and lifecycle pass. See WU evidence below. |
-| [ ] | W8 | Integrated validation and release defaults | W6, W7 | unassigned | not started | Run regression scenes, lifecycle checks, and paired benchmarks. |
+| [ ] | W8 | Integrated validation and release defaults | W6, W7 | /root | in progress | 2026-09-11: LOD integration continuation claims shared opaque/transparent composition regression checks. Preserve the water forward ABI and opaque snapshot depth while introducing terrain LOD; record shader and live evidence before closure. Full water release benchmarks remain outstanding. |
 
 ## Implementation tasks and acceptance criteria
+
+W8 integration note, September 21, /root: the shell performance investigation
+identified unchanged distant fluid geometry (10.55 million translucent indices in
+a 128/16 copied NORMAL world). `LevelRendererWaterDrawMixin` now attaches the same
+water binding using `ModifyExpressionValue`, avoiding the constructor wrapper's
+varargs/boxing overhead. Fluid meshes, metadata contents, sorting and shaders are
+unchanged. The copied-world Metal run and full Metal-validation build pass; see
+[shell performance evidence](evidence/shell-performance/README.md). This is not
+Standard-pack visual acceptance or distant-fluid simplification. W8 remains open.
 
 ### W1 — Establish water identity and composition order
 
@@ -2444,3 +2454,128 @@ fullscreen, failed-pack recovery, reopen and clean shutdown. `./gradlew jar sour
 passes in 3s (`/tmp/underwater-clear-package.log`); packaged underwater shader and
 new mixins/helper match the tested workspace. `git diff --check` passes.
 All WU acceptance criteria are complete. Existing W8 release gate remains open.
+
+## LOD composition regression progress (2026-09-11)
+
+P8 preview continuation (2026-09-12 evening), owner Codex: geometry/horizon controls
+are exposed without a development flag and remain off by default. The full native
+API-validation build passes after the complete preparation timer (19s) and disabled
+idle bookkeeping refinement (18s). The latter skips LOD draw counters and idle
+maintenance; shared water eligibility, bindings and forward draw routing are unchanged.
+The full 48-capture NORMAL/Metal/16/16 horizon route passes reload, dimension and
+clear/close checks; actual settings enable/reset passes in 16s. Earlier merged/split
+LOD water composition evidence below remains applicable. This does not close W8's
+separate water release-performance matrix.
+
+
+P8 native-validation continuation (2026-09-12), owner Codex: the complete build
+now passes with `MTL_DEBUG_LAYER=1` (17s, then 16s after horizon instrumentation).
+SPIRV-Cross native texture-buffer emission fixes the sampler ABI assertion; the
+shadow-filtering smoke fixture uses separate layered-depth and ordinary-color
+vertex entry points. Production water GPU fixtures pass in both builds. Water
+effect shaders and the water/depth ownership ABI are unchanged in this continuation;
+the prior full NORMAL-world 16/16 merged/split regression below remains the live
+composition evidence. [Native validation logs](evidence/lod/p8-release/validation/README.md).
+The 16-case LOD performance matrix completes but misses loaded-geometry release
+targets. W8 stays open for its independent water release-performance requirements.
+
+2026-09-12 continuation claimed by Codex for the P6 full-resolution distant-lighting
+fallback and P8 benchmark instrumentation. Preserve opaque color/depth ownership and
+the water forward ABI; rerun the generated-world merged/split water regression after
+the opaque resolve optimization. W8 remains in progress for its broader release
+requirements. Results and inspected artifacts will be recorded below before handoff.
+
+P6/P8 continuation validation passed (2026-09-12), M4 Max/64 GB, NORMAL
+seed 12345, 16/16, Default/Metal, `MTL_DEBUG_LAYER=1`. The full water identity
+route passes with the 64-chunk explored cache in both merged and split passes,
+including depth/identity, HDR, refraction/absorption, foam, reflections, underwater,
+hand/HUD, half resolution, resize and resource reload. Both close with zero
+distant GPU bytes and zero distant upload failures. Inspected the merged
+refraction/absorption comparison and split underwater-entry image: water/foreground
+boundaries and underwater depth remain intact. Commands, counters, representative
+images and full image hash manifests are retained in [fallback validation](evidence/lod/fallback-validation/);
+the remaining screenshots are archived locally under `build/reports/lod-fallback-images`.
+The 648 production-resolve fixtures also preserve exact depth and stay within
+0.002 color error across shadow thresholds, fog, debug views and legacy/HDR.
+W8 remains open for its independent water release-performance requirements.
+
+P7 completion continuation claimed by `/root`: validate persistent distant opaque
+nodes with the existing forward water and full-resolution opaque-depth snapshot.
+The cache/scheduler and resident-buffer fixes do not change the water ABI. The
+extended-horizon water regression will record actual distant draw ownership;
+W8 remains open for its independent release-performance requirements.
+
+P7 continuation claimed by `/root` (2026-09-11): validate distant opaque/cutout
+parent meshes entering the existing terrain pass before water snapshots and forward
+translucency. Extend atmospheric distance fog only; keep fluid/status-effect fog
+and the water identity ABI. W8 remains open; live regression evidence will follow.
+P7 progress checkpoint: `./gradlew build` passes in 13 s on M4 Max, including
+existing water GPU checks. The distant path requires a separate horizon experiment
+flag. No live distant-water composition acceptance is claimed; that remains pending.
+
+W8 remains in progress. The full generated NORMAL-world water matrix at 16/16,
+Default/Metal passed in 3m38s on M4 Max with loaded LOD and resident shadow LOD active.
+`./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true
+-PmetalLodExperimental=true -PmetalTestLod=true --args='--graphicsBackend default'`.
+Depth/identity/HDR, ordinary/Fabulous transparency, above/below water, rain/night,
+refraction/foam, reflection controls and resource reload assertions pass. Evidence:
+`docs/evidence/lod/water-merged/`. Build including production water GPU readbacks passes.
+The W5 underwater comparison initially failed with LOD both on and off because
+LocalPlayer water vision changes fog distance on client ticks during server tick
+freeze. The test now waits for water vision 1 before its unchanged image assertion;
+the focused `-PmetalWaterW5Probe=true` test and full matrix pass. No water appearance
+change was needed. Broader LOD solid-layer coverage and split-pass validation remain next;
+this evidence does not close the complete water performance/release matrix.
+
+Final LOD compatibility coverage passed on 2026-09-11 after allowing validated solid
+layers in mixed sections. Full merged and split NORMAL-world 16/16 Default/Metal
+matrices each passed in 3m27s with >3.2M LOD world draws and >3.8M LOD shadow draws,
+zero upload failures and zero charged GPU bytes after close. Commands above, plus
+`-PmetalPassMerging=false` for split. Evidence: `docs/evidence/lod/water-merged-final/`
+and `docs/evidence/lod/water-split/`. Identity/depth, ordinary/Fabulous, HDR/hand/HUD,
+weather, underwater and reflection/reload checks pass. W8 remains open for the complete
+water performance/release matrix; LOD composition acceptance is complete.
+
+Follow-up claimed by `/root`: after P8 profiling exposed per-LOD-draw batch flushes,
+opaque pipeline changes now remain ordered inside one native command stream. Water
+draw routing is unchanged. Native ordering/lifetime and LOD route checks pass.
+The complete merged water matrix passes again in 3m28s, NORMAL seed 12345,
+16/16 Default/Metal on M4 Max. It records 3,133,425 LOD world draws and 3,731,634
+LOD shadow draws, four safe stale-owner fallbacks, zero upload failures and zero
+charged GPU bytes after close. Identity/depth, above/below water, refraction, foam,
+reflections, HDR/Fabulous, crossings and reload assertions pass. Evidence:
+`docs/evidence/lod/water-batched/`. W8 remains open for its release-performance matrix.
+
+P7 final cache compatibility (2026-09-12), owner `/root`: the complete split-pass
+water matrix passes in **4m34s**, NORMAL seed 12345, 16/16, Default/Metal,
+Apple M4 Max/64 GB/macOS 27.0, with `MTL_DEBUG_LAYER=1`. It explores received terrain
+before the water fixture and renders a **64-chunk** cached opaque horizon.
+Command: `./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true
+-PmetalLodHorizonExperimental=true -PmetalTestLodHorizon=64 -PmetalPassMerging=false
+--args='--graphicsBackend default'`. Final cache fixes include parent repair,
+bounded behind-camera recapture and startup inventory invalidation.
+
+The matrix records **675,629** distant world draws and **733,501** loaded replacement
+draws; zero upload failures and zero charged GPU bytes after close. Identity/depth,
+native/half/resize, refraction, foam, underwater, SSR tiers, reflected camera movement,
+ordinary/Fabulous transparency and reload assertions pass. Selected identity,
+underwater and SSR images were inspected; magenta identity water is the intentional
+diagnostic mode. Evidence: `docs/evidence/lod/horizon-water-split/`. The final merged-pass
+repeat is recorded below. The water ABI and effect appearance are unchanged; uniform
+tail allocation was padded to match MSL's 16-byte alignment under API validation.
+W8 remains open for release performance qualification.
+
+The final merged repeat exposed a test-predicate failure at half resolution: its
+visible identity mask had 23,595 magenta-chroma samples but only 37 samples above
+the old absolute highlight cutoff. The native mask had 20,817 chroma samples;
+baseline had zero. Identity validation now requires magenta hue contrast across
+at least 500 samples, up from 50 highlight samples, retaining the <=10 negative
+baseline/restored limit. This changes the diagnostic assertion only. The failing
+capture and measured counts are retained in `docs/evidence/lod/water-identity-threshold/`;
+the merged matrix subsequently passed with the revised predicate in **4m35s**.
+It recorded **686,912** distant world draws and **720,735** loaded replacement draws,
+zero upload failures and zero charged GPU bytes after close. Command above without
+`-PmetalPassMerging=false`; same NORMAL seed, 16/16 Default/Metal and native API
+validation. Final merged artifacts and inspected images:
+`docs/evidence/lod/horizon-water-merged/`. P7 composition compatibility is complete;
+W8's broader release performance matrix remains open.

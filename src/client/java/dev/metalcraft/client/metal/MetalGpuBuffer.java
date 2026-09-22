@@ -68,6 +68,7 @@ final class MetalGpuBuffer extends GpuBuffer {
 
 	@Override
 	public GpuBufferSlice.MappedView map(final long offset, final long length, final boolean read, final boolean write) {
+		MetalBuffer.checkRange(this.size(), offset, length, "logical mapping");
 		if (!read && !write) {
 			throw new IllegalArgumentException("At least one of read or write must be true");
 		}

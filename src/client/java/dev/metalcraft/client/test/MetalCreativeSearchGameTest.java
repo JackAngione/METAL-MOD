@@ -28,7 +28,13 @@ final class MetalCreativeSearchGameTest {
 
 	void run() {
 		var worldBuilder = this.context.worldBuilder()
-			.adjustSettings(settings -> settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE));
+			.adjustSettings(settings -> {
+				var normal = settings.getSettings().worldgenLoadContext()
+					.lookupOrThrow(net.minecraft.core.registries.Registries.WORLD_PRESET)
+					.getOrThrow(net.minecraft.world.level.levelgen.presets.WorldPresets.NORMAL);
+				settings.setWorldType(new WorldCreationUiState.WorldTypeEntry(normal));
+				settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
+			});
 
 		try (TestSingleplayerContext world = worldBuilder.create()) {
 			this.context.waitFor(client -> client.level != null && client.player != null);

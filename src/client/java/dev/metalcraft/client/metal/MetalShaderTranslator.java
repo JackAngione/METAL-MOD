@@ -33,6 +33,7 @@ import static org.lwjgl.util.spvc.Spvc.SPVC_COMPILER_OPTION_MSL_PLATFORM;
 import static org.lwjgl.util.spvc.Spvc.SPVC_COMPILER_OPTION_MSL_ENABLE_DECORATION_BINDING;
 import static org.lwjgl.util.spvc.Spvc.SPVC_COMPILER_OPTION_FLIP_VERTEX_Y;
 import static org.lwjgl.util.spvc.Spvc.SPVC_COMPILER_OPTION_MSL_VERSION;
+import static org.lwjgl.util.spvc.Spvc.SPVC_COMPILER_OPTION_MSL_TEXTURE_BUFFER_NATIVE;
 import static org.lwjgl.util.spvc.Spvc.SPVC_MSL_PLATFORM_MACOS;
 import static org.lwjgl.util.spvc.Spvc.SPVC_RESOURCE_TYPE_SAMPLED_IMAGE;
 import static org.lwjgl.util.spvc.Spvc.SPVC_RESOURCE_TYPE_SEPARATE_IMAGE;
@@ -311,6 +312,9 @@ public final class MetalShaderTranslator {
 				checkSpvc(spvc_compiler_options_set_uint(options, SPVC_COMPILER_OPTION_MSL_VERSION, MSL_VERSION_2_4), context, stage, sourceName, "MSL version selection");
 				checkSpvc(spvc_compiler_options_set_uint(options, SPVC_COMPILER_OPTION_MSL_PLATFORM, SPVC_MSL_PLATFORM_MACOS), context, stage, sourceName, "MSL platform selection");
 				checkSpvc(spvc_compiler_options_set_bool(options, SPVC_COMPILER_OPTION_MSL_ENABLE_DECORATION_BINDING, true), context, stage, sourceName, "MSL resource binding preservation");
+				// nSetTexelBuffer binds MTLTextureTypeTextureBuffer. SPIRV-Cross otherwise
+				// emulates samplerBuffer with texture2d, which violates that native ABI.
+				checkSpvc(spvc_compiler_options_set_bool(options, SPVC_COMPILER_OPTION_MSL_TEXTURE_BUFFER_NATIVE, true), context, stage, sourceName, "Native Metal texel buffers");
 				if (stage == Stage.VERTEX) {
 					checkSpvc(spvc_compiler_options_set_bool(options, SPVC_COMPILER_OPTION_FLIP_VERTEX_Y, true), context, stage, sourceName, "Vulkan-to-Metal vertex coordinates");
 				}

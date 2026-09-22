@@ -1,0 +1,22 @@
+{
+  "world": "NORMAL / metalcraft",
+  "backend": "Metal",
+  "renderDistance": 16,
+  "simulationDistance": 16,
+  "chunkBuilder": "Threaded",
+  "sameCameraSequence": "0 -\u003e 5 -\u003e 0",
+  "selectedCell": 8,
+  "nativeIndices": 4950,
+  "coarseIndices": 972,
+  "nativeRestored": true,
+  "stats": {
+    "builds": 268,
+    "originalQuads": 97015,
+    "outputQuads": 63422,
+    "workerNanos": 291878907,
+    "geometricBuilds": 165,
+    "movedVertices": 132434
+  },
+  "elapsedSeconds": 15.389501667,
+  "worldClosed": true
+}

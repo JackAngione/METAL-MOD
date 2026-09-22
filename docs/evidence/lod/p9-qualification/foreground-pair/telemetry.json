@@ -1,0 +1,72 @@
+{
+  "false": {
+    "observedPeakMetalBytes": 1275953152,
+    "observations": 26423,
+    "frames": 3015,
+    "presentationChecks": 558,
+    "minimumGpuCoverage": 0.996969696969697,
+    "thermalStates": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "intervalRepeatsMs": {
+      "stationary": [
+        6.922,
+        6.845,
+        6.618
+      ],
+      "pan": [
+        6.967,
+        6.489,
+        6.976
+      ],
+      "traversal": [
+        8.176,
+        8.43,
+        6.893
+      ]
+    }
+  },
+  "true": {
+    "observedPeakMetalBytes": 1303740416,
+    "observations": 27821,
+    "frames": 2984,
+    "presentationChecks": 558,
+    "minimumGpuCoverage": 0.9969604863221885,
+    "thermalStates": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "intervalRepeatsMs": {
+      "stationary": [
+        6.998,
+        7.306,
+        7.414
+      ],
+      "pan": [
+        7.05,
+        7.731,
+        6.677
+      ],
+      "traversal": [
+        7.532,
+        7.013,
+        6.685
+      ]
+    }
+  }
+}

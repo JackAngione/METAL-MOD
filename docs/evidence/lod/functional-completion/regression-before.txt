@@ -1,0 +1,37 @@
+
+> Configure project :
+Fabric Loom: 1.17.20
+
+> Task :compileJava NO-SOURCE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileClientJava UP-TO-DATE
+> Task :compileMetalNative UP-TO-DATE
+> Task :processClientResources UP-TO-DATE
+> Task :clientClasses UP-TO-DATE
+> Task :compileShaderSmokeJava
+> Task :processShaderSmokeResources NO-SOURCE
+> Task :shaderSmokeClasses
+
+> Task :lodSmoke FAILED
+Solid fixture: 3072 -> 732 triangles; world error 0
+Exception in thread "main" java.lang.AssertionError: chunk-boundary crossing must select newly distant terrain: axis=0, direction=-1
+	at dev.metalcraft.client.lod.LodDistantSmoke.check(LodDistantSmoke.java:238)
+	at dev.metalcraft.client.lod.LodDistantSmoke.chunkBoundary(LodDistantSmoke.java:201)
+	at dev.metalcraft.client.lod.LodDistantSmoke.run(LodDistantSmoke.java:24)
+	at dev.metalcraft.client.lod.LodSmoke.main(LodSmoke.java:27)
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':lodSmoke' (registered in build file 'build.gradle').
+> Process 'command '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 2s
+6 actionable tasks: 2 executed, 4 up-to-date

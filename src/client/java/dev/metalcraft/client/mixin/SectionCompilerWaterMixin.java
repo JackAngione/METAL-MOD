@@ -37,6 +37,10 @@ abstract class SectionCompilerWaterMixin {
 	private SectionCompiler.Results metalcraft$captureWaterMetadata(final SectionPos sectionPos,
 		final RenderSectionRegion region, final VertexSorting vertexSorting,
 		final SectionBufferBuilderPack builders, final Operation<SectionCompiler.Results> original) {
+		// The shell compiler writes its own sidecar. This works regardless of wrapper order
+		// and avoids overwriting reduced metadata with an empty native-fluid capture.
+		if (((dev.metalcraft.client.chunk.NativeLodState)region).metalcraft$cellSize() > 1)
+			return original.call(sectionPos, region, vertexSorting, builders);
 		CompileCapture previous = this.metalcraft$waterCapture.get();
 		CompileCapture capture = new CompileCapture();
 		this.metalcraft$waterCapture.set(capture);

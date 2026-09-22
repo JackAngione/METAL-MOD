@@ -1,0 +1,18 @@
+{
+  "command": [
+    "./gradlew",
+    "runClient",
+    "-PmetalLifecycleTest",
+    "-PmetalLodHorizonTest=true",
+    "-PmetalLodHorizonBenchmark=true",
+    "-PmetalBenchmarkFullscreen=true",
+    "-PmetalBenchmarkUnlocked=true",
+    "-PmetalBenchmarkHalfResolution=false",
+    "--args=--graphicsBackend default"
+  ],
+  "baseCommit": "8f971658b930711975f02f5145806eeeac9617cd",
+  "sourceSha256": "2f3f13d25918be924d183d0448ddac8d18df3e484e5b015fdc0e228b7e0183ef",
+  "coldTestCache": true,
+  "exitCode": 0,
+  "elapsedSeconds": 793.6032719612122
+}

@@ -1,0 +1,67 @@
+{
+  "scope": "Synthetic Standard resolve cost experiment; not world/frame performance or a shipped capability",
+  "bands": "near \u003c64 blocks full resolution, middle 64..128 half linear, far \u003e\u003d128 quarter linear",
+  "depth": "Common full-resolution opaque depth; reduced targets contain no depth; subsequent depth-tested consumer unchanged",
+  "timestamp": "Metal GPUStartTime/GPUEndTime for one command buffer containing all passes; synchronous harness waits are outside measured intervals",
+  "samplesPerVariant": 180,
+  "device": "Apple M4 Max",
+  "results": [
+    {
+      "width": 1279,
+      "height": 719,
+      "mergedMs": [
+        0.113958,
+        0.207208,
+        0.212166
+      ],
+      "bandsMs": [
+        0.212749,
+        0.392625,
+        0.400874
+      ],
+      "medianChangePercent": 86.69071061268185,
+      "allocatedBytes": 34979840,
+      "quality": {
+        "maximumChannelError": 0.00567626953125,
+        "meanMaximumChannelError": 3.865662706658042E-5,
+        "pixelsOver002": 0,
+        "motionSteps": 16,
+        "depthBitDifferences": 0,
+        "pixels": 14713616,
+        "nearPixelsOver002": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "mergedMs": [
+        0.212416,
+        0.215249,
+        0.2165
+      ],
+      "bandsMs": [
+        0.415916,
+        0.421749,
+        0.425333
+      ],
+      "medianChangePercent": 95.80257607713168,
+      "allocatedBytes": 74334208
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "mergedMs": [
+        0.784041,
+        0.791375,
+        0.793208
+      ],
+      "bandsMs": [
+        1.630541,
+        1.640875,
+        1.647499
+      ],
+      "medianChangePercent": 107.96629257908705,
+      "allocatedBytes": 292880384
+    }
+  ]
+}

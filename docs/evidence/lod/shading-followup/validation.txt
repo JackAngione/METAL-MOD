@@ -1,0 +1,31 @@
+P6 follow-up validation — 2026-09-11
+Base commit: 3fd07fd90897d7db05d781dcd7953bf57fe9ee26
+Machine: Apple M4 Max, 64 GiB, macOS 27.0 (26A428), Java 25.0.4.
+Scope: offscreen Standard resolve fixtures only, not generated-world/gameplay acceptance.
+
+PASS ./gradlew lodPackedTileShadingBenchmark (30 s)
+  Three repeats of 180 samples per variant; 80 warm-up submissions per repeat.
+  1279x719 / 1920x1080 / 3840x2160; 96 / 256 block shadow distance.
+  Original stored bands, SIMD lookup, half-only quad, direct tile, packed tile.
+  All-pass GPU times; raw uninstrumented samples retained in the three metrics files.
+  Every approach fails net GPU improvement in this matrix. See summary.json.
+  16 moving odd-size readback steps: depth bit-identical, no near errors above .02.
+  256-block shadows: quarter-band image-budget failures explicitly recorded.
+  This PASS means the experiment executed and recorded results, not P6 acceptance.
+
+PASS MTL_DEBUG_LAYER=1 ./gradlew lodPackedTileShadingBenchmark (31 s)
+  Metal API validation enabled for the Java process and both native probe processes.
+  No Metal API validation errors. Instrumented results are not the timing reference.
+
+PASS ./gradlew build (11 s)
+  Existing CPU LOD, production Metal LOD, and shader translation smoke checks pass.
+PASS git diff --check
+PASS retained reports contain exactly three repeats and 180 samples per variant.
+
+P6 remains unchecked. No runtime capability/settings/shader source was promoted.
+Missing: net GPU improvement, generated-world moving silhouettes and transparent
+intersections, band hysteresis, runtime integration and lifecycle acceptance.
+
+A development 32x32 direct tile exceeded the 32 KiB tile-memory budget and was
+rejected under API validation. Its invalid timing/image results were discarded.
+The retained direct tile is 16x16 and encoder creation is checked before drawing.

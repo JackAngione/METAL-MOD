@@ -274,6 +274,10 @@ public final class MetalShaderTranslationSmoke {
 		);
 		assertSlotMasks(texel.vertex(), 0, 1);
 		assertSlotMasks(texel.fragment(), 0, 0);
+		if (!texel.vertex().metalSource().contains("texture_buffer<int>")) {
+			throw new AssertionError("Texel-buffer translation must match native MTLTextureTypeTextureBuffer bindings:\n"
+				+ texel.vertex().metalSource());
+		}
 
 		RenderPipeline mappedPipelineDefinition = mappedPipeline();
 		String mappedVertex = Blaze3DMetalMappings.vertexShaderWithLocations(
@@ -315,6 +319,8 @@ public final class MetalShaderTranslationSmoke {
 			assertMipRenderTargetViewport(device);
 			assertTexelBufferSampling(device);
 			assertMipLevelSampling(device);
+			assertDistantMipSampling(device);
+            TerrainResolutionSmoke.run(device);
 			assertBatchedResourceBindings(device);
 			assertQueriesAndLifetime(device, pipeline);
 			assertPassGpuTiming(device, pipeline);
@@ -475,6 +481,54 @@ public final class MetalShaderTranslationSmoke {
 		}
 	}
 
+	private static void assertDistantMipSampling(final MetalDevice device) {
+		for (int mipFloor : new int[]{1,2}) for (int maxLod : new int[]{0, 1, 3}) for (boolean explicit : new boolean[]{false, true}) {
+			String fragment = MIP_FRAGMENT_GLSL.replace("textureLod(Source, vec2(0.5), 2.0)",
+				explicit ? "textureLod(Source, vec2(0.5), 0.0)" : "texture(Source, vec2(0.5))");
+			try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
+					VERTEX_GLSL, "smoke/distant-mip.vert", fragment, "smoke/distant-mip.frag", MetalTexture.Format.RGBA8_UNORM, null));
+				 MetalCommandQueue queue = device.createCommandQueue();
+				 MetalTexture source = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 8, 8, 4));
+				 MetalTextureView view = source.createView();
+				 MetalTexture target = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 8, 8, 1));
+				 MetalGpuSampler base = new MetalGpuSampler(device.createSampler(new MetalSampler.Descriptor(
+					MetalSampler.Filter.NEAREST, MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE,
+					MetalSampler.AddressMode.CLAMP_TO_EDGE, 8, maxLod)),
+					com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE, com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE,
+					com.mojang.blaze3d.textures.FilterMode.NEAREST, com.mojang.blaze3d.textures.FilterMode.NEAREST,
+					8, java.util.OptionalDouble.of(maxLod))) {
+				int[] colors = {0xff0000ff, 0xff00ff00, 0xffff0000, 0xffffffff};
+				for (int mip=0; mip<4; mip++) {
+					int size=8>>mip;
+					var pixels=ByteBuffer.allocateDirect(size*size*4).order(ByteOrder.nativeOrder());
+					while(pixels.hasRemaining()) pixels.putInt(colors[mip]);
+					source.upload(queue,mip,pixels.flip());
+				}
+				var distant=base.distant(mipFloor);
+				if (distant != base.distant(mipFloor) || distant.getMaxAnisotropy()!=1 || base.getMaxAnisotropy()!=8
+					|| base.metal().descriptor().minLod()!=0) throw new AssertionError("Distant sampler isolation/reuse");
+				// Ordinary -> distant -> ordinary verifies restoring the original sampling behavior.
+				for (var sampler : new MetalGpuSampler[]{base, distant, base}) {
+					try (var commands=queue.createCommandBuffer(); var pass=commands.beginRenderPass(new MetalRenderPass.Descriptor(
+							MetalRenderPass.ColorAttachment.clear(target,0,0,0,1)))) {
+						pass.setPipeline(pipeline);
+						pass.setTexture(0,view,MetalRenderPass.STAGE_FRAGMENT);
+						pass.setSampler(0,sampler.metal(),MetalRenderPass.STAGE_FRAGMENT);
+						pass.draw(MetalRenderPass.Primitive.TRIANGLE,0,3,1,0);
+						pass.close(); commands.commitAndWait();
+					}
+					int expected=colors[sampler==base?0:Math.min(mipFloor,maxLod)];
+					int actual=target.readback(queue,0).order(ByteOrder.nativeOrder()).getInt((4*8+4)*4);
+					if(actual!=expected) throw new AssertionError("Distant mip floor/readback: max="+maxLod
+						+" explicit="+explicit+" expected="+Integer.toHexString(expected)+" actual="+Integer.toHexString(actual));
+				}
+				base.close();
+				if(!distant.metal().isClosed()) throw new AssertionError("Distant sampler lifetime leaked");
+			}
+		}
+		System.out.println("Distant Metal mip sampling passed: quarter resolution, mip caps, ordinary restoration and lifetime");
+	}
+
 	private static void assertFramebufferOrientation(final MetalDevice device) {
 		try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
 				 ORIENTATION_VERTEX_GLSL, "smoke/orientation.vert", RED_FRAGMENT_GLSL, "smoke/red.frag",
@@ -598,6 +652,10 @@ public final class MetalShaderTranslationSmoke {
 		try (MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
 				 BATCH_VERTEX_GLSL, "smoke/batch.vert", BATCH_FRAGMENT_GLSL, "smoke/batch.frag",
 				 MetalTexture.Format.RGBA8_UNORM, null));
+			 MetalRenderPipeline bluePipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
+				 BATCH_VERTEX_GLSL, "smoke/batch.vert", BATCH_FRAGMENT_GLSL.replace(
+				 "Tint * texture(BatchTexture, vec2(0.5))", "vec4(0.0, 0.0, 1.0, 1.0)"), "smoke/blue.frag",
+				 MetalTexture.Format.RGBA8_UNORM, null));
 			 MetalCommandQueue queue = device.createCommandQueue();
 			 MetalTexture color = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 8, 8, 1));
 			 MetalTexture source = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 2, 2, 1));
@@ -645,6 +703,34 @@ public final class MetalShaderTranslationSmoke {
 					if (red < 200 || green > 20 || blue > 20) {
 						throw new AssertionError("Metal command batch (checked=" + checked + ") did not bind its uniform, texture, and sampler: rgb="
 							+ red + "," + green + "," + blue);
+					}
+					// Alternating programs inside one submission must retain both draw order and
+					// resource bindings. Both orders catch an omitted or prematurely applied switch.
+					for (boolean blueLast : new boolean[]{false,true}) {
+						batch.reset();
+						try (MetalCommandBuffer commands = queue.createCommandBuffer();
+							 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
+								 MetalRenderPass.ColorAttachment.clear(color, 0, 1, 0, 1)))) {
+							pass.setPipeline(pipeline);
+							batch.setUniformBuffer(0,tint,0,MetalRenderPass.STAGE_FRAGMENT);
+							batch.setTexture(1,sourceView,MetalRenderPass.STAGE_FRAGMENT);
+							batch.setSampler(1,sampler,MetalRenderPass.STAGE_FRAGMENT);
+							pass.recordPipeline(batch,blueLast?pipeline:bluePipeline);
+							batch.drawIndexed(MetalRenderPass.Primitive.TRIANGLE,indices,0,MetalRenderPass.IndexType.UINT16,3,1,0,0);
+							pass.recordPipeline(batch,blueLast?bluePipeline:pipeline);
+							batch.drawIndexed(MetalRenderPass.Primitive.TRIANGLE,indices,0,MetalRenderPass.IndexType.UINT16,3,1,0,0);
+							pass.submit(batch);
+							pass.close();
+							// Last case: Java release before completion must keep the batched
+							// pipeline alive through the command buffer's native resource pins.
+							if (checked && blueLast) bluePipeline.close();
+							commands.commitAndWait();
+						}
+						pixels = color.readback(queue,0);
+						red = Byte.toUnsignedInt(pixels.get((4*8+4)*4));
+						blue = Byte.toUnsignedInt(pixels.get((4*8+4)*4+2));
+						if (blueLast ? blue<200||red>20 : red<200||blue>20)
+							throw new AssertionError("Batched pipeline ordering changed: checked="+checked+" blueLast="+blueLast);
 					}
 				}
 			} finally {

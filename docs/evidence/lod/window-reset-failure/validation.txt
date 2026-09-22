@@ -1,0 +1,8 @@
+Failed matrix attempt, 2026-09-12, 1080p / None / half resolution / LOD enabled.
+The nine benchmark phases and world close completed, then Fabric's final window-size reset crashed.
+SIGSEGV at libglfw.dylib+0x1227c, Render thread:
+glfwSetWindowMonitor -> Window.setMode -> fabric_resize -> fabric_resetSize
+-> FabricClientGameTestRunner.setupAndCheckFinalGameTestState.
+No MetalCraft native frame appears in this crashing stack. This locates the failure; it does not establish its root cause.
+The run is rejected because the client exit code was nonzero. Its raw timings and source/command provenance are retained for diagnosis.
+Retry the exact unchanged invocation before attributing this to a renderer change.

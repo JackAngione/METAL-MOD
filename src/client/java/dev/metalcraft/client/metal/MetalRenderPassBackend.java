@@ -52,6 +52,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	private static final boolean BATCHING = Boolean.parseBoolean(System.getProperty("metalcraft.commandBatching", "true"));
 
 	private final MetalGpuDevice device;
+    private final MetalCommandEncoder owner;
 	private final Map<String, GpuBufferSlice> uniforms = new HashMap<>(NAME_MAP_CAPACITY);
 	private final Map<String, TextureBinding> textures = new HashMap<>(NAME_MAP_CAPACITY);
 	/**
@@ -64,10 +65,12 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	private final GpuBufferSlice[] boundUniforms = new GpuBufferSlice[RESOURCE_SLOTS];
 	private final MetalGpuTextureView[] boundTextureViews = new MetalGpuTextureView[RESOURCE_SLOTS];
 	private final MetalGpuSampler[] boundSamplers = new MetalGpuSampler[RESOURCE_SLOTS];
+	private int terrainTextureMip;
 	private MetalRenderPass metal;
 	private RenderPass.RenderArea renderArea;
 	private int outputWidth;
 	private int outputHeight;
+    private int scissorX, scissorY, scissorWidth, scissorHeight;
 	private boolean hasDepth;
 	private MetalTexture.@Nullable Format colorFormat;
 	private MetalCompiledRenderPipeline pipeline;
@@ -89,8 +92,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	/** Non-null while a multi-draw is recording; binds and draws go to it instead of the encoder. */
 	private @Nullable MetalCommandStream recording;
 
-	MetalRenderPassBackend(final MetalGpuDevice device) {
+	MetalRenderPassBackend(final MetalGpuDevice device, final MetalCommandEncoder owner) {
 		this.device = device;
+        this.owner = owner;
 	}
 
 	/**
@@ -113,6 +117,8 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		this.renderArea = area;
 		this.outputWidth = width;
 		this.outputHeight = height;
+        this.scissorX = area.x(); this.scissorY = area.y();
+        this.scissorWidth = area.width(); this.scissorHeight = area.height();
 		this.hasDepth = depth;
 		this.colorFormat = colorFormat;
 		this.hdrOwned = hdrOwned;
@@ -192,7 +198,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		if (this.pipeline != compiled) {
 			this.pipeline = compiled;
 			this.clearBoundSlots();
-			this.pass().setPipeline(compiled.metal(this.hasDepth, this.colorFormat));
+			this.encodePipeline(compiled.metal(this.hasDepth, this.colorFormat));
 		}
 	}
 
@@ -225,6 +231,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	@Override
 	public void enableScissor(final int x, final int y, final int width, final int height) {
 		this.pass().setScissor(x, y, width, height);
+        this.scissorX = x; this.scissorY = y; this.scissorWidth = width; this.scissorHeight = height;
 	}
 
 	@Override
@@ -296,16 +303,44 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	) {
 		if (this.discardDraws) return;
 		RenderPipeline baseline = this.originalPipeline;
+        MetalCompiledRenderPipeline reconstruction = this.prepareTerrainResolution(draws, defaultIndexBuffer, defaultIndexType, uniformArgument);
+        MetalTerrainResolution.Band boundBand = null;
+        MetalCompiledRenderPipeline ordinary = this.pipeline;
+        boolean sharedTerrainBindings = reconstruction != null && reconstruction.sharesTerrainBindings(ordinary);
 		WorldGeometryAdapter geometry = WorldGeometryAdapter.active();
 		boolean waterEligible = geometry != null && this.device.opaqueWaterInputs().isPresent()
 			&& this.device.linearWorldSession().waterFrameInputs() != null
 			&& draws.stream().anyMatch(draw -> ((Object)draw) instanceof WaterDrawSource source && source.metalcraft$waterMesh() != null);
 		// Per-draw immutable uniforms are retired after encoding; don't defer their native binds.
 		MetalCommandStream batch = BATCHING && !waterEligible ? this.beginRecording() : null;
+		boolean lodDraws = dev.metalcraft.client.lod.LodLoadedRenderer.trackingDraws();
 		try {
 			for (RenderPass.Draw<T> draw : draws) {
+				this.terrainTextureMip = ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source
+					? source.metalcraft$textureMip() : 0;
+                if (reconstruction != null) {
+                    MetalCompiledRenderPipeline selected = this.terrainTextureMip > 0 ? reconstruction : ordinary;
+                    if (this.pipeline != selected) {
+                        this.pipeline = selected;
+                        if (!sharedTerrainBindings) this.clearBoundSlots();
+                        this.encodePipeline(selected.metal(this.hasDepth, this.colorFormat));
+                    }
+                    if (this.terrainTextureMip > 0) {
+                        var band = this.device.terrainResolution().band(this.terrainTextureMip, this.outputWidth, this.outputHeight, this.colorFormat);
+                        if (band != boundBand) {
+                            this.encodeTexture(14, band.colorView, MetalRenderPass.STAGE_FRAGMENT);
+                            this.encodeTexture(15, band.depthView, MetalRenderPass.STAGE_FRAGMENT);
+                            this.encodeUniformBuffer(15, band.parameters, 0, MetalRenderPass.STAGE_FRAGMENT);
+                            boundBand = band;
+                        }
+                    }
+                }
 				BiConsumer<T, RenderPass.UniformUploader> uploader = draw.uniformUploaderConsumer();
 				if (uploader != null) uploader.accept(uniformArgument, this::setUniform);
+				if (lodDraws
+					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source
+					&& source.metalcraft$lodDraw() != null
+					&& this.tryLodDraw(source.metalcraft$lodDraw(), baseline, defaultIndexBuffer, defaultIndexType)) continue;
 				this.setIndexBuffer(draw.indexBuffer() == null ? defaultIndexBuffer : draw.indexBuffer(), draw.indexType() == null ? defaultIndexType : draw.indexType());
 				this.setVertexBuffer(draw.slot(), draw.vertexBuffer().slice());
 				WaterMeshBinding water = waterEligible && ((Object)draw) instanceof WaterDrawSource source ? source.metalcraft$waterMesh() : null;
@@ -331,14 +366,111 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 				} else {
 					this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
 				}
+				if (lodDraws
+					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source && source.metalcraft$isExtended())
+					dev.metalcraft.client.lod.LodDistantRenderer.encoded(draw.indexCount());
+				if (lodDraws
+					&& ((Object)draw) instanceof dev.metalcraft.client.lod.LodDrawSource source && source.metalcraft$isTerrain())
+					dev.metalcraft.client.lod.LodLoadedRenderer.encodedTerrain(draw.indexCount(), draw.indexCount(), source.metalcraft$isDistant());
 			}
 		} finally {
+			this.terrainTextureMip = 0;
 			// Cleared before the batch is submitted, so a draw that threw part-way discards what it
 			// recorded rather than encoding half a multi-draw into the pass.
 			this.recording = null;
 		}
 		if (batch != null) this.submitBatch(batch);
+        if (reconstruction != null) this.setPipeline(baseline);
 		if (this.originalPipeline != baseline) this.setPipeline(baseline);
+	}
+
+    /** Shade each distant band once at fewer pixels; ordinary draws then provide exact coverage/depth. */
+    private <T> MetalCompiledRenderPipeline prepareTerrainResolution(Collection<RenderPass.Draw<T>> draws,
+            GpuBuffer defaultIndices, IndexType defaultType, T uniformArgument) {
+        if (this.originalPipeline != net.minecraft.client.renderer.RenderPipelines.SOLID_TERRAIN
+                || !MetalTerrainResolution.ENABLED || !dev.metalcraft.client.MetalCraftConfig.nativeLodPixels() || this.hdrOwned || !this.hasDepth || this.colorFormat == null
+                || !this.owner.supportsTerrainResolution() || this.scissorX != 0 || this.scissorY != 0
+                || this.scissorWidth != this.outputWidth || this.scissorHeight != this.outputHeight)
+            return null;
+        int mask = 0;
+        for (var draw : draws) if ((Object)draw instanceof dev.metalcraft.client.lod.LodDrawSource source) {
+            int tier = source.metalcraft$textureMip();
+            if (tier >= 1 && tier <= 2) mask |= 1 << tier;
+        }
+        if (mask == 0) return null;
+        var reconstruction = this.device.terrainResolutionPipeline(this.originalPipeline);
+        if (reconstruction == null) return null;
+        // Preflight compilation/allocation before changing the scene pass's ownership.
+        reconstruction.metal(true, this.colorFormat);
+        var targets = this.device.terrainResolution();
+        for (int tier = 1; tier <= 2; tier++) if ((mask & (1 << tier)) != 0)
+            targets.band(tier, this.outputWidth, this.outputHeight, this.colorFormat);
+        var ordinary = this.pipeline;
+        this.pass();
+        try {
+            for (int tier = 1; tier <= 2; tier++) {
+                if ((mask & (1 << tier)) == 0) continue;
+                var band = targets.band(tier, this.outputWidth, this.outputHeight, this.colorFormat);
+                this.metal = this.owner.terrainBand(band);
+                this.clearBoundSlots();
+                this.metal.setPipeline(ordinary.metal(true, this.colorFormat));
+                this.metal.setScissor(0, 0, band.width, band.height);
+                var batch = BATCHING ? this.beginRecording() : null;
+                try {
+                    this.terrainTextureMip = tier;
+                    for (var draw : draws) {
+                        if (!((Object)draw instanceof dev.metalcraft.client.lod.LodDrawSource source)
+                                || source.metalcraft$textureMip() != tier) continue;
+                        var uploader = draw.uniformUploaderConsumer();
+                        if (uploader != null) uploader.accept(uniformArgument, this::setUniform);
+                        this.setIndexBuffer(draw.indexBuffer() == null ? defaultIndices : draw.indexBuffer(),
+                            draw.indexType() == null ? defaultType : draw.indexType());
+                        this.setVertexBuffer(draw.slot(), draw.vertexBuffer().slice());
+                        this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
+                        targets.drawn(tier);
+                    }
+                } finally { this.recording = null; }
+                if (batch != null) this.submitBatch(batch);
+            }
+        } finally {
+            this.terrainTextureMip = 0;
+            this.metal = this.owner.resumeTerrainScene();
+            this.metal.setScissor(0, 0, this.outputWidth, this.outputHeight);
+            this.metal.setPipeline(ordinary.metal(true, this.colorFormat));
+            this.clearBoundSlots();
+        }
+        return reconstruction;
+    }
+
+	/** Decline before changing the ordinary draw's ownership if any required resource is unavailable. */
+	private boolean tryLodDraw(dev.metalcraft.client.lod.LodLoadedRenderer.Draw draw, RenderPipeline baseline,
+		@Nullable GpuBuffer indices, @Nullable IndexType indexType) {
+		if (!this.hasDepth || !(indices instanceof MetalGpuBuffer) || indices.isClosed() || indexType == null
+			|| !this.uniforms.containsKey("ChunkSection") || !this.uniforms.containsKey("Projection")
+			|| !this.uniforms.containsKey("Globals") || !this.uniforms.containsKey("Fog")
+			|| !this.textures.containsKey("Sampler0") || !this.textures.containsKey("Sampler2")) return false;
+		MetalCompiledRenderPipeline alternate = this.device.lodPipeline(baseline, this.hdrOwned);
+		if (alternate == null) return false;
+		MetalRenderPipeline nativePipeline = alternate.metal(this.hasDepth, this.colorFormat);
+		var mesh = draw.borrow(this.device);
+		if (mesh == null) return false;
+		// Pipeline changes stay in draw order inside the same native command stream.
+		this.encodePipeline(nativePipeline);
+		this.pipeline = alternate;
+		this.clearBoundSlots();
+		this.encodeVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, mesh.vertices(), 0);
+		this.encodeUniformBuffer(14, mesh.metadata(), 0, MetalRenderPass.STAGE_VERTEX);
+		this.setIndexBuffer(indices, indexType);
+		this.drawIndexed(mesh.indexCount(), 1, 0, 0, 0);
+		draw.encoded(mesh);
+		// Restores both the native program and its stage-specific binding cache.
+		this.setPipeline(baseline);
+		return true;
+	}
+
+	private void encodePipeline(final MetalRenderPipeline pipeline) {
+		if (this.recording != null) this.metal().recordPipeline(this.recording, pipeline);
+		else this.pass().setPipeline(pipeline);
 	}
 
 	@Override
@@ -408,16 +540,18 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 			String name = samplerLayout.get(index);
 			TextureBinding value = this.textures.get(name);
 			if (value == null) throw new IllegalStateException("Missing Metal sampler " + name);
+			MetalGpuSampler sampler = this.terrainTextureMip > 0 && name.equals("Sampler0")
+				? value.sampler.distant(this.terrainTextureMip) : value.sampler;
 			int resourceIndex = uniformLayout.size() + index;
 			requireSlot(resourceIndex, name);
 			// Views and samplers have identity equality, so this is the same test the record's
 			// equals() performed, without boxing the slot to look the pair up.
-			if (this.boundTextureViews[resourceIndex] != value.view || this.boundSamplers[resourceIndex] != value.sampler) {
+			if (this.boundTextureViews[resourceIndex] != value.view || this.boundSamplers[resourceIndex] != sampler) {
 				int stages = this.pipeline.textureStages(resourceIndex);
 				this.encodeTexture(resourceIndex, value.view.metal(), stages);
-				this.encodeSampler(resourceIndex, value.sampler.metal(), stages);
+				this.encodeSampler(resourceIndex, sampler.metal(), stages);
 				this.boundTextureViews[resourceIndex] = value.view;
-				this.boundSamplers[resourceIndex] = value.sampler;
+				this.boundSamplers[resourceIndex] = sampler;
 			}
 		}
 	}
