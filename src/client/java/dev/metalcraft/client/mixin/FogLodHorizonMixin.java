@@ -17,7 +17,7 @@ abstract class FogLodHorizonMixin {
     @Inject(method = "setupFog", at = @At("RETURN"))
     private void metalcraft$horizonFog(Camera camera,int distance,DeltaTracker delta,float darken,ClientLevel level,
                                      CallbackInfoReturnable<FogData> cir) {
-        int horizon=LodDistantRenderer.horizon();
+        int horizon=Math.max(LodDistantRenderer.horizon(),dev.metalcraft.client.horizon.NativeHorizon.horizon());
         if(horizon<=distance) return;
         FogData fog=cir.getReturnValue();
         fog.renderDistanceStart=horizon*16*.9f;

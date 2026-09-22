@@ -13,6 +13,8 @@ public final class NativeTerrainLodSmoke {
     private static final int QUAD_BYTES = 112;
 
     public static void main(String[] args) {
+        NativeShellSmoke.run();
+        dev.metalcraft.client.horizon.HorizonColumnSmoke.run();
         selection();
         compiledSelection();
         eligibilityParity();
@@ -71,7 +73,7 @@ public final class NativeTerrainLodSmoke {
         check(NativeLodSelection.select(120, 70, 1, true) == 2, "middle tier");
         check(NativeLodSelection.select(240, 70, 1, true) == 4, "far tier");
         check(NativeLodSelection.select(500, 70, 1, true) == 8, "horizon tier");
-        check(NativeLodSelection.select(500, 10, 8, true) == 1, "zoom restores native mesh");
+        check(NativeLodSelection.select(500, 10, 8, true) == 2, "zoom refines shell without restoring distant block models");
         check(NativeLodSelection.select(500, 70, 8, false) == 1, "disabled restores native mesh");
         check(NativeLodSelection.select(146, 70, 1, true) == 2 && NativeLodSelection.select(146, 70, 4, true) == 4, "hysteresis");
         check(NativeLodSelection.select(110, 70, 4, true) == 2, "refinement threshold");
@@ -174,8 +176,8 @@ public final class NativeTerrainLodSmoke {
                         "native radius overrides strength, FOV and old mesh tier");
                 check(NativeLodSelection.select(boundary + .01, 70, previous, true, level, radius) >= 2,
                         "normal-FOV LOD begins immediately beyond chosen radius");
-                check(NativeLodSelection.select(boundary + .01, 10, previous, true, level, radius) == 1,
-                        "zoom restores native detail beyond radius");
+                check(NativeLodSelection.select(boundary + .01, 10, previous, true, level, radius) >= 2,
+                        "every enabled section beyond the radius uses a shell, including zoom");
                 check(NativeLodSelection.select(boundary + 1000, 70, previous, true, 0, radius) == 1,
                         "zero reduction overrides radius");
                 check(NativeLodSelection.select(boundary + 1000, 70, previous, false, level, radius) == 1,

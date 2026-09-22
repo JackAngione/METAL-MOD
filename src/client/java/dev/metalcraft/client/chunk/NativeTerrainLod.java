@@ -1,9 +1,6 @@
 package dev.metalcraft.client.chunk;
 
-import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.MeshData;
 import dev.metalcraft.client.MetalCraftConfig;
 import java.util.Comparator;
 import java.util.PriorityQueue;
@@ -11,14 +8,10 @@ import java.util.concurrent.atomic.LongAdder;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.SectionUpdateTracker;
-import net.minecraft.client.renderer.SectionBufferBuilderPack;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.chunk.CompiledSectionMesh;
-import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.client.renderer.chunk.SectionMesh;
 import dev.metalcraft.client.mixin.ViewAreaAccessor;
 import net.minecraft.core.SectionPos;
-import org.lwjgl.system.MemoryUtil;
 
 /** One LOD mesh per native section; native worker queues and uploads own every replacement. */
 public final class NativeTerrainLod {
@@ -31,9 +24,11 @@ public final class NativeTerrainLod {
     private static volatile Frame camera = initialFrame();
     private static final NativeLodRebuildQueue rebuilds = new NativeLodRebuildQueue();
     private static int cursor;
-    private static final LongAdder builds = new LongAdder(), original = new LongAdder(), reduced = new LongAdder();
+    private static long frames, requests;
+    private static final LongAdder builds = new LongAdder();
     private static final LongAdder buildNanos = new LongAdder();
-    private static final LongAdder geometricBuilds = new LongAdder(), movedVertices = new LongAdder();
+    private static final LongAdder shellBuilds = new LongAdder(), shellBlocks = new LongAdder(), shellQuads = new LongAdder();
+    private static final LongAdder shellFluidBlocks = new LongAdder(), shellFluidQuads = new LongAdder();
     private NativeTerrainLod() { }
 
     private static Frame initialFrame() {
@@ -43,6 +38,7 @@ public final class NativeTerrainLod {
 
     /** Extraction thread only. Existing full-detail geometry remains installed until upload completes. */
     public static void beginFrame(SectionUpdateTracker tracker, Camera view) {
+        frames++;
         Minecraft client = Minecraft.getInstance();
         var pos = view.position();
         boolean enabled=MetalCraftConfig.nativeTerrainLod() && "Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName());
@@ -73,6 +69,11 @@ public final class NativeTerrainLod {
             SectionMesh mesh = section.getSectionMesh();
             if (!(mesh instanceof NativeLodState state) || mesh == CompiledSectionMesh.UNCOMPILED) continue;
             int current = state.metalcraft$cellSize();
+            // Empty native sections need no proxy. With horizontal selection, many
+            // sky/underground sections tie at the nearest distance and can otherwise
+            // monopolize the bounded coarsening queue. Empty shells still refine:
+            // their removed cave geometry may become visible on approach.
+            if (current == 1 && !mesh.hasRenderableLayers() && mesh.getRenderableBlockEntities().isEmpty()) continue;
             int scanOffset = index - cursor;
             if (scanOffset < 0) scanOffset += size;
             boolean scanCoarsening = scanOffset < 512;
@@ -104,6 +105,7 @@ public final class NativeTerrainLod {
             if (!rebuilds.hasCapacity(candidate.node, candidate.change)) continue;
             tracker.getDirtyState(candidate.node).setDirty(false);
             rebuilds.requested(candidate.node, candidate.mesh, candidate.desired, now);
+            requests++;
         }
     }
 
@@ -122,7 +124,8 @@ public final class NativeTerrainLod {
     }
 
     private static double distanceSquared(Frame frame,long section) {
-        return NativeLodSelection.distanceSquared(frame.x,frame.y,frame.z,
+        // Native quality is a horizontal chunk radius, including terrain above/below the camera.
+        return NativeLodSelection.distanceSquared(frame.x,SectionPos.y(section)*16.0+8,frame.z,
                 SectionPos.x(section),SectionPos.y(section),SectionPos.z(section));
     }
 
@@ -138,51 +141,14 @@ public final class NativeTerrainLod {
         camera = initialFrame();
     }
 
-    /** Bounded CPU-only simplification on the already scheduled native compiler worker. */
-    public static void compile(SectionCompiler.Results results, SectionBufferBuilderPack builders, int cellSize) {
-        ((NativeLodState)(Object)results).metalcraft$cellSize(cellSize);
-        MeshData source = results.renderedLayers.get(ChunkSectionLayer.SOLID);
-        if (cellSize == 1 || source == null) return;
-        var state = source.drawState();
-        if (state.primitiveTopology() != PrimitiveTopology.QUADS || !state.format().equals(DefaultVertexFormat.BLOCK)
-                || source.indexBuffer() != null || state.vertexCount() % 4 != 0) return;
-        var format = state.format();
-        var layout = new NativeSurfaceMesher.Layout(format.getVertexSize(), format.getElement("Position").offset(),
-                format.getElement("Color").offset(), format.getElement("UV0").offset(),
-                format.getElement("UV2").offset(), format.getElement("Normal") == null ? -1 : format.getElement("Normal").offset());
-        long started = System.nanoTime();
-        var contacts = new java.util.ArrayList<java.nio.ByteBuffer>();
-        boolean compatible = true;
-        for (var entry : results.renderedLayers.entrySet()) if (entry.getKey() != ChunkSectionLayer.SOLID) {
-            compatible &= entry.getValue().drawState().format().equals(format);
-            contacts.add(entry.getValue().vertexBuffer());
-        }
-        var geometry = compatible ? NativeGeometryMesher.reduce(source.vertexBuffer(), layout, cellSize, contacts) : null;
-        var result = geometry == null ? NativeSurfaceMesher.reduce(source.vertexBuffer(), layout, cellSize) : null;
-        byte[] vertices = geometry != null ? geometry.vertices() : result != null ? result.vertices() : null;
-        int quads = geometry != null ? geometry.quads() : result != null ? result.quads() : state.vertexCount() / 4;
-        builds.increment(); original.add(state.vertexCount() / 4);
-        reduced.add(quads);
-        buildNanos.add(System.nanoTime() - started);
-        if (vertices == null) return;
-        if (geometry != null) {
-            geometricBuilds.increment(); movedVertices.add(geometry.movedVertices());
-            // A removed small wall may reveal geometry hidden by native voxel occlusion.
-            // Keep culling conservative for the coarsened section.
-            results.visibilitySet.setAll(true);
-        }
-        // Use the native worker's own arena. No per-section GPU allocation or extra retained tier.
-        var arena = builders.buffer(ChunkSectionLayer.SOLID);
-        long pointer = arena.reserve(vertices.length);
-        MemoryUtil.memByteBuffer(pointer, vertices.length).put(vertices);
-        var replacement = new MeshData(arena.build(), new MeshData.DrawState(format, quads * 4,
-                quads * 6, state.primitiveTopology(), state.indexType()));
-        results.renderedLayers.put(ChunkSectionLayer.SOLID, replacement);
-        source.close();
+    public static void recordShell(int blocks, int quads, int fluidBlocks, int fluidQuads, long nanos) {
+        builds.increment(); buildNanos.add(nanos);
+        shellBuilds.increment(); shellBlocks.add(blocks); shellQuads.add(quads);
+        shellFluidBlocks.add(fluidBlocks); shellFluidQuads.add(fluidQuads);
     }
 
-    public record Stats(long builds, long originalQuads, long outputQuads, long workerNanos,
-                        long geometricBuilds, long movedVertices) { }
-    public static Stats stats() { return new Stats(builds.sum(), original.sum(), reduced.sum(), buildNanos.sum(),
-            geometricBuilds.sum(), movedVertices.sum()); }
+    public record Stats(long builds, long workerNanos, long shellBuilds, long shellBlocks, long shellQuads,
+                        long selectionFrames, long rebuildRequests, long shellFluidBlocks, long shellFluidQuads) { }
+    public static Stats stats() { return new Stats(builds.sum(), buildNanos.sum(), shellBuilds.sum(), shellBlocks.sum(), shellQuads.sum(), frames, requests,
+            shellFluidBlocks.sum(), shellFluidQuads.sum()); }
 }

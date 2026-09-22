@@ -10,5 +10,5 @@ import org.spongepowered.asm.mixin.injection.At;
 @Mixin(Camera.class)
 abstract class CameraLodHorizonMixin {
     @ModifyExpressionValue(method = "update", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Options;getEffectiveRenderDistance()I"))
-    private int metalcraft$horizonClip(int original) { return Math.max(original,LodDistantRenderer.horizon()); }
+    private int metalcraft$horizonClip(int original) { return Math.max(original,Math.max(LodDistantRenderer.horizon(),dev.metalcraft.client.horizon.NativeHorizon.horizon())); }
 }

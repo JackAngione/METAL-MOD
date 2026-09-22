@@ -61,12 +61,27 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 
 	@Override
 	public void runTest(final ClientGameTestContext context) {
-		try (var lod = new MetalLodTestScope(context)) {
-			this.runConfiguredTest(context);
-		}
+        // These routes measure native chunk delivery/section compilation in isolation.
+        // The compact-horizon route separately validates the model-only integrated path.
+        boolean nativeOnly = Boolean.getBoolean("metalcraft.geometricLodTest")
+                || Boolean.getBoolean("metalcraft.nativeTerrainLodTest") || Boolean.getBoolean("metalcraft.nativeChunkDistanceTest");
+        String horizonOverride = System.getProperty("metalcraft.disableHorizon");
+        if (nativeOnly) System.setProperty("metalcraft.disableHorizon", "true");
+        try (var lod = new MetalLodTestScope(context)) {
+            this.runConfiguredTest(context);
+        } finally {
+            if (nativeOnly) {
+                if (horizonOverride == null) System.clearProperty("metalcraft.disableHorizon");
+                else System.setProperty("metalcraft.disableHorizon", horizonOverride);
+            }
+        }
 	}
 
 	private void runConfiguredTest(final ClientGameTestContext context) {
+		if (Boolean.getBoolean("metalcraft.compactHorizonTest")) {
+            MetalCompactHorizonGameTest.run(context);
+            return;
+        }
 		if (Boolean.getBoolean("metalcraft.geometricLodTest")) {
 			MetalGeometricLodGameTest.run(context);
 			return;

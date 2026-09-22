@@ -36,7 +36,7 @@ final class MetalGeometricLodGameTest {
         try {
             context.runOnClient(c -> {
                 check("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()), "Metal selected");
-                c.options.renderDistance().set(pixelTest ? 128 : 16); c.options.simulationDistance().set(16);
+                c.options.renderDistance().set(128); c.options.simulationDistance().set(16);
                 if (pixelTest) MetalCraftConfig.setNativeLodPixels(true);
                 c.options.prioritizeChunkUpdates().set(PrioritizeChunkUpdates.NONE); c.options.fov().set(70);
                 MetalCraftConfig.setNativeQualityDistance(4);
@@ -54,6 +54,7 @@ final class MetalGeometricLodGameTest {
                 int targetX = (center.x() + 8) * 16, targetZ = center.z() * 16;
                 int cameraX = center.x() * 16 + 8, cameraZ = targetZ + 64;
                 BlockPos marker = new BlockPos(targetX + 8, 150, targetZ + 8);
+                BlockPos waterMarker = new BlockPos(targetX + 8, 152, targetZ + 40);
                 world.getServer().runCommand("gamemode spectator @a");
                 world.getServer().runCommand("tp @a " + cameraX + " 185 " + cameraZ + " -110 10");
                 world.getServer().runCommand("time set noon"); world.getServer().runCommand("weather clear");
@@ -72,10 +73,14 @@ final class MetalGeometricLodGameTest {
                 report.put("lightingPlacementRemovalAndSkyRestoration", true);
                 for (int x = 0; x < 32; x++) world.getServer().runCommand("fill " + (targetX + x) + " 145 " + (targetZ + 1)
                         + " " + (targetX + x) + " " + (145 + x) + " " + (targetZ + 30) + " minecraft:stone");
+                world.getServer().runCommand("fill " + targetX + " 151 " + (targetZ+32) + " " + (targetX+31) + " 152 " + (targetZ+63) + " minecraft:stone");
+                world.getServer().runCommand("fill " + (targetX+1) + " 152 " + (targetZ+33) + " " + (targetX+30) + " 152 " + (targetZ+62) + " minecraft:water");
                 context.waitFor(c -> uploaded(c, marker, 1), 600);
+                context.waitFor(c -> uploaded(c, waterMarker, 1) && waterIndices(c, waterMarker) > 0, 200);
                 context.waitTicks(40);
                 context.runOnClient(c -> c.gui.hud.getChat().clearMessages(true));
                 int nativeIndices = context.computeOnClient(c -> indices(c, marker));
+                int nativeWaterIndices = context.computeOnClient(c -> waterIndices(c, waterMarker));
                 var before = NativeTerrainLod.stats();
                 context.takeScreenshot("geometric-lod-0-native");
                 context.runOnClient(c -> { MetalCraftConfig.setNativeLodReduction(5); MetalCraftConfig.reload(); });
@@ -88,7 +93,7 @@ final class MetalGeometricLodGameTest {
                         + " stats=" + NativeTerrainLod.stats()));
                 check(selectedCell > 1, "fixture selects a coarser geometric tier");
                 try {
-                    context.waitFor(c -> uploaded(c, marker, selectedCell), 600);
+                    context.waitFor(c -> uploaded(c, marker, selectedCell), 200);
                 } catch (AssertionError timeout) {
                     context.runOnClient(c -> {
                         long node = net.minecraft.core.SectionPos.of(marker).asLong();
@@ -104,14 +109,32 @@ final class MetalGeometricLodGameTest {
                     throw timeout;
                 }
                 context.waitTicks(10);
+                int waterCell = context.computeOnClient(c -> NativeTerrainLod.snapshotCellSize(net.minecraft.core.SectionPos.of(waterMarker).asLong()));
+                context.waitFor(c -> uploaded(c, waterMarker, waterCell), 200);
+                int shellWaterIndices = context.computeOnClient(c -> waterIndices(c, waterMarker));
+                check(shellWaterIndices > 0 && shellWaterIndices < nativeWaterIndices / 2, "fluid shell cuts actual pond geometry by over half");
+                check(shellWaterIndices <= 320 * 6, "water shell including undersides respects its quad bound");
+                context.runOnClient(c -> {
+                    var water = ((dev.metalcraft.client.shader.water.WaterMeshSource)mesh(c, waterMarker)).metalcraft$waterMesh(ChunkSectionLayer.TRANSLUCENT);
+                    check(water != null && water.vertexCount() == shellWaterIndices / 6 * 4, "reduced water sidecar matches uploaded sorted mesh");
+                });
+                report.put("nativeWaterIndices", nativeWaterIndices); report.put("shellWaterIndices", shellWaterIndices);
+                report.put("waterSidecarMatches", true);
                 int coarseIndices = context.computeOnClient(c -> indices(c, marker));
                 check(coarseIndices < nativeIndices, "stepped fixture geometry reduced");
+                check(coarseIndices <= 160 * 6, "solid shell respects the 160-quad bound");
                 int coarseMip=context.computeOnClient(c -> NativeTerrainLod.textureMip(
                         net.minecraft.core.SectionPos.of(marker).asLong(),selectedCell));
                 check(coarseMip==(selectedCell>=4?2:1),"coarse native solid uses reduced texture mip");
                 report.put("coarseTextureMip",coarseMip);
-                check(NativeTerrainLod.stats().geometricBuilds() > before.geometricBuilds(), "actual clustering was uploaded");
+                check(NativeTerrainLod.stats().shellBuilds() > before.shellBuilds(), "direct shell geometry was uploaded");
                 context.takeScreenshot("geometric-lod-5-extreme");
+                context.runOnClient(c -> ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID));
+                context.waitFor(c -> ShaderPackRuntime.active().isActive(), 100);
+                context.waitTicks(10);
+                context.takeScreenshot("fluid-shell-standard");
+                context.runOnClient(c -> ShaderPackRuntime.active().selectPack(ShaderPackRuntime.NONE_ID));
+                context.waitTicks(5);
                 if (pixelTest) {
                     var stats = context.computeOnClient(c -> dev.metalcraft.client.metal.MetalGpuDevices.current().terrainResolutionStats());
                     check(stats != null && stats.quarterDraws() > 0, "real chunk draws use reduced target");
@@ -153,6 +176,8 @@ final class MetalGeometricLodGameTest {
                 world.getServer().runCommand("tp @a " + (targetX - 24) + " 158 " + (targetZ + 8) + " -90 0");
                 context.getInput().lookAt(-90, 0);
                 context.waitFor(c -> uploaded(c, marker, 1) && indices(c, marker) == nativeIndices, 100);
+                context.waitFor(c -> uploaded(c, waterMarker, 1) && waterIndices(c, waterMarker) == nativeWaterIndices, 100);
+                report.put("approachNativeWaterRestored", true);
                 report.put("approachNativeRestoredSeconds", (System.nanoTime() - approachStarted) / 1e9);
                 context.waitTicks(20);
                 check(context.computeOnClient(c -> uploaded(c, marker, 1) && indices(c, marker) == nativeIndices),
@@ -178,7 +203,7 @@ final class MetalGeometricLodGameTest {
                 context.waitTicks(5);
                 context.takeScreenshot("geometric-lod-0-restored");
                 report.put("world", "NORMAL / metalcraft"); report.put("backend", "Metal");
-                report.put("renderDistance", pixelTest ? 128 : 16); report.put("simulationDistance", 16); report.put("chunkBuilder", "Threaded");
+                report.put("renderDistance", 128); report.put("simulationDistance", 16); report.put("chunkBuilder", "Threaded");
                 report.put("sameCameraSequence", "0 -> 5 -> 0");
                 report.put("selectedCell", selectedCell);
                 report.put("nativeIndices", nativeIndices); report.put("coarseIndices", coarseIndices);
@@ -206,6 +231,11 @@ final class MetalGeometricLodGameTest {
         return section == null ? null : section.getSectionMesh();
     }
     private static int indices(Minecraft c, BlockPos pos) { return mesh(c, pos).getSectionDraw(ChunkSectionLayer.SOLID).indexCount(); }
+    private static int waterIndices(Minecraft c, BlockPos pos) {
+        var mesh = mesh(c, pos);
+        var draw = mesh == null ? null : mesh.getSectionDraw(ChunkSectionLayer.TRANSLUCENT);
+        return draw == null ? 0 : draw.indexCount();
+    }
     private static boolean uploaded(Minecraft c, BlockPos pos, int cell) {
         SectionMesh mesh = mesh(c, pos);
         return mesh instanceof NativeLodState state && state.metalcraft$cellSize() == cell

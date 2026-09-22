@@ -85,7 +85,7 @@
   "metalcraft.options.native_lod_pixels.tooltip": "Shade distant solid terrain at half/quarter resolution, keeping near terrain and depth sharp. Requires Terrain LOD and the None shader pack. Other packs retain their normal resolution. Disable to compare performance.",
   "metalcraft.options.native_lod": "Distance-based terrain LOD",
   "metalcraft.options.native_quality_distance": "Native quality distance: %s chunks",
-  "metalcraft.options.native_quality_distance.tooltip": "Full terrain detail within this distance (1–256 chunks; default 4). At normal FOV, LOD begins beyond it and becomes coarser with distance. Zoom can restore detail farther out. Measured to the nearest chunk-section boundary. Requires terrain LOD and reduction above 0. Changes apply as chunks rebuild.",
+  "metalcraft.options.native_quality_distance.tooltip": "Full terrain detail within this horizontal distance (1–256 chunks; default 4). Beyond it, terrain uses shell models. Zoom refines the shell without restoring individual blocks. Measured to the nearest chunk boundary. Requires terrain LOD and reduction above 0.",
   "metalcraft.options.native_lod_reduction": "LOD detail reduction",
   "metalcraft.options.native_lod_reduction.0": "0 — Native detail",
   "metalcraft.options.native_lod_reduction.1": "1 — Subtle",
@@ -93,8 +93,8 @@
   "metalcraft.options.native_lod_reduction.3": "3 — Balanced",
   "metalcraft.options.native_lod_reduction.4": "4 — Strong",
   "metalcraft.options.native_lod_reduction.5": "5 — Extreme",
-  "metalcraft.options.native_lod_reduction.tooltip": "0 keeps native detail at all distances. Higher levels remove more distant block-sized steps and small terrain features; 5 gives the coarsest terrain shapes. Nearby terrain stays sharp. 3 is the default. Requires terrain LOD enabled; changes apply as chunks rebuild.",
-  "metalcraft.options.native_lod.tooltip": "Keeps nearby terrain at full detail and simplifies distant opaque terrain geometry, textures and lighting. Coarse solid textures use half or quarter resolution when mipmaps are available. Distant outlines become coarser. Section boundaries and transparent/model contacts stay protected. Detail returns as you approach or zoom in. Changes apply as chunks rebuild.",
+  "metalcraft.options.native_lod_reduction.tooltip": "0 keeps native detail everywhere. Higher levels simplify distant shell models more quickly, up to one coarse exterior shape per section. Nearby terrain stays sharp. 3 is the default. Requires terrain LOD enabled; changes apply as chunks rebuild.",
+  "metalcraft.options.native_lod.tooltip": "Render distant terrain as simple exterior shell models. Nearby terrain keeps its normal blocks. Shells omit small details, cavities and distant block entities; fluids keep their normal rendering. Changes apply as chunks rebuild.",
   "metalcraft.options.clear_distance_fog": "Clear distance fog",
   "metalcraft.options.clear_distance_fog.tooltip": "Keeps distant terrain clear in fair weather by pushing distance fog beyond the loaded view. Water, lava, snow, weather and status-effect fog remain. Applies immediately on Metal."
 }

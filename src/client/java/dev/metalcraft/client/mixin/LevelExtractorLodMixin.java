@@ -31,6 +31,7 @@ abstract class LevelExtractorLodMixin {
     }
     @Inject(method = "setLevel", at = @At("HEAD"))
     private void metalcraft$worldLod(@Nullable ClientLevel level, CallbackInfo ci) {
+        dev.metalcraft.client.horizon.HorizonRenderer.reset();
         dev.metalcraft.client.chunk.NativeTerrainLod.reset();
         dev.metalcraft.client.lod.LodDistantRenderer.worldChanged();
         if (LodCompilerCapture.ENABLED)

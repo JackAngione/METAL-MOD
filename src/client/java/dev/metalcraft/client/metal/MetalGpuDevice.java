@@ -843,6 +843,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 			this.commandEncoder.close();
 			dev.metalcraft.client.lod.LodLoadedRenderer.close(this);
 			dev.metalcraft.client.lod.LodDistantRenderer.close(this);
+			dev.metalcraft.client.horizon.HorizonRenderer.close(this);
 			this.clearLodPipelines();
 			if (this.shaderPackRuntime != null) {
 				this.shaderPackRuntime.close();

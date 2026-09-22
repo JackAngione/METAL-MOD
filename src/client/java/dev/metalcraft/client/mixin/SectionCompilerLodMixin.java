@@ -12,19 +12,30 @@ import net.minecraft.client.renderer.chunk.RenderSectionRegion;
 import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.core.SectionPos;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Final;
+import org.spongepowered.asm.mixin.Shadow;
 
 /** Reduces distant native solid output on its compiler worker, before ordinary upload/release. */
 @Mixin(SectionCompiler.class)
 abstract class SectionCompilerLodMixin {
+    @Shadow @Final private net.minecraft.client.renderer.block.BlockStateModelSet blockModelSet;
+    @Shadow @Final private net.minecraft.client.color.block.BlockColors blockColors;
+    @Shadow @Final private net.minecraft.client.renderer.block.FluidStateModelSet fluidModelSet;
+
     @WrapMethod(method = "compile")
     private SectionCompiler.Results metalcraft$captureLod(SectionPos section, RenderSectionRegion region,
             VertexSorting sorting, SectionBufferBuilderPack builders, Operation<SectionCompiler.Results> original) {
-        SectionCompiler.Results results = original.call(section, region, sorting, builders);
+        int tier = ((dev.metalcraft.client.chunk.NativeLodState)region).metalcraft$cellSize();
+        SectionCompiler.Results results;
         try {
-            dev.metalcraft.client.chunk.NativeTerrainLod.compile(results, builders,
-                    ((dev.metalcraft.client.chunk.NativeLodState)region).metalcraft$cellSize());
+            results = tier > 1 ? dev.metalcraft.client.chunk.NativeShellCompiler.compile(section, region,
+                    builders, blockModelSet, fluidModelSet, blockColors, sorting, tier)
+                    : original.call(section, region, sorting, builders);
         } catch (RuntimeException | Error error) {
-            results.release();
+            // Vanilla treats any NPE as an exhausted buffer pool and retries while
+            // retaining the acquired pack. Surface real compiler failures instead.
+            if (tier > 1 && error instanceof NullPointerException)
+                throw new IllegalStateException("Building terrain shell at " + section, error);
             throw error;
         }
         if (LodCompilerCapture.capturing()) {

@@ -13,6 +13,9 @@ abstract class RenderPassLodDrawMixin implements LodDrawSource {
     @Unique private boolean metalcraft$terrain, metalcraft$distant;
     @Unique private boolean metalcraft$extended;
     @Unique private int metalcraft$textureMip;
+    @Unique private double metalcraft$sortDistance;
+    @Override public void metalcraft$sortDistance(double distance) { metalcraft$sortDistance = distance; }
+    @Override public double metalcraft$sortDistance() { return metalcraft$sortDistance; }
     @Override public void metalcraft$textureMip(int mip) { metalcraft$textureMip = mip; }
     @Override public int metalcraft$textureMip() { return metalcraft$textureMip; }
     @Override public void metalcraft$extended() { metalcraft$extended = true; }

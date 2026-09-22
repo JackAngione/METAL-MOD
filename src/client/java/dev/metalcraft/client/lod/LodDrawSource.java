@@ -13,4 +13,6 @@ public interface LodDrawSource {
     boolean metalcraft$isExtended();
     void metalcraft$textureMip(int mip);
     int metalcraft$textureMip();
+    void metalcraft$sortDistance(double distance);
+    double metalcraft$sortDistance();
 }

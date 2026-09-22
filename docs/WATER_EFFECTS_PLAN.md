@@ -41,6 +41,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
+| [x] | WL | Distant water shell geometry | W1, W3, W7 | /root | done | September 21: direct fluid shells and detached horizon water implemented. Full Metal build passes; 20.24-second section route reduces pond 2,700 → 480 indices and restores native water exactly. Final 28.29-second NORMAL 128/16 route passes model-only water, edit/handoff/lifecycle checks; None, Standard, falling-water and native underwater images inspected. Fractional closure and metadata covered by geometry checks. See evidence/fluid-shell and evidence/compact-horizon. |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
 | [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
 | [x] | W3 | Water routing and stable frame inputs | W1, W2 | grok | done | 2026-09-07: surface/opaque depth debug views, GPU reconstruction at native and odd half extents, live native/half identity, resize/world-change snapshot extents, and ordinary vs forced Fabulous water routing. See W3 completion evidence. |
@@ -57,6 +58,15 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 | [ ] | W8 | Integrated validation and release defaults | W6, W7 | /root | in progress | 2026-09-11: LOD integration continuation claims shared opaque/transparent composition regression checks. Preserve the water forward ABI and opaque snapshot depth while introducing terrain LOD; record shader and live evidence before closure. Full water release benchmarks remain outstanding. |
 
 ## Implementation tasks and acceptance criteria
+
+W8 integration note, September 21, /root: the shell performance investigation
+identified unchanged distant fluid geometry (10.55 million translucent indices in
+a 128/16 copied NORMAL world). `LevelRendererWaterDrawMixin` now attaches the same
+water binding using `ModifyExpressionValue`, avoiding the constructor wrapper's
+varargs/boxing overhead. Fluid meshes, metadata contents, sorting and shaders are
+unchanged. The copied-world Metal run and full Metal-validation build pass; see
+[shell performance evidence](evidence/shell-performance/README.md). This is not
+Standard-pack visual acceptance or distant-fluid simplification. W8 remains open.
 
 ### W1 — Establish water identity and composition order
 

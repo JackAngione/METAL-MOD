@@ -35,7 +35,7 @@ public final class NativeLodSelection {
 
         public int selectSquared(double distanceSquared, int previous) {
             if (!Double.isFinite(distanceSquared) || distanceSquared <= radiusSquared) return 1;
-            int selected=1;
+            int selected=maximumCell > 1 ? 2 : 1;
             for (int tier=1, cell=2; cell<=maximumCell; tier++, cell*=2)
                 if (distanceSquared >= (cell <= previous ? retain[tier] : enter[tier])) selected=cell;
             return selected;
@@ -72,7 +72,7 @@ public final class NativeLodSelection {
         double projectedDistance = (96.0 * 1.15 + (distance - nativeRadius) * strength)
                 * Math.tan(Math.toRadians(fovDegrees) / 2) / Math.tan(Math.toRadians(70) / 2);
         int maximumCell = switch (reduction) { case 1 -> 2; case 2 -> 4; case 3 -> 8; default -> 16; };
-        int selected = 1;
+        int selected = 2;
         for (int cell = 2; cell <= maximumCell; cell *= 2) {
             double threshold = 48.0 * cell;
             if (projectedDistance >= threshold * (cell <= previous ? 0.85 : 1.15)) selected = cell;

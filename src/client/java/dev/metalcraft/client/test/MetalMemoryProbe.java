@@ -44,6 +44,9 @@ public final class MetalMemoryProbe {
                 sample.put("uncompiledVisible",client.levelRenderer.visibleSections().stream()
                         .filter(s -> s.getSectionMesh()==CompiledSectionMesh.UNCOMPILED).count());
                 sample.put("compileQueue",client.levelRenderer.sectionRenderDispatcher().getCompileQueueSize());
+                sample.put("loadedFullChunks", client.level.getChunkSource().getLoadedChunksCount());
+                sample.put("horizon", dev.metalcraft.client.horizon.HorizonRenderer.stats());
+                sample.put("terrain", terrainCensus(client));
                 sample.put("gcMillis",ManagementFactory.getGarbageCollectorMXBeans().stream().mapToLong(b -> Math.max(0,b.getCollectionTime())).sum());
                 samples.add(sample);
                 System.out.println("Memory probe: " + sample);
@@ -67,5 +70,40 @@ public final class MetalMemoryProbe {
                 client.stop();
             }
         });
+    }
+
+    /** Opt-in census of installed meshes, including resident sections outside the visible list. */
+    private static Object terrainCensus(net.minecraft.client.Minecraft client) {
+        var result = new LinkedHashMap<String,Object>();
+        var camera = client.gameRenderer.mainCamera().position();
+        int radius = dev.metalcraft.client.MetalCraftConfig.nativeQualityDistance();
+        result.put("nativeQualityDistance", radius);
+        result.put("nativeTerrainLod", dev.metalcraft.client.MetalCraftConfig.nativeTerrainLod());
+        result.put("nativeLodReduction", dev.metalcraft.client.MetalCraftConfig.nativeLodReduction());
+        result.put("nativeLodPixels", dev.metalcraft.client.MetalCraftConfig.nativeLodPixels());
+        for (boolean visible : new boolean[] {true, false}) {
+            Iterable<net.minecraft.client.renderer.chunk.SectionRenderDispatcher.RenderSection> sections = visible
+                    ? client.levelRenderer.visibleSections()
+                    : ((dev.metalcraft.client.mixin.ViewAreaAccessor)client.levelRenderer.viewArea()).metalcraft$sections();
+            var counts = new LinkedHashMap<String,Long>();
+            for (var section : sections) {
+                var mesh = section.getSectionMesh();
+                if (mesh == CompiledSectionMesh.UNCOMPILED || !mesh.hasRenderableLayers()) continue;
+                long node = section.getSectionNode();
+                boolean far = dev.metalcraft.client.chunk.NativeLodSelection.distanceSquared(camera.x,
+                        net.minecraft.core.SectionPos.y(node)*16.0+8, camera.z, net.minecraft.core.SectionPos.x(node),
+                        net.minecraft.core.SectionPos.y(node), net.minecraft.core.SectionPos.z(node)) > radius*radius*256.0;
+                int tier = mesh instanceof dev.metalcraft.client.chunk.NativeLodState state ? state.metalcraft$cellSize() : 1;
+                String group = (far ? "far" : "near") + (tier > 1 ? "Shell" : "Native");
+                counts.merge(group + "Sections", 1L, Long::sum);
+                for (var layer : net.minecraft.client.renderer.chunk.ChunkSectionLayer.values()) {
+                    var draw = mesh.getSectionDraw(layer);
+                    if (draw != null) counts.merge(group + layer.name() + "Indices", (long)draw.indexCount(), Long::sum);
+                }
+            }
+            result.put(visible ? "visible" : "resident", counts);
+        }
+        result.put("shellBuilds", dev.metalcraft.client.chunk.NativeTerrainLod.stats());
+        return result;
     }
 }

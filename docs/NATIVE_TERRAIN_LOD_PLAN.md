@@ -1,5 +1,93 @@
 # Native terrain surface LOD
 
+## Model-only horizon and FPS correction — September 21
+
+Owner: /root. Status: implemented and validated. Goal: simplify fluids like solid
+shells, remove distant full-chunk residency where feasible, and verify submission gains.
+
+- [x] Compile fluid envelopes directly, including water metadata and native detail restoration.
+- [x] Decouple the distant model lifetime from full chunk data and bound native loading.
+- [x] Reduce the measured section submission bottleneck and compare identical model buffers.
+- [x] Pass geometry/ownership tests and brief NORMAL-world 128/16 Metal validation,
+  including Standard water routing, handoff and measured performance.
+
+The integrated singleplayer path now caps native client delivery/view storage at
+quality distance + 3, leaving simulation unchanged. Distant columns are detached
+height/material envelopes, grouped 8×8 for submission. At most 16 temporary sampler
+tickets obtain source data; models survive after source chunks unload. Edits refresh
+cached columns, movement drops out-of-range data, and disable/world close release
+ownership. GPU retirement follows completed Metal submissions.
+
+The 28.29-second final NORMAL 128/16, Default/Metal route passes absent-client-chunk
+rendering, server edits, native approach/retreat, None/Standard water, falling-water
+and underwater captures (inspected), resize, disable/re-enable and world close.
+Native quality 4 produces effective native distance 7 and fewer than 500 full client
+chunks. All 628 visible model columns and their uploaded buffers remain unchanged
+through the diagnostic ABBA comparison: grouping reduces median CPU frame time
+from 2.87 to 0.73 ms (74.6%) and command bytes/frame from 124,240 to 9,232 (92.6%).
+This isolates fine-grained submission overhead, not a historical-build or fully
+populated 128-distance gameplay FPS comparison. Multiplayer retains native delivery.
+
+The full Metal-validation build passes, including 600 randomized whole-column
+geometry cases and the earlier section/fluid checks. The prior direct-fluid route
+also reduced its pond from 2,700 to 480 indices and restored native water exactly.
+[Architecture, raw measurements, images and limits](evidence/compact-horizon/README.md).
+
+## Shell performance investigation — September 21
+
+Owner: /root. Status: investigation complete; major loading/fluid costs remain.
+
+- [x] Census visible and resident native/shell meshes beyond the quality radius;
+  profile a brief copied NORMAL-world run at 128/16 on Default/Metal.
+- [x] Remove the confirmed per-draw annotation allocation overhead; retain an
+  opt-in mesh/layer/chunk census for subsequent work.
+- [x] Validate live annotation integration and the full Metal build; record
+  attribution evidence and remaining limits.
+
+No far native block meshes appeared in either stationary copied-save census.
+However, at the final baseline sample far shells contained 581,604 solid indices
+plus **10,549,368 unchanged translucent fluid indices**. The follow-up also counted
+26,027 complete client world chunks, despite a native-quality distance of 10.
+Quality distance controls meshes, not server chunk tickets or client block/light
+storage. Native section traversal and draw submission remain CPU costs even for
+tiny meshes. The baseline averaged 2.84 ms of GPU occupancy per captured frame,
+against 17.42 ms median frame interval.
+
+The draw constructor wrappers allocated varargs/boxed arguments per section/layer;
+they now annotate the constructed object directly. Both 20-second 128/16 Metal
+captures complete and the full Metal-validation build passes in 26 seconds. The
+second capture overlapped the build, so its FPS is excluded from improvement claims.
+Full chunk residency, lighting and fluid meshing were located but not redesigned
+in this investigation. [Evidence and next implementation boundaries](evidence/shell-performance/README.md).
+
+## Exterior shell rework — September 20
+
+Owner: /root. Status: implemented and validated. This supersedes the geometric clustering path
+below for terrain outside Native quality distance. The disabled historical disk
+cache is not part of the active renderer.
+
+- [x] Build bounded exterior envelopes directly from section snapshots, skipping
+  ordinary block-model tessellation beyond the native boundary.
+- [x] Include foliage/custom block silhouettes in the proxy, remove internal
+  cavities and distant block entities, and preserve fluid rendering contracts.
+- [x] Verify geometry bounds, hidden interiors, empty terrain, seams and detail
+  restoration; run the full build and one brief NORMAL-world 128/16 Metal route.
+
+Historical section-shell path (still used for native overlap and multiplayer):
+the shell is partitioned into Minecraft's existing section upload units; it is
+one installed solid mesh per section, not a retained block mesh or a second tier.
+World chunk loading and simulation remain Minecraft-owned.
+
+Validation: 320 randomized exterior-oracle fixtures pass, together with buried/
+partial-neighbor coverage, fluid-prefix lifetime/index-width checks and all native
+radius/zoom/disable selection checks. The complete Metal-validation build passes.
+The final 20.58-second NORMAL-world 128/16, Threaded, Default/Metal route passes
+approach/retreat, radius changes, level zero, lighting, resize and world close.
+The sampled fixture drops from 4,950 to 342 indices (93.09%) and restores its exact
+native mesh on approach. Images were inspected. Initial live diagnostics exposed
+and fixed missing untinted-material handling; no FPS gain is inferred from geometry
+counts. [Evidence and limits](evidence/shell-lod/README.md).
+
 ## Heap-pressure correction — September 20
 
 Owner: Codex. Status: implemented and validated following real gameplay reaching

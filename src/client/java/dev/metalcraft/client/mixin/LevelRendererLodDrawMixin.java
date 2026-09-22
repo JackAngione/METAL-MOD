@@ -1,15 +1,11 @@
 package dev.metalcraft.client.mixin;
 
-import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
-import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.sugar.Local;
-import com.mojang.blaze3d.IndexType;
-import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderPass;
 import dev.metalcraft.client.lod.LodDrawSource;
 import dev.metalcraft.client.lod.LodLoadedRenderer;
-import java.util.function.BiConsumer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
@@ -30,27 +26,39 @@ abstract class LevelRendererLodDrawMixin {
 
     @Inject(method = "prepareChunkRenders", at = @At("HEAD"))
     private void metalcraft$prepareLod(Matrix4fc view, CallbackInfoReturnable<ChunkSectionsToRender> cir) {
+        dev.metalcraft.client.horizon.HorizonRenderer.prepare(levelRenderState.cameraRenderState);
         LodLoadedRenderer.prepare(((LevelRenderer)(Object)this).visibleSections(), levelRenderState.cameraRenderState);
     }
 
     @Inject(method = "prepareChunkRenders", at = @At("RETURN"), cancellable = true)
     private void metalcraft$distantLod(Matrix4fc view, CallbackInfoReturnable<ChunkSectionsToRender> cir) {
-        cir.setReturnValue(dev.metalcraft.client.lod.LodDistantRenderer.append(cir.getReturnValue(),levelRenderState.cameraRenderState));
+        var result=dev.metalcraft.client.lod.LodDistantRenderer.append(cir.getReturnValue(),levelRenderState.cameraRenderState);
+        cir.setReturnValue(dev.metalcraft.client.horizon.HorizonRenderer.append(result,levelRenderState.cameraRenderState));
     }
 
-    @WrapOperation(method = "prepareChunkRenders", at = @At(value = "NEW", target = "com/mojang/blaze3d/systems/RenderPass$Draw"))
-    private RenderPass.Draw<GpuBufferSlice[]> metalcraft$attachLod(int slot, GpuBuffer vertices,
-            GpuBuffer indices, IndexType indexType, int firstIndex, int indexCount, int baseVertex,
-            BiConsumer<GpuBufferSlice[], RenderPass.UniformUploader> uploader,
-            Operation<RenderPass.Draw<GpuBufferSlice[]>> original, @Local SectionMesh sectionMesh,
+    @ModifyExpressionValue(method="prepareChunkRenders",at=@At(value="INVOKE",target="Lnet/minecraft/client/renderer/chunk/SectionMesh;getSectionDraw(Lnet/minecraft/client/renderer/chunk/ChunkSectionLayer;)Lnet/minecraft/client/renderer/chunk/SectionMesh$SectionDraw;"))
+    private SectionMesh.SectionDraw metalcraft$singleTerrainOwner(SectionMesh.SectionDraw draw,@Local RenderSection section) {
+        return dev.metalcraft.client.horizon.HorizonRenderer.covers(section.getSectionNode())?null:draw;
+    }
+
+    // Annotate the constructed draw directly. Wrapping its eight constructor arguments
+    // created varargs arrays/boxed integers for every section/layer on every frame.
+    @ModifyExpressionValue(method = "prepareChunkRenders", at = @At(value = "NEW", target = "com/mojang/blaze3d/systems/RenderPass$Draw"))
+    private RenderPass.Draw<GpuBufferSlice[]> metalcraft$attachLod(RenderPass.Draw<GpuBufferSlice[]> draw,
+            @Local SectionMesh sectionMesh,
             @Local ChunkSectionLayer layer, @Local RenderSection section) {
-        var draw = original.call(slot, vertices, indices, indexType, firstIndex, indexCount, baseVertex, uploader);
+        if(layer==ChunkSectionLayer.TRANSLUCENT && dev.metalcraft.client.horizon.NativeHorizon.enabled()) {
+            var pos=levelRenderState.cameraRenderState.pos;long node=section.getSectionNode();
+            double dx=net.minecraft.core.SectionPos.x(node)*16.0+8-pos.x,dy=net.minecraft.core.SectionPos.y(node)*16.0+8-pos.y,
+                    dz=net.minecraft.core.SectionPos.z(node)*16.0+8-pos.z;
+            ((LodDrawSource)(Object)draw).metalcraft$sortDistance(dx*dx+dy*dy+dz*dz);
+        }
         if (layer == ChunkSectionLayer.SOLID && sectionMesh instanceof dev.metalcraft.client.chunk.NativeLodState state)
             ((LodDrawSource)(Object)draw).metalcraft$textureMip(dev.metalcraft.client.chunk.NativeTerrainLod.textureMip(
                     section.getSectionNode(),state.metalcraft$cellSize()));
         if (!LodLoadedRenderer.trackingDraws()) return draw;
         ((LodDrawSource)(Object)draw).metalcraft$terrain(LodLoadedRenderer.distant(section, levelRenderState.cameraRenderState));
-        if (layer == ChunkSectionLayer.SOLID && indices == null && firstIndex == 0)
+        if (layer == ChunkSectionLayer.SOLID && draw.indexBuffer() == null && draw.firstIndex() == 0)
             ((LodDrawSource)(Object)draw).metalcraft$lodDraw(LodLoadedRenderer.selected(section, sectionMesh));
         return draw;
     }
