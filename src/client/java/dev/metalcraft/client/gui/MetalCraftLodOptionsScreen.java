@@ -146,6 +146,12 @@ public final class MetalCraftLodOptionsScreen extends Screen {
                 .create(0, 0, width, 20, Component.translatable("metalcraft.options.native_lod_reduction"),
                         (b, v) -> MetalCraftConfig.setNativeLodReduction(v)));
         rows.addChild(nativeQualityDistanceSlider(width));
+        rows.addChild(CycleButton.<Integer>builder(
+                v -> Component.translatable("metalcraft.options.horizon_detail." + v), MetalCraftConfig.horizonDetail())
+                .withValues(1, 2, 3, 4, 5)
+                .withTooltip(v -> Tooltip.create(Component.translatable("metalcraft.options.horizon_detail.tooltip")))
+                .create(0, 0, width, 20, Component.translatable("metalcraft.options.horizon_detail"),
+                        (b, v) -> MetalCraftConfig.setHorizonDetail(v)));
         rows.addChild(CycleButton.onOffBuilder(MetalCraftConfig.nativeLodPixels())
                 .withTooltip(v -> Tooltip.create(Component.translatable("metalcraft.options.native_lod_pixels.tooltip")))
                 .create(0, 0, width, 20, Component.translatable("metalcraft.options.native_lod_pixels"),

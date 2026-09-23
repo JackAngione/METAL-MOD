@@ -1,5 +1,31 @@
 # Native terrain surface LOD
 
+## Adjustable distant model detail — September 23
+
+Owner: /root. Status: implemented and validated. The active detached horizon has a
+saved 1–5 detail control. Level 1 retains the prior adaptive 4/8/16-block cells;
+levels 2 and 3 cap cells at 8 and 4 blocks, while levels 4 and 5 capture new
+2-block and 1-block surface samples. This restores terrain silhouettes and more
+local material variation without retaining full client chunks. These remain
+height-envelope models, so caves, overhangs and block entities are not native.
+
+- [x] Add a persistent terrain-menu control and map five levels to real horizon
+  sampling and Metal mesh resolution.
+- [x] Rebuild detached samples when detail changes; preserve bounded tickets,
+  native handoff, edit refresh and GPU retirement.
+- [x] Validate tier geometry, saved-value recovery, the full Metal build and one
+  brief NORMAL-world 128/16 Default/Metal route with levels 1–5.
+
+`./gradlew build --offline` passed, including the new 2-block and 1-block closed
+mesh fixtures and settings-codec cases. A 31.50-second Metal-validation world route
+passed every detail setting, source-chunk absence, edit refresh, native approach
+and retreat, Standard water, disable/re-enable, resize and close. Inspected
+screenshots show progressively finer terrain at levels 4 and 5. The route does
+not benchmark full-horizon memory or frame rate; higher levels intentionally
+increase sampling and mesh cost. Local evidence: `run/build/compact-horizon.json`
+and `run/screenshots/0000_compact-horizon-none.png` through
+`0004_compact-horizon-detail-5.png`.
+
 ## Model-only horizon and FPS correction — September 21
 
 Owner: /root. Status: implemented and validated. Goal: simplify fluids like solid

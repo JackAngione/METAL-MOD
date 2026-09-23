@@ -47,6 +47,7 @@ public final class HorizonRenderer {
     private static MetalGpuDevice device;
     private static long frame,bytes,uploads,draws;
     private static int lastX=Integer.MIN_VALUE,lastZ=Integer.MIN_VALUE,lastRadius;
+    private static int detail=HorizonDetail.DEFAULT;
     public record Stats(int cachedColumns,int groups,int selectedGroups,int frameColumns,long gpuBytes,long uploads,long draws,
                         int nativeDistance,int horizon,HorizonStreamer.Stats streaming) { }
     private static volatile Stats stats=new Stats(0,0,0,0,0,0,0,0,0,new HorizonStreamer.Stats(0,0,0,0,0));
@@ -78,7 +79,10 @@ public final class HorizonRenderer {
     static void tick(Minecraft client) {
         if(!NativeHorizon.enabled() || client.level==null || client.player==null) { if(world!=null) reset(); return; }
         var nextModels=client.getModelManager().getBlockStateModelSet();
-        if(world!=client.level || models!=nextModels) { reset(); world=client.level; models=nextModels; }
+        int requestedDetail=MetalCraftConfig.horizonDetail();
+        if(world!=client.level || models!=nextModels || detail!=requestedDetail) {
+            reset(); world=client.level; models=nextModels; detail=requestedDetail;
+        }
         int x=client.player.chunkPosition().x(),z=client.player.chunkPosition().z(),radius=NativeHorizon.horizon();
         if(x!=lastX || z!=lastZ || radius!=lastRadius) {
             // Only movement/settings changes visit retained columns. Never scan them per rendered frame.
@@ -107,7 +111,8 @@ public final class HorizonRenderer {
             var group=groups.computeIfAbsent(groupKey(column.x(),column.z()),ignored->new Group(Math.floorDiv(column.x(),GROUP),Math.floorDiv(column.z(),GROUP)));
             group.columns[slot(column.x(),column.z())]=column; group.revision++;
         }
-        HorizonStreamer.request(new HorizonStreamer.Request(epoch,client.getSingleplayerServer(),client.level.dimension(),x,z,NativeHorizon.innerDistance(),radius));
+        HorizonStreamer.request(new HorizonStreamer.Request(epoch,client.getSingleplayerServer(),client.level.dimension(),x,z,NativeHorizon.innerDistance(),radius,
+                HorizonDetail.sampleSize(detail)));
     }
     public static void reset() {
         HorizonStreamer.stop(); epoch++; world=null;models=null; columns.clear(); selected.clear();
@@ -156,7 +161,7 @@ public final class HorizonRenderer {
             int cell=NativeShellMesher.grid(Math.max(2,policy.selectSquared(distance(group,camera),group.cell==0?2:group.cell)));
             // Bound even the gentlest reduction setting at very long distances.
             double range=distance(group,camera);
-            cell=Math.max(cell,range>768.0*768?16:range>384.0*384?8:4);
+            cell=HorizonDetail.cellSize(detail,Math.max(cell,range>768.0*768?16:range>384.0*384?8:4));
             boolean shapeChanged=group.mask!=mask || group.cell!=cell;
             if(group.meshRevision!=group.revision || shapeChanged || group.mesh==null) {
                 // Boundary changes cannot draw stale models over the native handoff area.

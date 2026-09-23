@@ -23,19 +23,25 @@ import net.minecraft.world.level.material.FluidState;
 final class HorizonSnapshot {
     private record Surface(float low,float high,Sample sample) { }
     final int x,z;
-    private final Surface[] solid=new Surface[16],fluid=new Surface[16];
-    private HorizonSnapshot(int x,int z) { this.x=x; this.z=z; }
+    private final int sampleSize;
+    private final Surface[] solid,fluid;
+    private HorizonSnapshot(int x,int z,int sampleSize) {
+        this.x=x; this.z=z; this.sampleSize=sampleSize;
+        int count=256/(sampleSize*sampleSize);
+        solid=new Surface[count];fluid=new Surface[count];
+    }
 
-    static HorizonSnapshot capture(ServerLevel level,LevelChunk chunk) {
-        var result=new HorizonSnapshot(chunk.getPos().x(),chunk.getPos().z());
+    static HorizonSnapshot capture(ServerLevel level,LevelChunk chunk,int sampleSize) {
+        var result=new HorizonSnapshot(chunk.getPos().x(),chunk.getPos().z(),sampleSize);
         var pos=new BlockPos.MutableBlockPos();
-        for(int tz=0;tz<4;tz++) for(int tx=0;tx<4;tx++) {
-            int sx=tx*4,sz=tz*4,highest=Integer.MIN_VALUE;
+        int width=16/sampleSize;
+        for(int tz=0;tz<width;tz++) for(int tx=0;tx<width;tx++) {
+            int sx=tx*sampleSize,sz=tz*sampleSize,highest=Integer.MIN_VALUE;
             // Keep the highest feature in each tile instead of occasionally missing
             // a tree/cliff by sampling only its center. The envelope below is vague.
-            for(int dz=0;dz<4;dz++) for(int dx=0;dx<4;dx++) {
-                int h=chunk.getHeight(Heightmap.Types.WORLD_SURFACE,tx*4+dx,tz*4+dz);
-                if(h>highest) { highest=h; sx=tx*4+dx; sz=tz*4+dz; }
+            for(int dz=0;dz<sampleSize;dz++) for(int dx=0;dx<sampleSize;dx++) {
+                int h=chunk.getHeight(Heightmap.Types.WORLD_SURFACE,tx*sampleSize+dx,tz*sampleSize+dz);
+                if(h>highest) { highest=h; sx=tx*sampleSize+dx; sz=tz*sampleSize+dz; }
             }
             int wx=result.x*16+sx,wz=result.z*16+sz;
             float solidLow=Float.POSITIVE_INFINITY,solidHigh=Float.NEGATIVE_INFINITY;
@@ -56,7 +62,7 @@ final class HorizonSnapshot {
                     fluidHigh=y+(stacked?1:fs.getOwnHeight()); fluidSample=sample(level,pos,state);
                 }
             }
-            int i=tx+tz*4;
+            int i=tx+tz*width;
             if(solidSample!=null) result.solid[i]=new Surface(solidLow,solidHigh,solidSample);
             if(fluidSample!=null) result.fluid[i]=new Surface(fluidLow,fluidHigh,fluidSample);
         }
@@ -69,10 +75,10 @@ final class HorizonSnapshot {
                 level.getMinY(),level.getHeight());
     }
     HorizonColumn bake(BlockStateModelSet models,FluidStateModelSet fluids,BlockColors colors) {
-        var cells=new HorizonColumn.Cell[16];
-        for(int i=0;i<16;i++) cells[i]=new HorizonColumn.Cell(bake(solid[i],false,models,fluids,colors),
+        var cells=new HorizonColumn.Cell[solid.length];
+        for(int i=0;i<cells.length;i++) cells[i]=new HorizonColumn.Cell(bake(solid[i],false,models,fluids,colors),
                 bake(fluid[i],true,models,fluids,colors));
-        return new HorizonColumn(x,z,cells);
+        return new HorizonColumn(x,z,sampleSize,cells);
     }
     private static HorizonColumn.Surface bake(Surface surface,boolean fluid,BlockStateModelSet models,FluidStateModelSet fluids,BlockColors colors) {
         if(surface==null) return null;

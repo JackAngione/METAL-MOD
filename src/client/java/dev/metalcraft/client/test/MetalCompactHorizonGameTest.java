@@ -5,6 +5,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.chunk.NativeLodState;
 import dev.metalcraft.client.horizon.HorizonRenderer;
+import dev.metalcraft.client.horizon.HorizonDetail;
 import dev.metalcraft.client.horizon.NativeHorizon;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.nio.file.Files;
@@ -21,7 +22,7 @@ final class MetalCompactHorizonGameTest {
     static void run(ClientGameTestContext context) {
         int distance=context.computeOnClient(c->c.options.renderDistance().get());
         int simulation=context.computeOnClient(c->c.options.simulationDistance().get());
-        int quality=MetalCraftConfig.nativeQualityDistance(),reduction=MetalCraftConfig.nativeLodReduction();
+        int quality=MetalCraftConfig.nativeQualityDistance(),reduction=MetalCraftConfig.nativeLodReduction(),detail=MetalCraftConfig.horizonDetail();
         boolean enabled=MetalCraftConfig.nativeTerrainLod(),fog=MetalCraftConfig.clearDistanceFog();
         boolean vsync=context.computeOnClient(c->c.options.enableVsync().get());
         String pack=context.computeOnClient(c->ShaderPackRuntime.active().selectedPackId());
@@ -31,6 +32,7 @@ final class MetalCompactHorizonGameTest {
                 check("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()),"Metal backend");
                 c.options.renderDistance().set(128);c.options.simulationDistance().set(16);c.options.enableVsync().set(false);
                 MetalCraftConfig.setNativeTerrainLod(true);MetalCraftConfig.setNativeLodReduction(5);MetalCraftConfig.setNativeQualityDistance(4);
+                MetalCraftConfig.setHorizonDetail(1);
                 MetalCraftConfig.setClearDistanceFog(true);ShaderPackRuntime.active().selectPack(ShaderPackRuntime.NONE_ID);
             });
             context.getInput().resizeWindow(1280,720);
@@ -62,6 +64,33 @@ final class MetalCompactHorizonGameTest {
                 context.runOnClient(c->c.gui.hud.getChat().clearMessages(true));context.waitTicks(5);
                 context.takeScreenshot("compact-horizon-none");
                 report.put("unloadedDistantColumnRendered",true); report.put("initial",HorizonRenderer.stats());
+                boolean detailRoute=Boolean.getBoolean("metalcraft.compactHorizonDetailTest");
+                if(detailRoute) {
+                    check(HorizonDetail.sampleSize(1)==4 && HorizonDetail.sampleSize(4)==2 && HorizonDetail.sampleSize(5)==1,
+                            "detail sample sizes");
+                    check(HorizonDetail.cellSize(1,16)==16 && HorizonDetail.cellSize(2,16)==8
+                            && HorizonDetail.cellSize(3,16)==4 && HorizonDetail.cellSize(4,16)==2
+                            && HorizonDetail.cellSize(5,16)==1,"detail cell limits");
+                    for(int level=2;level<=5;level++) {
+                        final int selected=level;
+                        context.runOnClient(c->MetalCraftConfig.setHorizonDetail(selected));
+                        context.waitFor(c->{
+                            var column=HorizonRenderer.column(columnX,columnZ);
+                            return column!=null && column.sampleSize()==HorizonDetail.sampleSize(selected)
+                                    && HorizonRenderer.covers(SectionPos.of(marker).asLong());
+                        },300);
+                        check(context.computeOnClient(c->!c.level.getChunkSource().hasChunk(columnX,columnZ)),
+                                "detail change keeps full distant chunk unloaded");
+                        context.takeScreenshot("compact-horizon-detail-"+selected);
+                    }
+                    context.runOnClient(c->MetalCraftConfig.setHorizonDetail(1));
+                    context.waitFor(c->{
+                        var column=HorizonRenderer.column(columnX,columnZ);
+                        return column!=null && column.sampleSize()==4
+                                && HorizonRenderer.covers(SectionPos.of(marker).asLong());
+                    },300);
+                    report.put("detailLevelsAndResampling",true);
+                }
                 world.getServer().runOnServer(server->server.overworld().getChunk(columnX,columnZ)
                         .setBlockState(new BlockPos(x+8,195,z+8),net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(),3));
                 context.waitFor(c->height(columnX,columnZ,false)==196,200);
@@ -83,19 +112,21 @@ final class MetalCompactHorizonGameTest {
                 world.getServer().runCommand("tp @a "+cx+" 210 "+cz+" -90 10");context.getInput().lookAt(-90,10);
                 context.waitFor(c->HorizonRenderer.covers(SectionPos.of(marker).asLong()) && !c.level.getChunkSource().hasChunk(columnX,columnZ),300);
                 context.runOnClient(c->ShaderPackRuntime.active().selectPack(ShaderPackRuntime.NONE_ID));
-                // Freeze discovery, never alter or replace the already visible geometry between phases.
-                System.setProperty("metalcraft.freezeHorizonSampling","true");context.waitTicks(30);
-                var phases=new ArrayList<Object>();
-                int columns=HorizonRenderer.stats().frameColumns(); long uploads=HorizonRenderer.stats().uploads();
-                for(boolean split:new boolean[]{true,false,false,true}) {
-                    System.setProperty("metalcraft.horizonSplitDraws",Boolean.toString(split));
-                    context.runOnClient(c->MetalFrameMetrics.beginCapture(10));context.waitTicks(40);
-                    var frames=context.computeOnClient(c->MetalFrameMetrics.endCapture(split?"split-identical-mesh":"grouped-identical-mesh"));
-                    check(HorizonRenderer.stats().frameColumns()==columns && HorizonRenderer.stats().uploads()==uploads,"same model coverage and GPU buffers across timing phases");
-                    check(frames.frames()>20,"populated timing capture");phases.add(frames);
+                if(!detailRoute) {
+                    // Freeze discovery, never alter or replace the already visible geometry between phases.
+                    System.setProperty("metalcraft.freezeHorizonSampling","true");context.waitTicks(30);
+                    var phases=new ArrayList<Object>();
+                    int columns=HorizonRenderer.stats().frameColumns(); long uploads=HorizonRenderer.stats().uploads();
+                    for(boolean split:new boolean[]{true,false,false,true}) {
+                        System.setProperty("metalcraft.horizonSplitDraws",Boolean.toString(split));
+                        context.runOnClient(c->MetalFrameMetrics.beginCapture(10));context.waitTicks(40);
+                        var frames=context.computeOnClient(c->MetalFrameMetrics.endCapture(split?"split-identical-mesh":"grouped-identical-mesh"));
+                        check(HorizonRenderer.stats().frameColumns()==columns && HorizonRenderer.stats().uploads()==uploads,"same model coverage and GPU buffers across timing phases");
+                        check(frames.frames()>20,"populated timing capture");phases.add(frames);
+                    }
+                    report.put("sameMeshABBA",phases);report.put("fixedModelColumns",columns);
+                    System.clearProperty("metalcraft.horizonSplitDraws");System.clearProperty("metalcraft.freezeHorizonSampling");
                 }
-                report.put("sameMeshABBA",phases);report.put("fixedModelColumns",columns);
-                System.clearProperty("metalcraft.horizonSplitDraws");System.clearProperty("metalcraft.freezeHorizonSampling");
                 context.getInput().resizeWindow(1100,700);context.waitTicks(3);
                 // Turning the horizon off clears all model ownership. Keep native load small during the check.
                 context.runOnClient(c->{c.options.renderDistance().set(7);MetalCraftConfig.setNativeTerrainLod(false);});
@@ -114,6 +145,7 @@ final class MetalCompactHorizonGameTest {
             context.runOnClient(c->{
                 c.options.renderDistance().set(distance);c.options.simulationDistance().set(simulation);c.options.enableVsync().set(vsync);
                 MetalCraftConfig.setNativeQualityDistance(quality);MetalCraftConfig.setNativeLodReduction(reduction);
+                MetalCraftConfig.setHorizonDetail(detail);
                 MetalCraftConfig.setNativeTerrainLod(enabled);MetalCraftConfig.setClearDistanceFog(fog);ShaderPackRuntime.active().selectPack(pack);
             });
             try { Files.writeString(Path.of("build/compact-horizon.json"),new GsonBuilder().setPrettyPrinting().create().toJson(report)); }

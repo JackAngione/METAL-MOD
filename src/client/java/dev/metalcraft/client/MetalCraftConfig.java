@@ -8,6 +8,7 @@ import dev.metalcraft.client.lod.LodSettingsCodec;
 import dev.metalcraft.client.lod.LodFrameSettings;
 import dev.metalcraft.client.lod.LodCapabilities;
 import dev.metalcraft.client.chunk.NativeLodSelection;
+import dev.metalcraft.client.horizon.HorizonDetail;
 import com.mojang.logging.LogUtils;
 import java.io.IOException;
 import java.io.Reader;
@@ -83,6 +84,15 @@ public final class MetalCraftConfig {
 
 	public static synchronized int nativeQualityDistance() { return data.nativeQualityDistance; }
 
+	public static synchronized int horizonDetail() { return data.horizonDetail; }
+
+	public static synchronized void setHorizonDetail(final int level) {
+		int clamped = HorizonDetail.clamp(level);
+		if (data.horizonDetail == clamped) return;
+		data.horizonDetail = clamped;
+		save();
+	}
+
 	public static synchronized void setNativeQualityDistance(final int chunks) {
 		int clamped = NativeLodSelection.clampNativeDistance(chunks);
 		if (data.nativeQualityDistance == clamped) return;
@@ -137,6 +147,7 @@ public final class MetalCraftConfig {
                 || !pixels.getAsJsonPrimitive().isBoolean() || pixels.getAsBoolean();
             loaded.nativeLodReduction = NativeLodSettingsCodec.readReduction(json.get("nativeLodReduction"));
 			loaded.nativeQualityDistance = NativeLodSettingsCodec.readNativeDistance(json.get("nativeQualityDistance"));
+			loaded.horizonDetail = NativeLodSettingsCodec.readHorizonDetail(json.get("horizonDetail"));
 			loaded.lod = LodSettingsCodec.read(json.get("lod"));
 			return loaded;
 		} catch (IOException | RuntimeException error) {
@@ -181,6 +192,7 @@ public final class MetalCraftConfig {
         private boolean nativeLodPixels = true;
 		private int nativeLodReduction = NativeLodSelection.DEFAULT_REDUCTION;
 		private int nativeQualityDistance = NativeLodSelection.DEFAULT_NATIVE_DISTANCE;
+		private int horizonDetail = HorizonDetail.DEFAULT;
 		private LodSettings lod = LodSettings.defaults();
 	}
 }

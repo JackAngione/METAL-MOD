@@ -80,7 +80,7 @@ final class MetalLodSettingsGameTest {
                 var screen = c.gui.screen();
                 boolean available = dev.metalcraft.client.lod.LodCapabilities.current(true).geometry();
                 boolean horizon = dev.metalcraft.client.lod.LodCapabilities.current(true).extendedHorizon();
-                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 8 + (available ? 3 : 0) + (horizon ? 4 : 0),
+                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 9 + (available ? 3 : 0) + (horizon ? 4 : 0),
                         "resize does not duplicate option widgets");
                 boolean disabled = widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).map(e -> (CycleButton<?>)e)
                         .anyMatch(b -> !b.active && b.getMessage().getString().contains("Enable terrain LOD"));

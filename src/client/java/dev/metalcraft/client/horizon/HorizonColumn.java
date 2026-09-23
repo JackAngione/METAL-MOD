@@ -1,8 +1,7 @@
 package dev.metalcraft.client.horizon;
 
-/** Immutable 4x4 column envelope. No chunk, block palette, level or light-engine owner survives here. */
-public record HorizonColumn(int x, int z, Cell[] cells) {
-    public static final int CELL = 4, WIDTH = 4, COUNT = 16;
+/** Immutable sampled column envelope. No chunk, block palette, level or light-engine owner survives here. */
+public record HorizonColumn(int x, int z, int sampleSize, Cell[] cells) {
     public record Material(float u, float v, int color, int light, boolean water, boolean translucent) { }
     public record Surface(float low, float high, Material material) {
         public Surface {
@@ -15,7 +14,8 @@ public record HorizonColumn(int x, int z, Cell[] cells) {
         void face(float[] positions, Material material, int axis, int sign);
     }
     public HorizonColumn {
-        if (cells.length != COUNT) throw new IllegalArgumentException("Column sample count");
+        if (sampleSize != 1 && sampleSize != 2 && sampleSize != 4) throw new IllegalArgumentException("Column sample size");
+        if (cells.length != 256 / (sampleSize * sampleSize)) throw new IllegalArgumentException("Column sample count");
         cells = cells.clone();
         for (var cell : cells) java.util.Objects.requireNonNull(cell);
     }
@@ -23,8 +23,8 @@ public record HorizonColumn(int x, int z, Cell[] cells) {
 
     /** Closed envelopes survive independent neighbor residency and unlike neighboring LOD tiers. */
     public int emit(int cellSize, Output output) {
-        if (cellSize != 4 && cellSize != 8 && cellSize != 16) throw new IllegalArgumentException("Horizon cell size");
-        int width = 16 / cellSize, stride = cellSize / CELL;
+        if (cellSize < sampleSize || cellSize > 16 || (cellSize & (cellSize-1)) != 0) throw new IllegalArgumentException("Horizon cell size");
+        int width = 16 / cellSize, stride = cellSize / sampleSize, sampleWidth = 16 / sampleSize;
         int[] count = {0}; float[] positions = new float[12];
         for (boolean fluid : new boolean[]{false, true}) {
             Surface[] grid = new Surface[width * width];
@@ -32,7 +32,7 @@ public record HorizonColumn(int x, int z, Cell[] cells) {
                 float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
                 Material material = null;
                 for (int dz = 0; dz < stride; dz++) for (int dx = 0; dx < stride; dx++) {
-                    Cell cell = cells[x * stride + dx + (z * stride + dz) * WIDTH];
+                    Cell cell = cells[x * stride + dx + (z * stride + dz) * sampleWidth];
                     Surface surface = fluid ? cell.fluid : cell.solid;
                     if (surface == null) continue;
                     low = Math.min(low, surface.low);

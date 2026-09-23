@@ -21,7 +21,7 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 /** Bounded server-owned sampling. Full chunks are borrowed temporarily, never sent to the client. */
 public final class HorizonStreamer {
-    record Request(long epoch,MinecraftServer server,ResourceKey<Level> dimension,int x,int z,int near,int far) { }
+    record Request(long epoch,MinecraftServer server,ResourceKey<Level> dimension,int x,int z,int near,int far,int sampleSize) { }
     record Completed(long epoch,HorizonSnapshot snapshot) { }
     public record Stats(int tickets,int pendingSnapshots,long columns,long failures,int serverLoadedChunks) { }
     private static final TicketType TICKET=new TicketType(0,TicketType.FLAG_LOADING);
@@ -99,7 +99,7 @@ public final class HorizonStreamer {
                 var result=job.future.join();
                 var chunk=result==null?null:result.orElse(null);
                 if(sameWorld(job.request,next) && chunk instanceof LevelChunk full) {
-                    completed.add(new Completed(next.epoch,HorizonSnapshot.capture(job.level,full))); columns++;
+                    completed.add(new Completed(next.epoch,HorizonSnapshot.capture(job.level,full,job.request.sampleSize))); columns++;
                 }
             } catch(RuntimeException error) {
                 failures++; com.mojang.logging.LogUtils.getLogger().warn("Horizon sample failed at {}: {}",job.pos,error.toString());
