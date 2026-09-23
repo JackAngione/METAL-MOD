@@ -136,6 +136,11 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			return;
 		}
 
+		if (Boolean.getBoolean("metalcraft.skyTest")) {
+			MetalSkyGameTest.run(context);
+			return;
+		}
+
 		if (benchmark) {
 			try (MetalBenchmarkEnvironment environment = new MetalBenchmarkEnvironment(context)) {
 				new MetalRealWorldBenchmark(context, backend).run();

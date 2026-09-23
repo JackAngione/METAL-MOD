@@ -108,6 +108,15 @@ MetalRenderPipeline pipeline = device.createRenderPipeline(
 
 Sources passed here must already have `#moj_import` or other includes expanded. Translation diagnostics retain the supplied source names.
 
+The bundled **MetalCraft Standard** pack includes an atmospheric Overworld sky,
+drifting cumulus and high cirrus clouds, sunrise/sunset color and halos, and weather
+lighting. Custom round sun and moon models add solar limb darkening, lunar surface
+detail, and all eight moon phases, with Minecraft's celestial paths and stars.
+Select Standard in
+**Video Settings → MetalCraft Settings**; the ordinary **Clouds** setting controls
+Off/Fast/Fancy quality. Cloud shading uses a half-resolution Metal target.
+See [sky rendering and validation](docs/SKY_RENDERING.md).
+
 ## Shader add-on pathway
 
 Shader add-ons should stay inside Blaze3D instead of issuing raw OpenGL, Vulkan, or Metal calls. Backend-neutral pipelines use the active Metal device while remaining compatible with Minecraft's OpenGL recovery path.

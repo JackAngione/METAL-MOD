@@ -193,6 +193,8 @@ tasks.named('runClient') {
 		systemProperty 'fabric.client.gametest', 'true'
 		systemProperty 'metalcraft.waterIdentityTest', providers.gradleProperty('metalWaterIdentityTest').getOrElse('false')
 		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
+		systemProperty 'metalcraft.skyTest', providers.gradleProperty('metalSkyTest').getOrElse('false')
+		systemProperty 'metalcraft.skyMotionTest', providers.gradleProperty('metalSkyMotionTest').getOrElse('false')
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
 		systemProperty 'metalcraft.lodSettingsTest', providers.gradleProperty('metalLodSettingsTest').getOrElse('false')
 		systemProperty 'metalcraft.lodCompilerTest', providers.gradleProperty('metalLodCompilerTest').getOrElse('false')

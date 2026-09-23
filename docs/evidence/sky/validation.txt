@@ -1,0 +1,20 @@
+Validation date: 2026-09-22
+./gradlew build
+Standard sky day: mean=0.5078367, holes=32082, dense=42100
+Standard sky sunset: mean=0.4146641, holes=32082, dense=42100
+Standard sky night: mean=0.013586565, holes=32082, dense=42100
+Standard sky rain: mean=0.36865517, holes=29046, dense=51456
+Standard sky off: mean=0.3863221, holes=82944, dense=0
+Standard sky above: mean=0.54603887, holes=31262, dense=44316
+Standard celestials GPU: circular opaque moons, eight phases, waxing/waning, rain, HDR sun limb and rear culling passed; energy=[1689.107129395008, 1203.5074989199638, 580.0138247013092, 205.9881933927536, 29.629410326480865, 240.51687133312225, 748.4195947051048, 1367.696605861187]
+Standard sky GPU: finite HDR, cloud gaps, toggle, night/rain, sunset and premultiplied blending passed
+BUILD SUCCESSFUL in 23s
+./gradlew runClient -PmetalLifecycleTest -PmetalSkyTest=true --args='--graphicsBackend default'
+[10:32:18] [Render thread/INFO] (Minecraft) Using graphics backend Metal, using drivers: Mac OS X 27.0
+[10:32:19] [Render thread/INFO] (MetalCraftClient) MetalCraft direct renderer active: Apple / Apple M4 Max using Metal
+[10:32:37] [Test thread/INFO] (Minecraft) [STDOUT]: Visible cloud toggle changed 170448 upper-frame pixels
+[10:32:50] [Test thread/INFO] (Minecraft) [STDOUT]: Standard sky live passed: NORMAL world, Metal, 16/16, day/sunrise/sunset/night/rain, custom sun/moon and lunar phases, cloud modes, resource reload, resize, Fabulous, pack restoration
+BUILD SUCCESSFUL in 36s
+Visual review: round sun, detailed full/quarter moon, stars, sunrise/sunset, and Fabulous.
+moon-*-detail.png: isolated production-Metal GPU fixture at 12-degree vertical field of view.
+All in-game captures: generated NORMAL seed 12345; Metal; render/simulation 16/16.

@@ -1,0 +1,13 @@
+Sky walking stability — 2026-09-22
+Before fix: ./gradlew shaderTranslationSmoke
+Exception in thread "main" java.lang.AssertionError: Sky moves with view-bob translation: sunset, shift=-0.08, mean HDR difference=0.1560656175691895
+After fix: ./gradlew build
+Standard sky walking GPU: sun/moon, atmosphere and clouds invariant under view-bob translation; camera rotation retained; max mean HDR difference=2.5264520213437176E-7
+BUILD SUCCESSFUL in 23s
+./gradlew runClient -PmetalLifecycleTest -PmetalSkyTest=true -PmetalSkyMotionTest=true --args='--graphicsBackend default'
+[19:57:05] [Render thread/INFO] (Minecraft) Using graphics backend Metal, using drivers: Mac OS X 27.0
+[19:57:05] [Render thread/INFO] (MetalCraftClient) MetalCraft direct renderer active: Apple / Apple M4 Max using Metal
+[19:57:25] [Test thread/INFO] (Minecraft) [STDOUT]: Standard sky walking live passed: NORMAL world, Metal, 16/16, view bob enabled; distance=7.511324961672705, max bob=0.099999994, max solar shift=2.135594901552338 pixels
+BUILD SUCCESSFUL in 25s
+Visual review: standing and mid-step sun remains in place; cloud composition intact.
+Captures: walking-standing.png and walking-midstep.png, unmodified live screenshots.

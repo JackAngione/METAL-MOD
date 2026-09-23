@@ -68,6 +68,25 @@ final class LinearWorldSessionSmoke {
 			RenderPipeline unseen = pipeline("metalcraft:smoke/linear_session_unseen");
 			RenderPipeline legacy = pipeline("metalcraft:smoke/linear_session_legacy");
 			RenderPipeline unsupported = pipeline("metalcraft:smoke/linear_session_unsupported");
+			RenderPipeline sampled = RenderPipeline.builder().withLocation(Identifier.parse("metalcraft:smoke/session_sample"))
+				.withVertexShader(Identifier.parse("metalcraft:smoke/session_sample"))
+				.withFragmentShader(Identifier.parse("metalcraft:smoke/session_sample"))
+				.withCull(false).withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+				.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
+				.withBindGroupLayout(com.mojang.blaze3d.pipeline.BindGroupLayout.builder()
+					.withSampler("MainSampler").withSampler("MainDepthSampler").build()).build();
+			String sampleSource = """
+				#include <metal_stdlib>
+				using namespace metal;
+				vertex float4 vs(uint id [[vertex_id]]) {
+				    return float4(id == 1 ? 3.0 : -1.0, id == 2 ? 3.0 : -1.0, 0.5, 1);
+				}
+				fragment float4 fs(texture2d<float> scene [[texture(0)]], depth2d<float> depth [[texture(1)]],
+				    sampler colorSampler [[sampler(0)]], sampler depthSampler [[sampler(1)]]) {
+				    return float4(scene.sample(colorSampler, float2(0.5)).rgb, depth.sample(depthSampler, float2(0.5)));
+				}
+				""";
+			gpu.registerNativePipeline(sampled, new MetalGpuDevice.NativeProgram(sampleSource, "vs", "fs", FrameBindings.ColorEncoding.LINEAR_SRGB));
 			gpu.registerNativePipeline(known, new MetalGpuDevice.NativeProgram(
 				LINEAR_SOURCE, "vs", "fs", FrameBindings.ColorEncoding.LINEAR_SRGB));
 			gpu.registerNativePipeline(unseen, new MetalGpuDevice.NativeProgram(
@@ -87,6 +106,7 @@ final class LinearWorldSessionSmoke {
 				 var unrelated = gpu.createTexture("session-unrelated", USAGE, GpuFormat.RGBA8_UNORM, 9, 3, 1, 1);
 				 var unrelatedView = gpu.createTextureView(unrelated);
 				 var copyDest = gpu.createTexture("session-copy", USAGE, GpuFormat.RGBA16_FLOAT, 9, 3, 1, 1);
+				 var copyView = gpu.createTextureView(copyDest);
 				 var output = gpu.createTexture("session-grade-out", USAGE, GpuFormat.RGBA8_UNORM, 9, 3, 1, 1);
 				 var outputView = gpu.createTextureView(output)) {
 				backend.clearColorTexture(mainColor, new Vector4f(0, 1, 0, 1));
@@ -124,6 +144,21 @@ final class LinearWorldSessionSmoke {
 					assertRgba8(read(queue, unrelatedView), 0, 0, 255, 255);
 					assertHdr(read(queue, session.hdrColor()), 2.0, 0.25, 0.125, 1.0);
 					assertHdr(read(queue, copyDest), 2.0, 0.25, 0.125, 1.0);
+
+					var sampler = gpu.createSampler(com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE,
+						com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE, com.mojang.blaze3d.textures.FilterMode.NEAREST,
+						com.mojang.blaze3d.textures.FilterMode.NEAREST, 1, OptionalDouble.empty());
+					var samplePass = backend.createRenderPass(RenderPassDescriptor.create(() -> "session sampled main")
+						.withColorAttachment(copyView, Optional.empty()).withRenderArea(new RenderPass.RenderArea(0, 0, 9, 3)));
+					samplePass.setPipeline(sampled);
+					// A different view of the original main must resolve to the HDR main,
+					// even when writing an internal post target rather than the main itself.
+					samplePass.bindTexture("MainSampler", skyView, sampler);
+					samplePass.bindTexture("MainDepthSampler", mainDepthView, sampler);
+					samplePass.draw(3, 1, 0, 0);
+					backend.submitRenderPass();
+					backend.finishPendingWork();
+					assertHdr(read(queue, copyDest), 2.0, 0.25, 0.125, 0.25);
 
 					draw(backend, mainColorView, null, 9, 3, unseen);
 					backend.finishPendingWork();

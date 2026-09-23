@@ -93,6 +93,11 @@ abstract class GameRendererWorldGradeMixin {
 					!= dev.metalcraft.client.shader.water.WaterRoutingDebug.Mode.UNDERWATER_DISTORTION_OFF));
 		}
 		try {
+			var skyRuntime = ShaderPackRuntime.active();
+			if (skyRuntime != null && skyRuntime.worldSky() != null) {
+				// The captured final raster projection is shared by sky and water reconstruction.
+				skyRuntime.worldSky().rasterProjection(this.metalcraft$waterProjection);
+			}
 			if (gpu != null && gpu.linearWorldSession() != null) {
 				gpu.linearWorldSession().waterFrameInputs(WaterFrameInputs.create(this.metalcraft$waterProjection,
 					new Vector3d(cameraState.pos.x, cameraState.pos.y, cameraState.pos.z),
@@ -108,6 +113,8 @@ abstract class GameRendererWorldGradeMixin {
 			this.metalcraft$linearWorld = null;
 			throw error;
 		} finally {
+			var skyRuntime = ShaderPackRuntime.active();
+			if (skyRuntime != null && skyRuntime.worldSky() != null) skyRuntime.worldSky().rasterProjection(null);
 			this.metalcraft$waterProjection = null;
 			frame.close();
 		}

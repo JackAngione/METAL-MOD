@@ -7,6 +7,7 @@ import dev.metalcraft.client.metal.MetalGpuDevice;
 import dev.metalcraft.client.metal.MetalTexture;
 import dev.metalcraft.client.shader.world.ShadowCascades;
 import dev.metalcraft.client.shader.world.WorldTerrainShadows;
+import dev.metalcraft.client.shader.sky.StandardSkyRenderer;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +41,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 	private @Nullable MetalShaderFrameExecutor executor;
 	private @Nullable WorldGeometryAdapter worldGeometry;
 	private @Nullable WorldTerrainShadows worldShadows;
+	private @Nullable StandardSkyRenderer worldSky;
 	private @Nullable String lastError;
 	private int width;
 	private int height;
@@ -398,6 +400,9 @@ public final class ShaderPackRuntime implements AutoCloseable {
 				this::optionValueUnchecked
 			);
 			if (BUILTIN_ID.equals(this.pack.id())) {
+				this.worldSky = new StandardSkyRenderer(this.device,
+					this.pack.metalSources().get("shared/sky.metal"), this.pack.metalSources().get("shared/celestials.metal"),
+					this.pack.metalSources().get("sky.metal"));
 				this.worldShadows = new WorldTerrainShadows(this.gpuDevice,
 					new ShadowCascades.Settings(
 						((Number)this.optionValueUnchecked("shadow_cascades")).intValue(),
@@ -418,6 +423,10 @@ public final class ShaderPackRuntime implements AutoCloseable {
 		return this.worldShadows;
 	}
 
+	public @Nullable StandardSkyRenderer worldSky() {
+		return this.worldSky;
+	}
+
 	public void gradeWorld(final com.mojang.blaze3d.textures.GpuTextureView color,
 		final com.mojang.blaze3d.textures.GpuTextureView depth) {
 		if (this.gpuDevice != null) this.gpuDevice.gradeWorld(color, depth);
@@ -428,6 +437,10 @@ public final class ShaderPackRuntime implements AutoCloseable {
 	}
 
 	private void closeWorldGeometry() {
+		if (this.worldSky != null) {
+			this.worldSky.close();
+			this.worldSky = null;
+		}
 		if (this.worldShadows != null) {
 			this.worldShadows.close();
 			this.worldShadows = null;

@@ -207,7 +207,12 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		if (textureView == null && sampler == null) {
 			this.textures.remove(name);
 		} else if (textureView instanceof MetalGpuTextureView view && sampler instanceof MetalGpuSampler metalSampler) {
-			this.textures.put(name, new TextureBinding(view, metalSampler));
+			// Framegraph post passes still refer to the captured main views. Route reads
+			// through the same identity mapping as attachments/clears/copies, including
+			// Fabulous passes writing a separate internal target (hdrOwned is false).
+			MetalLinearWorldSession session = this.device.linearWorldSession();
+			MetalGpuTextureView sampled = session == null ? view : (MetalGpuTextureView)session.translateView(view);
+			this.textures.put(name, new TextureBinding(sampled, metalSampler));
 		} else {
 			throw new IllegalArgumentException("Metal texture and sampler must both be supplied by the direct Metal backend");
 		}
