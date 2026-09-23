@@ -21,6 +21,20 @@ public record HorizonColumn(int x, int z, int sampleSize, Cell[] cells) {
     }
     @Override public Cell[] cells() { return cells.clone(); }
 
+    /** Immutable aggregate; avoids cloning the column's sample array for group meshing. */
+    Surface surface(int x,int z,int cellSize,boolean fluid) {
+        int stride=cellSize/sampleSize,width=16/sampleSize;
+        if(stride==1) { var cell=cells[x+z*width]; return fluid?cell.fluid:cell.solid; }
+        float low=Float.POSITIVE_INFINITY,high=Float.NEGATIVE_INFINITY; Material material=null;
+        for(int dz=0;dz<stride;dz++) for(int dx=0;dx<stride;dx++) {
+            var cell=cells[x*stride+dx+(z*stride+dz)*width]; var value=fluid?cell.fluid:cell.solid;
+            if(value==null) continue;
+            low=Math.min(low,value.low);
+            if(value.high>high) { high=value.high;material=value.material; }
+        }
+        return material==null?null:new Surface(low,high,material);
+    }
+
     /** Closed envelopes survive independent neighbor residency and unlike neighboring LOD tiers. */
     public int emit(int cellSize, Output output) {
         if (cellSize < sampleSize || cellSize > 16 || (cellSize & (cellSize-1)) != 0) throw new IllegalArgumentException("Horizon cell size");

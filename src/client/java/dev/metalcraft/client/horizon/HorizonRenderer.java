@@ -36,7 +36,7 @@ import org.joml.Matrix4f;
 /** Render-owned compact horizon: 64 columns per Metal mesh, independent of native chunk residency. */
 public final class HorizonRenderer {
     private static final int GROUP=8, MAX_COLUMNS=262144;
-    private static final long MAX_GPU_BYTES=256L<<20;
+    private static long gpuBudget=256L<<20;
     private static final ConcurrentHashMap<Long,HorizonColumn> columns=new ConcurrentHashMap<>();
     private static final Map<Long,Group> groups=new HashMap<>();
     private static final List<Retired> retired=new ArrayList<>();
@@ -46,8 +46,13 @@ public final class HorizonRenderer {
     private static BlockStateModelSet models;
     private static MetalGpuDevice device;
     private static long frame,bytes,uploads,draws;
+    private static long meshBuilds,meshBuildNanos,admissionSkips;
+    private static int wantedColumns,coarseGroups;
+    public record Diagnostics(long meshBuilds,long meshBuildNanos,long admissionSkips,int wantedColumns,int coarseGroups,long gpuBudget) { }
+    public static Diagnostics diagnostics() { return new Diagnostics(meshBuilds,meshBuildNanos,admissionSkips,wantedColumns,coarseGroups,legacyMeshing?256L<<20:gpuBudget); }
     private static int lastX=Integer.MIN_VALUE,lastZ=Integer.MIN_VALUE,lastRadius;
     private static int detail=HorizonDetail.DEFAULT;
+    private static boolean legacyMeshing;
     public record Stats(int cachedColumns,int groups,int selectedGroups,int frameColumns,long gpuBytes,long uploads,long draws,
                         int nativeDistance,int horizon,HorizonStreamer.Stats streaming) { }
     private static volatile Stats stats=new Stats(0,0,0,0,0,0,0,0,0,new HorizonStreamer.Stats(0,0,0,0,0));
@@ -57,8 +62,17 @@ public final class HorizonRenderer {
         final HorizonColumn[] columns=new HorizonColumn[64];
         long revision,meshRevision=-1,mask,selectedFrame,lastUse;
         int cell;
+        long estimateRevision=-1,estimateMask,estimateBytes;
+        int estimateCell;
+        float minY=Float.POSITIVE_INFINITY,maxY=Float.NEGATIVE_INFINITY;
         Mesh mesh;
         Group(int x,int z) { this.x=x; this.z=z; }
+        void include(HorizonColumn column) {
+            for(var cell:column.cells()) {
+                if(cell.solid()!=null) { minY=Math.min(minY,cell.solid().low());maxY=Math.max(maxY,cell.solid().high()); }
+                if(cell.fluid()!=null) { minY=Math.min(minY,cell.fluid().low());maxY=Math.max(maxY,cell.fluid().high()); }
+            }
+        }
     }
     private record Layer(ChunkSectionLayer layer,GpuBuffer vertices,GpuBuffer indices,IndexType indexType,int count,
                          WaterMeshBinding water,MeshData.SortState sorting) implements AutoCloseable {
@@ -109,7 +123,7 @@ public final class HorizonRenderer {
             var column=snapshot.bake(models,client.getModelManager().getFluidStateModelSet(),client.getBlockColors());
             columns.put(ChunkPos.pack(column.x(),column.z()),column);
             var group=groups.computeIfAbsent(groupKey(column.x(),column.z()),ignored->new Group(Math.floorDiv(column.x(),GROUP),Math.floorDiv(column.z(),GROUP)));
-            group.columns[slot(column.x(),column.z())]=column; group.revision++;
+            group.columns[slot(column.x(),column.z())]=column; group.include(column);group.revision++;
         }
         HorizonStreamer.request(new HorizonStreamer.Request(epoch,client.getSingleplayerServer(),client.level.dimension(),x,z,NativeHorizon.innerDistance(),radius,
                 HorizonDetail.sampleSize(detail)));
@@ -132,7 +146,15 @@ public final class HorizonRenderer {
 
     public static void prepare(CameraRenderState camera) {
         frame++; selected.clear();
-        var current=MetalGpuDevices.current(); if(current==null) return; device=current;
+        var current=MetalGpuDevices.current(); if(current==null) return;
+        if(device!=current) gpuBudget=HorizonGpuBudget.bytes(current.metal().recommendedWorkingSetBytes());
+        device=current;
+        // Diagnostic baseline for same-world performance comparisons only.
+        boolean legacy=Boolean.getBoolean("metalcraft.horizonLegacyMesh");
+        if(legacy!=legacyMeshing) {
+            for(var group:groups.values()) { retire(group);group.meshRevision=-1;group.estimateRevision=-1; }
+            legacyMeshing=legacy;
+        }
         long completed=current.completedResourceSubmission();
         retired.removeIf(old->{ if(old.submission<=completed) { old.mesh.close(); bytes-=old.mesh.bytes; return true; } return false; });
         if(!NativeHorizon.enabled() || world!=Minecraft.getInstance().level) return;
@@ -143,21 +165,24 @@ public final class HorizonRenderer {
             if(group.mesh!=null && frame-group.selectedFrame>120) retire(group);
             double gx=group.x*128.0,gz=group.z*128.0;
             double dx=Math.max(0,Math.abs(camera.pos.x-(gx+64))-64),dz=Math.max(0,Math.abs(camera.pos.z-(gz+64))-64);
-            if(dx*dx+dz*dz>far*far*256.0 || !camera.cullFrustum.isVisible(new AABB(gx,-2048,gz,gx+128,2048,gz+128))) continue;
+            if(group.minY>group.maxY || dx*dx+dz*dz>far*far*256.0
+                    || !camera.cullFrustum.isVisible(new AABB(gx,legacyMeshing?-2048:group.minY,gz,gx+128,legacyMeshing?2048:group.maxY,gz+128))) continue;
             candidates.add(group);
         }
         candidates.sort(Comparator.comparingDouble(g->distance(g,camera)));
         var policy=NativeLodSelection.policy(Minecraft.getInstance().gameRenderer.mainCamera().getFov(),true,
                 MetalCraftConfig.nativeLodReduction(),MetalCraftConfig.nativeQualityDistance());
-        int budget=4,shown=0;
+        boolean missingCoverage=false;
+        if(!legacyMeshing) for(var group:candidates) {
+            long mask=visibleMask(group,cx,cz,near);
+            if(mask!=0 && (group.mesh==null || group.mask!=mask)) { missingCoverage=true;break; }
+        }
+        int budget=4,shown=0; wantedColumns=0;coarseGroups=0;
+        boolean evictedForBudget=false;
         for(var group:candidates) {
-            long mask=0;
-            for(int i=0;i<64;i++) {
-                var column=group.columns[i]; if(column==null) continue;
-                if(Math.abs((long)column.x()-cx)<=near && Math.abs((long)column.z()-cz)<=near) continue;
-                mask|=1L<<i;
-            }
+            long mask=visibleMask(group,cx,cz,near);
             if(mask==0) continue;
+            wantedColumns+=Long.bitCount(mask);
             int cell=NativeShellMesher.grid(Math.max(2,policy.selectSquared(distance(group,camera),group.cell==0?2:group.cell)));
             // Bound even the gentlest reduction setting at very long distances.
             double range=distance(group,camera);
@@ -165,25 +190,61 @@ public final class HorizonRenderer {
             boolean shapeChanged=group.mask!=mask || group.cell!=cell;
             if(group.meshRevision!=group.revision || shapeChanged || group.mesh==null) {
                 // Boundary changes cannot draw stale models over the native handoff area.
-                if(budget>0) {
+                if(budget>0 && legacyMeshing) {
                     var mesh=build(group,mask,cell,camera);
-                    if(bytes+mesh.bytes<=MAX_GPU_BYTES) {
-                        retire(group);group.mesh=mesh; bytes+=mesh.bytes;group.mask=mask;group.cell=cell;group.meshRevision=group.revision;uploads++;
-                    } else {
-                        mesh.close();
-                        // Free off-screen buffers before retrying, respecting in-flight GPU ownership.
-                        for(var old:groups.values()) if(old!=group && old.selectedFrame<frame-1) retire(old);
-                    }
+                    if(bytes+mesh.bytes<=(256L<<20)) {
+                        retire(group);group.mesh=mesh;bytes+=mesh.bytes;group.mask=mask;group.cell=cell;group.meshRevision=group.revision;uploads++;
+                    } else { mesh.close();admissionSkips++; }
                     budget--;
+                } else if(budget>0 && (!missingCoverage || group.mesh==null || group.mask!=mask)) {
+                    int buildCell=missingCoverage?16:cell;
+                    // Estimate before allocating/uploading Metal buffers. Reuse the
+                    // estimate until terrain or shape changes, including on rejection.
+                    if(group.estimateRevision!=group.revision || group.estimateMask!=mask || group.estimateCell!=buildCell) {
+                        group.estimateBytes=estimate(group,mask,buildCell);
+                        group.estimateRevision=group.revision;group.estimateMask=mask;group.estimateCell=buildCell;
+                    }
+                    if(bytes+group.estimateBytes<=gpuBudget) {
+                        var mesh=build(group,mask,buildCell,camera);
+                        retire(group);group.mesh=mesh; bytes+=mesh.bytes;group.mask=mask;group.cell=buildCell;group.meshRevision=group.revision;uploads++;
+                        budget--;
+                    } else {
+                        admissionSkips++;
+                        // Free off-screen buffers before retrying, respecting in-flight GPU ownership.
+                        if(!evictedForBudget) {
+                            for(var old:groups.values()) if(old!=group && old.selectedFrame<frame-1) retire(old);
+                            evictedForBudget=true;
+                        }
+                        // A closed coarse envelope preserves coverage while detail
+                        // waits for residency. Never draw an old native-handoff mask.
+                        if(group.mesh==null || group.mask!=mask) {
+                            long fallbackBytes=estimate(group,mask,16);
+                            if(bytes+fallbackBytes<=gpuBudget) {
+                                var mesh=build(group,mask,16,camera);
+                                retire(group);group.mesh=mesh;bytes+=mesh.bytes;group.mask=mask;group.cell=16;
+                                group.meshRevision=group.revision;uploads++;budget--;
+                            }
+                        }
+                    }
                 }
-                if(shapeChanged && (group.mask!=mask || group.cell!=cell)) continue;
+                if(group.mask!=mask) continue;
             }
             if(group.mesh==null) continue;
+            if(group.cell!=cell) coarseGroups++;
             group.selectedFrame=frame; group.lastUse=current.reserveResourceSubmission(); selected.add(group); shown+=Long.bitCount(group.mask);
             resort(group,camera);
         }
         stats=new Stats(columns.size(),groups.size(),selected.size(),shown,bytes,uploads,draws,
                 NativeHorizon.nativeDistance(Minecraft.getInstance().options.renderDistance().get()),far,HorizonStreamer.stats());
+    }
+    private static long visibleMask(Group group,int cx,int cz,int near) {
+        long mask=0;
+        for(int i=0;i<64;i++) {
+            var column=group.columns[i];if(column==null) continue;
+            if(Math.abs((long)column.x()-cx)<=near && Math.abs((long)column.z()-cz)<=near) continue;
+            mask|=1L<<i;
+        }
+        return mask;
     }
     private static double distance(Group g,CameraRenderState c) { double dx=g.x*128.0+64-c.pos.x,dz=g.z*128.0+64-c.pos.z; return dx*dx+dz*dz; }
     public static boolean covers(long section) {
@@ -237,18 +298,16 @@ public final class HorizonRenderer {
         return new ChunkSectionsToRender(original.textureView(),original.drawGroupsPerLayer(),max,original.chunkSectionInfos());
     }
     private static Mesh build(Group group,long mask,int cell,CameraRenderState camera) {
+        long start=System.nanoTime();meshBuilds++;
         var layers=new ArrayList<Layer>(); long bytes=0;
         try(var solidArena=new ByteBufferBuilder(4096);var waterArena=new ByteBufferBuilder(4096)) {
             var buffers=new BufferBuilder[]{new BufferBuilder(solidArena,PrimitiveTopology.QUADS,ChunkSectionLayer.SOLID.vertexFormat()),
                     new BufferBuilder(waterArena,PrimitiveTopology.QUADS,ChunkSectionLayer.TRANSLUCENT.vertexFormat())};
             int[] vertices={0,0};var water=new WaterVertexMetadata.Builder();float[] shifted=new float[12];
             var lighting=Minecraft.getInstance().level.cardinalLighting();
-            for(int i=0;i<64;i++) {
-                if((mask&(1L<<i))==0) continue;
-                var column=group.columns[i]; int ox=(column.x()-group.x*8)*16,oz=(column.z()-group.z*8)*16;
-                column.emit(cell,(positions,material,axis,sign)-> {
+            emit(group,mask,cell,(positions,material,axis,sign)-> {
                     int layer=material.translucent()?1:0;
-                    for(int v=0;v<4;v++) { shifted[v*3]=positions[v*3]+ox;shifted[v*3+1]=positions[v*3+1];shifted[v*3+2]=positions[v*3+2]+oz; }
+                    System.arraycopy(positions,0,shifted,0,12);
                     if(layer==1 && material.water()) water.putQuad(vertices[layer],shifted,0,0,0);
                     var direction=axis==0?(sign>0?Direction.EAST:Direction.WEST):axis==1?(sign>0?Direction.UP:Direction.DOWN):(sign>0?Direction.SOUTH:Direction.NORTH);
                     float shade=lighting.byFace(direction);int color=material.color();
@@ -256,7 +315,6 @@ public final class HorizonRenderer {
                     for(int v=0;v<4;v++) buffers[layer].addVertex(shifted[v*3],shifted[v*3+1],shifted[v*3+2]).setColor(shaded).setUv(material.u(),material.v()).setLight(material.light());
                     vertices[layer]+=4;
                 });
-            }
             for(int i=0;i<2;i++) {
                 var mesh=buffers[i].build(); if(mesh==null) continue;
                 try(mesh) {
@@ -273,5 +331,32 @@ public final class HorizonRenderer {
             }
             return new Mesh(List.copyOf(layers),bytes,camera);
         } catch(RuntimeException|Error failure) { layers.forEach(Layer::close);throw failure; }
+        finally { meshBuildNanos+=System.nanoTime()-start; }
+    }
+
+    private static long estimate(Group group,long mask,int cell) {
+        long[] vertices={0,0}; boolean[] water={false};
+        HorizonMesher.emit(group.columns,mask,cell,(p,m,a,s)-> {
+            vertices[m.translucent()?1:0]+=4;
+            if(m.translucent() && m.water()) water[0]=true;
+        });
+        // Sorted translucent indices and the complete parallel water sidecar are
+        // charged before GPU allocation, just as in build(). Opaque indices are shared.
+        return vertices[0]*ChunkSectionLayer.SOLID.vertexFormat().getVertexSize()
+                +vertices[1]*(ChunkSectionLayer.TRANSLUCENT.vertexFormat().getVertexSize()+(water[0]?32:0))
+                +(vertices[1]/4*6)*(vertices[1]>=65536?4:2);
+    }
+
+    private static void emit(Group group,long mask,int cell,HorizonColumn.Output output) {
+        if(!legacyMeshing) { HorizonMesher.emit(group.columns,mask,cell,output);return; }
+        float[] shifted=new float[12];
+        for(int i=0;i<64;i++) {
+            if((mask&(1L<<i))==0) continue;
+            int ox=(i%8)*16,oz=(i/8)*16;
+            group.columns[i].emit(cell,(p,m,a,s)-> {
+                for(int v=0;v<4;v++) { shifted[v*3]=p[v*3]+ox;shifted[v*3+1]=p[v*3+1];shifted[v*3+2]=p[v*3+2]+oz; }
+                output.face(shifted,m,a,s);
+            });
+        }
     }
 }

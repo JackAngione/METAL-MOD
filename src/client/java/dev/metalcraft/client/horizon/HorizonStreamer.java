@@ -25,6 +25,7 @@ public final class HorizonStreamer {
     record Completed(long epoch,HorizonSnapshot snapshot) { }
     public record Stats(int tickets,int pendingSnapshots,long columns,long failures,int serverLoadedChunks) { }
     private static final TicketType TICKET=new TicketType(0,TicketType.FLAG_LOADING);
+    private static final int PROCESSORS=Runtime.getRuntime().availableProcessors();
     private static final ExecutorService REQUESTS=Executors.newSingleThreadExecutor(r->{
         var t=new Thread(r,"MetalCraft horizon requests"); t.setDaemon(true); return t;
     });
@@ -93,7 +94,7 @@ public final class HorizonStreamer {
         }
         long deadline=System.nanoTime()+2_000_000L;
         var iterator=jobs.entrySet().iterator();
-        while(iterator.hasNext() && completed.size()<64 && System.nanoTime()<deadline) {
+        while(iterator.hasNext() && completed.size()<HorizonGenerationBudget.MAX_SNAPSHOTS && System.nanoTime()<deadline) {
             var job=iterator.next().getValue(); if(!job.future.isDone()) continue;
             try {
                 var result=job.future.join();
@@ -105,25 +106,29 @@ public final class HorizonStreamer {
                 failures++; com.mojang.logging.LogUtils.getLogger().warn("Horizon sample failed at {}: {}",job.pos,error.toString());
             } finally { job.release(); iterator.remove(); }
         }
-        if(server.isPaused() || completed.size()>=48) { publish(); return; }
+        int limit=HorizonGenerationBudget.jobLimit(PROCESSORS,server.getAverageTickTimeNanos(),completed.size());
+        if(server.isPaused() || jobs.size()>=limit) { publish(); return; }
         ServerLevel level=server.getLevel(next.dimension); if(level==null) { publish(); return; }
         // Coalesce edits per column; retain the old model until its replacement is ready.
         // Leave half the slots for discovery so animated terrain cannot starve the horizon.
         int refreshes=0;
-        for(var edits=dirty.iterator();edits.hasNext() && jobs.size()<16 && refreshes<8;) {
+        for(var edits=dirty.iterator();edits.hasNext() && jobs.size()<limit && refreshes<8;) {
             long key=edits.next(); if(jobs.containsKey(key)) continue;
             edits.remove(); int x=ChunkPos.getX(key),z=ChunkPos.getZ(key);
             if(Math.abs((long)x-next.x)>next.far+2 || Math.abs((long)z-next.z)>next.far+2) continue;
             jobs.put(key,new Job(next,level,new ChunkPos(x,z))); refreshes++;
         }
-        // Sampling and generation stay bounded independently of the requested horizon.
-        for(int scanned=0;!exhausted && jobs.size()<16 && scanned<256;scanned++) {
+        // A deeper window overlaps vanilla generation dependencies while the existing
+        // 2 ms sampling deadline and client intake still bound snapshot/render work.
+        // Ramp up over several ticks instead of submitting the whole window at once.
+        int starts=refreshes;
+        for(int scanned=0;!exhausted && jobs.size()<limit && starts<HorizonGenerationBudget.STARTS_PER_TICK && scanned<256;scanned++) {
             var column=cursor.next(); if(column==null) { exhausted=true; break; }
             long key=ChunkPos.pack(column.x(),column.z());
             if(jobs.containsKey(key) || NativeHorizon.hasColumn(next.epoch,key)) continue;
             var pos=new ChunkPos(column.x(),column.z());
             if(!level.getWorldBorder().isWithinBounds(pos)) continue;
-            jobs.put(key,new Job(next,level,pos));
+            jobs.put(key,new Job(next,level,pos)); starts++;
         }
         publish();
     }

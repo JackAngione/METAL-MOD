@@ -1,0 +1,40 @@
+{
+  "before": {
+    "tickets": 61,
+    "pendingSnapshots": 3,
+    "columns": 3,
+    "failures": 0,
+    "serverLoadedChunks": 2554
+  },
+  "after": {
+    "tickets": 64,
+    "pendingSnapshots": 0,
+    "columns": 677,
+    "failures": 0,
+    "serverLoadedChunks": 3022
+  },
+  "seconds": 9.999749583,
+  "columnsPerSecond": 67.4016878528467,
+  "renderer": {
+    "cachedColumns": 677,
+    "groups": 20,
+    "selectedGroups": 20,
+    "frameColumns": 349,
+    "gpuBytes": 7642432,
+    "uploads": 92,
+    "draws": 295529,
+    "nativeDistance": 23,
+    "horizon": 128,
+    "streaming": {
+      "tickets": 64,
+      "pendingSnapshots": 0,
+      "columns": 677,
+      "failures": 0,
+      "serverLoadedChunks": 3022
+    }
+  },
+  "averageServerTickMs": 2.711807,
+  "peakTickets": 64,
+  "peakSnapshots": 35,
+  "peakServerLoadedChunks": 3218
+}

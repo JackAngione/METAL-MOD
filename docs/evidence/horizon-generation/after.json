@@ -1,0 +1,40 @@
+{
+  "before": {
+    "tickets": 63,
+    "pendingSnapshots": 1,
+    "columns": 1,
+    "failures": 0,
+    "serverLoadedChunks": 2554
+  },
+  "after": {
+    "tickets": 35,
+    "pendingSnapshots": 29,
+    "columns": 721,
+    "failures": 0,
+    "serverLoadedChunks": 3057
+  },
+  "seconds": 10.000149875,
+  "columnsPerSecond": 71.99892091617276,
+  "renderer": {
+    "cachedColumns": 692,
+    "groups": 20,
+    "selectedGroups": 20,
+    "frameColumns": 364,
+    "gpuBytes": 7739928,
+    "uploads": 90,
+    "draws": 322109,
+    "nativeDistance": 23,
+    "horizon": 128,
+    "streaming": {
+      "tickets": 35,
+      "pendingSnapshots": 29,
+      "columns": 721,
+      "failures": 0,
+      "serverLoadedChunks": 3057
+    }
+  },
+  "averageServerTickMs": 2.052999,
+  "pausedCancellationAndResume": true,
+  "passed": true,
+  "world": "NORMAL / metalcraft / 128 render / 16 simulation / Metal"
+}

@@ -41,6 +41,7 @@ changes to the geometry adapter, bindings, manifest, or native bridge need one o
 
 | Done | ID | Deliverable | Depends on | Owner | Status | Evidence / next action |
 | --- | --- | --- | --- | --- | --- | --- |
+| [x] | WL2 | Lossless compact-horizon mesh reduction and residency | WL | /root | done | September 23: HorizonMesher merges equal coplanar surfaces and covered group-internal walls; water quads stay ≤16 blocks and retain two-sided normals/identity, fractional heights, tint/light and masked/native boundaries. Randomized oriented-area/material and cross-column union checks plus water sidecar checks pass. Full Metal build passes; NORMAL 64/16 detail-5 Standard route passes full coverage, stable buffers and camera reversal; both water-bearing screenshots inspected. Diagnostic legacy/fixed phases: 22.01→107.66 FPS, fixed F3 109. Evidence: evidence/horizon-detail/README.md. Shader effects unchanged; W8 broader release qualification remains open. |
 | [x] | WL | Distant water shell geometry | W1, W3, W7 | /root | done | September 21: direct fluid shells and detached horizon water implemented. Full Metal build passes; 20.24-second section route reduces pond 2,700 → 480 indices and restores native water exactly. Final 28.29-second NORMAL 128/16 route passes model-only water, edit/handoff/lifecycle checks; None, Standard, falling-water and native underwater images inspected. Fractional closure and metadata covered by geometry checks. See evidence/fluid-shell and evidence/compact-horizon. |
 | [x] | W1 | Water identity and composition design | — | /root | done | 2026-09-05: mapped fluid/sorting/composition audit, chosen forward/metadata/depth/blend contracts, and live water-only diagnostic verified. Build and Metal lifecycle pass; see W1 completion evidence below for files, commands and captures. |
 | [x] | W2 | HDR composition prerequisite | W1 | grok | done | 2026-09-06: live HDR session ungated. First-time LINEAR native stand-ins no longer poison the open session; geometry is selected before beginLinearWorld; fog clears of RGBA16_FLOAT decode through SceneColor. Standard-world water identity, linear exposure/HUD, GPU HDR>1, and sRGB layer display checks pass. See W2 completion evidence. |
@@ -2579,3 +2580,9 @@ zero upload failures and zero charged GPU bytes after close. Command above witho
 validation. Final merged artifacts and inspected images:
 `docs/evidence/lod/horizon-water-merged/`. P7 composition compatibility is complete;
 W8's broader release performance matrix remains open.
+
+September 23 screenshot follow-up (/root): native quality and water detail distances
+set to 16; same NORMAL/Metal 64-chunk detail-5 view captured with F3. Standard active
+and error-free at capture, water option asserted 16, image inspected. Evidence:
+`evidence/horizon-detail/native16-water16-f3.png` and `native16-water16.json`.
+Settings-only verification; W8 remains open.

@@ -4,6 +4,8 @@ This is a Minecraft mod which the entire purpose is to maximally optimize Minecr
 
 # Agent instructions
 - Use a standard world to test, NOT a flat world.
+- Never commit screenshots. Keep captures local and ignored by Git; do not force-add them as validation evidence.
+- Commit image files used as actual game assets (textures, sprites, UI art, etc.). Scope screenshot ignore rules to capture locations; never ignore image extensions globally or exclude game resource directories.
 - When following plans, mark off the tasks as you complete them.
 
 

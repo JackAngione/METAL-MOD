@@ -1,5 +1,63 @@
 # Native terrain surface LOD
 
+## Maximum-detail coverage and frame cost — September 23
+
+Owner: /root. Status: implemented and validated. The 64-chunk detail-5 capture reached the
+256 MiB GPU ceiling with only 711 displayed columns; rejected meshes were rebuilt
+and uploaded every frame. Preserve one-block samples and material/light boundaries.
+
+- [x] Trace incomplete coverage and per-frame allocation churn to mesh expansion
+  and repeated GPU admission failures.
+- [x] Merge equivalent envelope faces and remove covered group-internal walls,
+  preserving fluid identity, winding, lighting, native handoff and surface detail.
+  Randomized oriented-area/material comparisons and masked cross-column union
+  fixtures pass. Use actual terrain-height bounds for conservative frustum culling.
+- [x] Bound mesh admission/retries and preserve visible coverage under pressure.
+  Cache exact byte estimates before GPU allocation; retain coarse coverage while
+  refining; charge retired buffers until their last Metal submission completes.
+  Scale the bounded residency allowance with Metal's recommended working set.
+- [x] Validate geometry equivalence, build/Metal checks, and the same NORMAL
+  64-chunk detail-5/F3 scene with full coverage, stable buffers and measured FPS.
+
+First live iteration: 256 MiB still cannot hold all maximum-detail geometry after
+lossless merging. Coverage fallback works, but the full-detail acceptance gate
+correctly fails (57 coarse groups). Scaling residency to 1/16 of Metal's recommended
+working set, bounded to 128 MiB–1 GiB, passed the final validation below. Rejected evidence is
+retained in `evidence/horizon-detail/256mib-rejected.json`.
+
+Final validation: `./gradlew build --offline` passes in 23s. The same-world
+NORMAL 64/16, detail 5, 1920×1080 Standard/Metal route passes: 11,840 cached
+columns, all 4,981 visible candidates at full requested detail, zero stationary
+mesh rebuilds/uploads, and all 4,819 candidates covered at full detail after a
+camera reversal. Diagnostic legacy/fixed phases average 22.01/107.66 FPS; median
+CPU frame time drops 43.87→8.72 ms. The inspected fixed F3 capture shows 109 FPS.
+Residency is 764 MiB under this device's bounded 1 GiB allowance. No reduction in
+one-block sample detail was used. [Metrics, limits and screenshots](evidence/horizon-detail/README.md).
+
+## Distant generation throughput — September 23
+
+Owner: /root. Status: implemented and validated. Preserve vanilla FULL generation and detached
+snapshot contents while improving bounded scheduling on the active compact horizon.
+
+- [x] Measure a short fresh NORMAL-world baseline at 128/16 on Default/Metal.
+  Original 16-request window: 409 sampled columns in 10.00 seconds (40.90/s),
+  zero failures, 3.67 ms mean server tick at the end of the measurement.
+- [x] Improve generation admission without changing terrain, lighting, or mesh output;
+  retain queue limits, paused cancellation, edit refresh and world teardown.
+- [x] Run focused scheduling checks, the Metal build, and the same short live route;
+  record throughput, server pressure, ownership bounds and remaining limits.
+
+The active compact streamer now allows 16–64 requests based on CPU count, admits
+at most 16 per tick, and backs off under server/client pressure. The 2 ms capture
+deadline, FULL chunk generation and snapshot/mesh contents are unchanged. A full
+Metal build passes. Two successful fresh NORMAL 128/16 runs completed 72.00 and
+70.10 columns/s versus 40.90/s before; the final route also verifies detached
+terrain outside client delivery, no simulation, edit refresh, paused cancellation,
+resume and close. Peak ownership was 64 tickets and 27 queued snapshots. More
+server chunks remain resident while the wider window works; this is an early
+horizon-population measurement, not a complete 128-radius fill or pure worldgen
+benchmark. [Raw results, commands and limits](evidence/horizon-generation/README.md).
+
 ## Adjustable distant model detail — September 23
 
 Owner: /root. Status: implemented and validated. The active detached horizon has a

@@ -1,0 +1,22 @@
+{
+  "screenshotSettings": "NORMAL / metalcraft / 64 render / 16 simulation / detail 5 / Standard / Metal / F3",
+  "renderer": {
+    "cachedColumns": 11840,
+    "groups": 220,
+    "selectedGroups": 24,
+    "frameColumns": 711,
+    "gpuBytes": 259502416,
+    "uploads": 708,
+    "draws": 349008,
+    "nativeDistance": 23,
+    "horizon": 64,
+    "streaming": {
+      "tickets": 0,
+      "pendingSnapshots": 0,
+      "columns": 12046,
+      "failures": 0,
+      "serverLoadedChunks": 5329
+    }
+  },
+  "fps": 36
+}

@@ -1,0 +1,1889 @@
+{
+  "legacy": {
+    "frames": {
+      "name": "legacy-expanded-mesh",
+      "frames": 81,
+      "durationSeconds": 4.100811875,
+      "averageFps": 19.75218626677431,
+      "onePercentLowFps": 15.565363256353688,
+      "pointOnePercentLowFps": 15.565363256353688,
+      "p50CpuMs": 48.79,
+      "p95CpuMs": 55.285959,
+      "p99CpuMs": 63.261833,
+      "p50IntervalMs": 49.7305,
+      "p99IntervalMs": 64.245208,
+      "worstIntervalMs": 64.245208,
+      "p50AcquireMs": 0.393583,
+      "p99AcquireMs": 0.465791,
+      "p50OutsideLoopMs": 0.043833,
+      "p99OutsideLoopMs": 0.103625,
+      "phaseStalls": [
+        {
+          "source": "RENDER_FRAME",
+          "totalMs": 4059.804621,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "GPU_FRAME",
+          "totalMs": 704.802414,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "UPLOAD_COPY",
+          "totalMs": 84.658637,
+          "count": 1134,
+          "bytes": 4079194344
+        },
+        {
+          "source": "BUFFER_CREATE",
+          "totalMs": 73.178896,
+          "count": 39042,
+          "bytes": 4083465312
+        },
+        {
+          "source": "BUFFER_MAP",
+          "totalMs": 44.697354,
+          "count": 290870,
+          "bytes": 106472784
+        },
+        {
+          "source": "COMMAND_BATCH",
+          "totalMs": 37.416661,
+          "count": 243,
+          "bytes": 31764960
+        },
+        {
+          "source": "ACQUIRE",
+          "totalMs": 31.946662,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "JVM_GC",
+          "totalMs": 28.0,
+          "count": 9,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_TICK",
+          "totalMs": 22.810126,
+          "count": 80,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_POST_TASKS",
+          "totalMs": 10.209836,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_TASKS",
+          "totalMs": 2.469084,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_POST_RENDER",
+          "totalMs": 1.29942,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "RESOURCE_RELEASE",
+          "totalMs": 1.29621,
+          "count": 39042,
+          "bytes": 4083465312
+        },
+        {
+          "source": "SUBMIT",
+          "totalMs": 1.066624,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_PACKETS",
+          "totalMs": 0.620498,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "LEVEL_END_FRAME",
+          "totalMs": 0.562831,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "HARNESS_HANDOFF",
+          "totalMs": 0.493462,
+          "count": 89,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_PRE_FRAME",
+          "totalMs": 0.30958,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_PRE_RENDER",
+          "totalMs": 0.296873,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_GIZMOS",
+          "totalMs": 0.173293,
+          "count": 80,
+          "bytes": 0
+        },
+        {
+          "source": "ARENA_WAIT",
+          "totalMs": 0.16025,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "PRESENT",
+          "totalMs": 0.067963,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "TASK_DRAIN",
+          "totalMs": 0.010627,
+          "count": 81,
+          "bytes": 0
+        },
+        {
+          "source": "RENDER_PASS_MERGE",
+          "totalMs": 0.0,
+          "count": 81,
+          "bytes": 0
+        }
+      ],
+      "tailStalls": [
+        {
+          "source": "RENDER_FRAME",
+          "totalMs": 63.718208,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "JVM_GC",
+          "totalMs": 9.0,
+          "count": 2,
+          "bytes": 0
+        },
+        {
+          "source": "GPU_FRAME",
+          "totalMs": 7.976625,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "UPLOAD_COPY",
+          "totalMs": 1.2155,
+          "count": 14,
+          "bytes": 50360424
+        },
+        {
+          "source": "BUFFER_CREATE",
+          "totalMs": 1.064004,
+          "count": 482,
+          "bytes": 50413152
+        },
+        {
+          "source": "BUFFER_MAP",
+          "totalMs": 0.618731,
+          "count": 3591,
+          "bytes": 1314480
+        },
+        {
+          "source": "COMMAND_BATCH",
+          "totalMs": 0.480334,
+          "count": 3,
+          "bytes": 392160
+        },
+        {
+          "source": "ACQUIRE",
+          "totalMs": 0.399375,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_TICK",
+          "totalMs": 0.285625,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_POST_TASKS",
+          "totalMs": 0.131083,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "RESOURCE_RELEASE",
+          "totalMs": 0.031256,
+          "count": 482,
+          "bytes": 50413152
+        },
+        {
+          "source": "CLIENT_TASKS",
+          "totalMs": 0.020083,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_PACKETS",
+          "totalMs": 0.0195,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_POST_RENDER",
+          "totalMs": 0.018709,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "SUBMIT",
+          "totalMs": 0.017375,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "LEVEL_END_FRAME",
+          "totalMs": 0.007917,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "HARNESS_HANDOFF",
+          "totalMs": 0.00525,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_PRE_FRAME",
+          "totalMs": 0.005042,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_PRE_RENDER",
+          "totalMs": 0.004459,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "CLIENT_GIZMOS",
+          "totalMs": 0.00225,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "PRESENT",
+          "totalMs": 0.001958,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "ARENA_WAIT",
+          "totalMs": 0.001875,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "TASK_DRAIN",
+          "totalMs": 1.25E-4,
+          "count": 1,
+          "bytes": 0
+        },
+        {
+          "source": "RENDER_PASS_MERGE",
+          "totalMs": 0.0,
+          "count": 1,
+          "bytes": 0
+        }
+      ],
+      "worstFrames": [
+        {
+          "index": 16,
+          "intervalMs": 64.245208,
+          "cpuMs": 63.261833,
+          "outsideLoopMs": 0.051708,
+          "stalls": [
+            {
+              "source": "RENDER_FRAME",
+              "totalMs": 63.718208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "JVM_GC",
+              "totalMs": 9.0,
+              "count": 2,
+              "bytes": 0
+            },
+            {
+              "source": "GPU_FRAME",
+              "totalMs": 7.976625,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "UPLOAD_COPY",
+              "totalMs": 1.2155,
+              "count": 14,
+              "bytes": 50360424
+            },
+            {
+              "source": "BUFFER_CREATE",
+              "totalMs": 1.064004,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "BUFFER_MAP",
+              "totalMs": 0.618731,
+              "count": 3591,
+              "bytes": 1314480
+            },
+            {
+              "source": "COMMAND_BATCH",
+              "totalMs": 0.480334,
+              "count": 3,
+              "bytes": 392160
+            },
+            {
+              "source": "ACQUIRE",
+              "totalMs": 0.399375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TICK",
+              "totalMs": 0.285625,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_TASKS",
+              "totalMs": 0.131083,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RESOURCE_RELEASE",
+              "totalMs": 0.031256,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "CLIENT_TASKS",
+              "totalMs": 0.020083,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PACKETS",
+              "totalMs": 0.0195,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_RENDER",
+              "totalMs": 0.018709,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "SUBMIT",
+              "totalMs": 0.017375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "LEVEL_END_FRAME",
+              "totalMs": 0.007917,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "HARNESS_HANDOFF",
+              "totalMs": 0.00525,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_FRAME",
+              "totalMs": 0.005042,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_RENDER",
+              "totalMs": 0.004459,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_GIZMOS",
+              "totalMs": 0.00225,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "PRESENT",
+              "totalMs": 0.001958,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ARENA_WAIT",
+              "totalMs": 0.001875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "TASK_DRAIN",
+              "totalMs": 1.25E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RENDER_PASS_MERGE",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "intervalMs": 57.738166,
+          "cpuMs": 56.863041,
+          "outsideLoopMs": 0.042333,
+          "stalls": [
+            {
+              "source": "RENDER_FRAME",
+              "totalMs": 57.290917,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "GPU_FRAME",
+              "totalMs": 9.178374,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "JVM_GC",
+              "totalMs": 7.0,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "UPLOAD_COPY",
+              "totalMs": 1.058123,
+              "count": 14,
+              "bytes": 50360424
+            },
+            {
+              "source": "BUFFER_CREATE",
+              "totalMs": 0.891705,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "BUFFER_MAP",
+              "totalMs": 0.520368,
+              "count": 3591,
+              "bytes": 1314480
+            },
+            {
+              "source": "COMMAND_BATCH",
+              "totalMs": 0.511167,
+              "count": 3,
+              "bytes": 392160
+            },
+            {
+              "source": "ACQUIRE",
+              "totalMs": 0.383917,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TICK",
+              "totalMs": 0.247875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_TASKS",
+              "totalMs": 0.10375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TASKS",
+              "totalMs": 0.031292,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_RENDER",
+              "totalMs": 0.016208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RESOURCE_RELEASE",
+              "totalMs": 0.015291,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "SUBMIT",
+              "totalMs": 0.013375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PACKETS",
+              "totalMs": 0.013041,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "LEVEL_END_FRAME",
+              "totalMs": 0.006833,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "HARNESS_HANDOFF",
+              "totalMs": 0.005417,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_FRAME",
+              "totalMs": 0.002166,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_RENDER",
+              "totalMs": 0.00175,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ARENA_WAIT",
+              "totalMs": 0.001208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_GIZMOS",
+              "totalMs": 9.17E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "PRESENT",
+              "totalMs": 7.5E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "TASK_DRAIN",
+              "totalMs": 1.66E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RENDER_PASS_MERGE",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            }
+          ]
+        },
+        {
+          "index": 64,
+          "intervalMs": 57.318166,
+          "cpuMs": 56.408042,
+          "outsideLoopMs": 0.043791,
+          "stalls": [
+            {
+              "source": "RENDER_FRAME",
+              "totalMs": 56.848208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "GPU_FRAME",
+              "totalMs": 7.328458,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "JVM_GC",
+              "totalMs": 3.0,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "UPLOAD_COPY",
+              "totalMs": 1.214167,
+              "count": 14,
+              "bytes": 50360424
+            },
+            {
+              "source": "BUFFER_CREATE",
+              "totalMs": 1.026162,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "COMMAND_BATCH",
+              "totalMs": 0.615334,
+              "count": 3,
+              "bytes": 392160
+            },
+            {
+              "source": "BUFFER_MAP",
+              "totalMs": 0.596266,
+              "count": 3591,
+              "bytes": 1314480
+            },
+            {
+              "source": "ACQUIRE",
+              "totalMs": 0.391,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TICK",
+              "totalMs": 0.274167,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_TASKS",
+              "totalMs": 0.105958,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TASKS",
+              "totalMs": 0.027875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RESOURCE_RELEASE",
+              "totalMs": 0.017947,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "CLIENT_POST_RENDER",
+              "totalMs": 0.01375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "SUBMIT",
+              "totalMs": 0.013666,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "LEVEL_END_FRAME",
+              "totalMs": 0.006666,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "HARNESS_HANDOFF",
+              "totalMs": 0.006375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PACKETS",
+              "totalMs": 0.006167,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_FRAME",
+              "totalMs": 0.003375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "PRESENT",
+              "totalMs": 0.001709,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_RENDER",
+              "totalMs": 0.001667,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ARENA_WAIT",
+              "totalMs": 0.00125,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_GIZMOS",
+              "totalMs": 0.001,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "TASK_DRAIN",
+              "totalMs": 4.2E-5,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RENDER_PASS_MERGE",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            }
+          ]
+        },
+        {
+          "index": 19,
+          "intervalMs": 56.739542,
+          "cpuMs": 55.816458,
+          "outsideLoopMs": 0.045875,
+          "stalls": [
+            {
+              "source": "RENDER_FRAME",
+              "totalMs": 56.259208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "GPU_FRAME",
+              "totalMs": 7.3065,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "JVM_GC",
+              "totalMs": 3.0,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "UPLOAD_COPY",
+              "totalMs": 1.161164,
+              "count": 14,
+              "bytes": 50360424
+            },
+            {
+              "source": "BUFFER_CREATE",
+              "totalMs": 1.031621,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "BUFFER_MAP",
+              "totalMs": 0.587158,
+              "count": 3591,
+              "bytes": 1314480
+            },
+            {
+              "source": "COMMAND_BATCH",
+              "totalMs": 0.474416,
+              "count": 3,
+              "bytes": 392160
+            },
+            {
+              "source": "ACQUIRE",
+              "totalMs": 0.394041,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TICK",
+              "totalMs": 0.259792,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_TASKS",
+              "totalMs": 0.11275,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TASKS",
+              "totalMs": 0.032708,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RESOURCE_RELEASE",
+              "totalMs": 0.016754,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "CLIENT_POST_RENDER",
+              "totalMs": 0.015458,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "SUBMIT",
+              "totalMs": 0.013958,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PACKETS",
+              "totalMs": 0.008834,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "HARNESS_HANDOFF",
+              "totalMs": 0.007542,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "LEVEL_END_FRAME",
+              "totalMs": 0.005625,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_FRAME",
+              "totalMs": 0.005292,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_RENDER",
+              "totalMs": 0.004583,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_GIZMOS",
+              "totalMs": 0.002416,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ARENA_WAIT",
+              "totalMs": 0.001958,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "PRESENT",
+              "totalMs": 0.001792,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "TASK_DRAIN",
+              "totalMs": 1.67E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RENDER_PASS_MERGE",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            }
+          ]
+        },
+        {
+          "index": 61,
+          "intervalMs": 56.223375,
+          "cpuMs": 55.285959,
+          "outsideLoopMs": 0.042125,
+          "stalls": [
+            {
+              "source": "RENDER_FRAME",
+              "totalMs": 55.743959,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "GPU_FRAME",
+              "totalMs": 9.842,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "JVM_GC",
+              "totalMs": 2.0,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "UPLOAD_COPY",
+              "totalMs": 1.199585,
+              "count": 14,
+              "bytes": 50360424
+            },
+            {
+              "source": "BUFFER_CREATE",
+              "totalMs": 1.046791,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "BUFFER_MAP",
+              "totalMs": 0.620601,
+              "count": 3591,
+              "bytes": 1314480
+            },
+            {
+              "source": "COMMAND_BATCH",
+              "totalMs": 0.484208,
+              "count": 3,
+              "bytes": 392160
+            },
+            {
+              "source": "ACQUIRE",
+              "totalMs": 0.400042,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TICK",
+              "totalMs": 0.261625,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_TASKS",
+              "totalMs": 0.127083,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TASKS",
+              "totalMs": 0.032208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RESOURCE_RELEASE",
+              "totalMs": 0.027793,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "SUBMIT",
+              "totalMs": 0.0195,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_RENDER",
+              "totalMs": 0.014917,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PACKETS",
+              "totalMs": 0.006584,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "LEVEL_END_FRAME",
+              "totalMs": 0.006291,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "HARNESS_HANDOFF",
+              "totalMs": 0.005209,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ARENA_WAIT",
+              "totalMs": 0.003,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "PRESENT",
+              "totalMs": 0.001917,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_FRAME",
+              "totalMs": 0.001791,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_RENDER",
+              "totalMs": 0.001708,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_GIZMOS",
+              "totalMs": 7.09E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "TASK_DRAIN",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RENDER_PASS_MERGE",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            }
+          ]
+        },
+        {
+          "index": 38,
+          "intervalMs": 55.447375,
+          "cpuMs": 54.508791,
+          "outsideLoopMs": 0.043833,
+          "stalls": [
+            {
+              "source": "RENDER_FRAME",
+              "totalMs": 54.947833,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "GPU_FRAME",
+              "totalMs": 7.904958,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "JVM_GC",
+              "totalMs": 4.0,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "UPLOAD_COPY",
+              "totalMs": 1.072332,
+              "count": 14,
+              "bytes": 50360424
+            },
+            {
+              "source": "BUFFER_CREATE",
+              "totalMs": 0.889131,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "BUFFER_MAP",
+              "totalMs": 0.544131,
+              "count": 3591,
+              "bytes": 1314480
+            },
+            {
+              "source": "COMMAND_BATCH",
+              "totalMs": 0.434208,
+              "count": 3,
+              "bytes": 392160
+            },
+            {
+              "source": "ACQUIRE",
+              "totalMs": 0.390583,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TICK",
+              "totalMs": 0.278625,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_TASKS",
+              "totalMs": 0.141375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TASKS",
+              "totalMs": 0.026709,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RESOURCE_RELEASE",
+              "totalMs": 0.016169,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "CLIENT_POST_RENDER",
+              "totalMs": 0.014791,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "SUBMIT",
+              "totalMs": 0.012875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "LEVEL_END_FRAME",
+              "totalMs": 0.008375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "HARNESS_HANDOFF",
+              "totalMs": 0.005208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_FRAME",
+              "totalMs": 0.001875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_RENDER",
+              "totalMs": 0.0015,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_GIZMOS",
+              "totalMs": 0.001083,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ARENA_WAIT",
+              "totalMs": 9.17E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "PRESENT",
+              "totalMs": 7.08E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PACKETS",
+              "totalMs": 3.75E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "TASK_DRAIN",
+              "totalMs": 1.25E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RENDER_PASS_MERGE",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            }
+          ]
+        },
+        {
+          "index": 65,
+          "intervalMs": 54.475042,
+          "cpuMs": 53.306833,
+          "outsideLoopMs": 0.045834,
+          "stalls": [
+            {
+              "source": "RENDER_FRAME",
+              "totalMs": 53.770375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "GPU_FRAME",
+              "totalMs": 7.716875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "UPLOAD_COPY",
+              "totalMs": 1.250668,
+              "count": 14,
+              "bytes": 50360424
+            },
+            {
+              "source": "BUFFER_CREATE",
+              "totalMs": 1.099529,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "BUFFER_MAP",
+              "totalMs": 0.575012,
+              "count": 3591,
+              "bytes": 1314480
+            },
+            {
+              "source": "COMMAND_BATCH",
+              "totalMs": 0.497208,
+              "count": 3,
+              "bytes": 392160
+            },
+            {
+              "source": "CLIENT_TICK",
+              "totalMs": 0.445208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ACQUIRE",
+              "totalMs": 0.402958,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_TASKS",
+              "totalMs": 0.150875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TASKS",
+              "totalMs": 0.0305,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "SUBMIT",
+              "totalMs": 0.018417,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RESOURCE_RELEASE",
+              "totalMs": 0.016456,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "CLIENT_POST_RENDER",
+              "totalMs": 0.015333,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PACKETS",
+              "totalMs": 0.014292,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "LEVEL_END_FRAME",
+              "totalMs": 0.00775,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "HARNESS_HANDOFF",
+              "totalMs": 0.006208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_RENDER",
+              "totalMs": 0.004542,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_FRAME",
+              "totalMs": 0.004208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ARENA_WAIT",
+              "totalMs": 0.0025,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_GIZMOS",
+              "totalMs": 0.001625,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "PRESENT",
+              "totalMs": 0.001,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "TASK_DRAIN",
+              "totalMs": 1.25E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RENDER_PASS_MERGE",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "JVM_GC",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            }
+          ]
+        },
+        {
+          "index": 62,
+          "intervalMs": 54.173084,
+          "cpuMs": 52.885083,
+          "outsideLoopMs": 0.054334,
+          "stalls": [
+            {
+              "source": "RENDER_FRAME",
+              "totalMs": 53.394625,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "GPU_FRAME",
+              "totalMs": 11.212749,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "UPLOAD_COPY",
+              "totalMs": 1.252208,
+              "count": 14,
+              "bytes": 50360424
+            },
+            {
+              "source": "BUFFER_CREATE",
+              "totalMs": 1.002675,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "BUFFER_MAP",
+              "totalMs": 0.607606,
+              "count": 3591,
+              "bytes": 1314480
+            },
+            {
+              "source": "CLIENT_TICK",
+              "totalMs": 0.481166,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "COMMAND_BATCH",
+              "totalMs": 0.458166,
+              "count": 3,
+              "bytes": 392160
+            },
+            {
+              "source": "ACQUIRE",
+              "totalMs": 0.443208,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_TASKS",
+              "totalMs": 0.133584,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_TASKS",
+              "totalMs": 0.061291,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RESOURCE_RELEASE",
+              "totalMs": 0.02855,
+              "count": 482,
+              "bytes": 50413152
+            },
+            {
+              "source": "CLIENT_PACKETS",
+              "totalMs": 0.023875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "SUBMIT",
+              "totalMs": 0.017417,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_POST_RENDER",
+              "totalMs": 0.016541,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_RENDER",
+              "totalMs": 0.009375,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "HARNESS_HANDOFF",
+              "totalMs": 0.007,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "LEVEL_END_FRAME",
+              "totalMs": 0.00625,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_PRE_FRAME",
+              "totalMs": 0.004875,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "ARENA_WAIT",
+              "totalMs": 0.002333,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "CLIENT_GIZMOS",
+              "totalMs": 0.001959,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "PRESENT",
+              "totalMs": 0.001292,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "TASK_DRAIN",
+              "totalMs": 1.25E-4,
+              "count": 1,
+              "bytes": 0
+            },
+            {
+              "source": "RENDER_PASS_MERGE",
+              "totalMs": 0.0,
+              "count": 1,
+              "bytes": 0
+            }
+          ]
+        }
+      ],
+      "taskKinds": [
+        {
+          "name": "total",
+          "totalMs": 0.0,
+          "count": 0,
+          "timed": true
+        }
+      ],
+      "passKinds": [
+        {
+          "name": "sumOfSpans",
+          "totalMs": 1612.329039,
+          "count": 1347
+        },
+        {
+          "name": "MetalCraft shader: shadow_terrain",
+          "totalMs": 344.947294,
+          "count": 100
+        },
+        {
+          "name": "Section layers for translucent",
+          "totalMs": 334.988249,
+          "count": 100
+        },
+        {
+          "name": "Section layers for opaque",
+          "totalMs": 261.628253,
+          "count": 100
+        },
+        {
+          "name": "3d crosshair",
+          "totalMs": 238.074412,
+          "count": 100
+        },
+        {
+          "name": "MetalCraft shader: grade",
+          "totalMs": 234.853332,
+          "count": 100
+        },
+        {
+          "name": "(depth clear)",
+          "totalMs": 137.845828,
+          "count": 200
+        },
+        {
+          "name": "MetalCraft sky: sun and moon",
+          "totalMs": 35.218046,
+          "count": 100
+        },
+        {
+          "name": "MetalCraft sky: atmosphere",
+          "totalMs": 16.689084,
+          "count": 100
+        },
+        {
+          "name": "GUI before blur",
+          "totalMs": 3.886832,
+          "count": 100
+        },
+        {
+          "name": "Animate minecraft:textures/atlas/blocks.png",
+          "totalMs": 1.580752,
+          "count": 99
+        },
+        {
+          "name": "Animate minecraft:textures/atlas/particles.png",
+          "totalMs": 1.03883,
+          "count": 99
+        },
+        {
+          "name": "Update light",
+          "totalMs": 1.011749,
+          "count": 99
+        }
+      ],
+      "lod": {
+        "start": {
+          "uploads": 0,
+          "uploadedBytes": 0,
+          "draws": 0,
+          "originalTriangles": 0,
+          "replacementTriangles": 0,
+          "staleFallbacks": 0,
+          "uploadFailures": 0,
+          "chargedBytes": 0,
+          "residentMeshes": 0,
+          "retiredMeshes": 0,
+          "frameUploadBytes": 0,
+          "prepareNanos": 0,
+          "frameSelected": 0,
+          "tier1Draws": 0,
+          "tier2Draws": 0,
+          "tier3Draws": 0,
+          "tier4Draws": 0,
+          "shadowDraws": 0,
+          "shadowOriginalTriangles": 0,
+          "shadowReplacementTriangles": 0,
+          "terrainDraws": 0,
+          "terrainInputTriangles": 0,
+          "terrainRenderedTriangles": 0,
+          "distantDraws": 0,
+          "distantInputTriangles": 0,
+          "distantRenderedTriangles": 0
+        },
+        "end": {
+          "uploads": 0,
+          "uploadedBytes": 0,
+          "draws": 0,
+          "originalTriangles": 0,
+          "replacementTriangles": 0,
+          "staleFallbacks": 0,
+          "uploadFailures": 0,
+          "chargedBytes": 0,
+          "residentMeshes": 0,
+          "retiredMeshes": 0,
+          "frameUploadBytes": 0,
+          "prepareNanos": 0,
+          "frameSelected": 0,
+          "tier1Draws": 0,
+          "tier2Draws": 0,
+          "tier3Draws": 0,
+          "tier4Draws": 0,
+          "shadowDraws": 0,
+          "shadowOriginalTriangles": 0,
+          "shadowReplacementTriangles": 0,
+          "terrainDraws": 0,
+          "terrainInputTriangles": 0,
+          "terrainRenderedTriangles": 0,
+          "distantDraws": 0,
+          "distantInputTriangles": 0,
+          "distantRenderedTriangles": 0
+        },
+        "p50PrepareMs": 0.0,
+        "p95PrepareMs": 0.0,
+        "p99PrepareMs": 0.0
+      },
+      "gpuFrame": {
+        "begunFrames": 82,
+        "pendingFrames": 2,
+        "invalidFrames": 0,
+        "emptyFrames": 0,
+        "overflowFrames": 0,
+        "samplesMs": [
+          7.434791,
+          6.754709,
+          6.708916,
+          7.229375,
+          7.207125,
+          9.357666,
+          8.138666,
+          7.68775,
+          7.443,
+          7.505875,
+          8.38975,
+          9.747334,
+          12.132,
+          7.104875,
+          7.979875,
+          7.976625,
+          10.99825,
+          11.924584,
+          7.3065,
+          7.790709,
+          7.489459,
+          7.628375,
+          8.818791,
+          11.243291,
+          7.332875,
+          8.043875,
+          8.268416,
+          10.08625,
+          12.0725,
+          10.013125,
+          7.370875,
+          7.599625,
+          7.453,
+          7.653709,
+          7.643834,
+          8.326291,
+          8.071625,
+          7.904959,
+          7.150166,
+          7.371375,
+          7.866541,
+          9.309875,
+          11.5505,
+          7.5275,
+          7.7175,
+          7.999584,
+          10.024541,
+          9.851125,
+          7.08375,
+          7.60625,
+          7.632291,
+          7.42075,
+          9.044541,
+          9.95325,
+          11.199375,
+          11.635375,
+          10.4695,
+          11.404209,
+          9.433791,
+          9.178375,
+          9.842,
+          11.21275,
+          11.694834,
+          7.328459,
+          7.716875,
+          7.378125,
+          7.73275,
+          8.684709,
+          11.053625,
+          12.232791,
+          6.608375,
+          7.436375,
+          8.28875,
+          10.2865,
+          12.176375,
+          9.841791,
+          6.931541,
+          7.304041,
+          7.54775,
+          7.90025
+        ],
+        "commandBuffers": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "p50Ms": 7.976625,
+        "p95Ms": 11.924584,
+        "p99Ms": 12.232791
+      }
+    },
+    "allocatedMiBPerSecond": 2899.5557350081363,
+    "meshBuilds": 404,
+    "meshBuildMs": 4124.861958,
+    "renderer": {
+      "cachedColumns": 11840,
+      "groups": 220,
+      "selectedGroups": 24,
+      "frameColumns": 736,
+      "gpuBytes": 266524856,
+      "uploads": 2784,
+      "draws": 1324952,
+      "nativeDistance": 23,
+      "horizon": 64,
+      "streaming": {
+        "tickets": 0,
+        "pendingSnapshots": 0,
+        "columns": 12050,
+        "failures": 0,
+        "serverLoadedChunks": 5329
+      }
+    },
+    "diagnostics": {
+      "meshBuilds": 3496,
+      "meshBuildNanos": 11124208911,
+      "admissionSkips": 138459,
+      "wantedColumns": 9399,
+      "coarseGroups": 0
+    }
+  },
+  "lastRenderer": {
+    "cachedColumns": 0,
+    "groups": 0,
+    "selectedGroups": 0,
+    "frameColumns": 0,
+    "gpuBytes": 268393024,
+    "uploads": 2907,
+    "draws": 1923460,
+    "nativeDistance": 0,
+    "horizon": 0,
+    "streaming": {
+      "tickets": 0,
+      "pendingSnapshots": 0,
+      "columns": 12050,
+      "failures": 0,
+      "serverLoadedChunks": 0
+    }
+  },
+  "lastDiagnostics": {
+    "meshBuilds": 3627,
+    "meshBuildNanos": 11379404873,
+    "admissionSkips": 326849,
+    "wantedColumns": 4981,
+    "coarseGroups": 57
+  }
+}

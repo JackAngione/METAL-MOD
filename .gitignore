@@ -48,3 +48,10 @@ xcuserdata/
 
 # Stray nested working copy (not part of this repo)
 MetalMod/
+
+# Local screenshot captures only; game images under src/**/resources stay trackable.
+/screenshots/
+/docs/evidence/**/*.png
+/docs/evidence/**/*.jpg
+/docs/evidence/**/*.jpeg
+/docs/evidence/**/*.webp

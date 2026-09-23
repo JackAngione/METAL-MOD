@@ -78,6 +78,14 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	}
 
 	private void runConfiguredTest(final ClientGameTestContext context) {
+        if(Boolean.getBoolean("metalcraft.horizonDetailTest")) {
+            MetalHorizonDetailGameTest.run(context);
+            return;
+        }
+		if (Boolean.getBoolean("metalcraft.horizonGenerationTest")) {
+            MetalHorizonGenerationGameTest.run(context);
+            return;
+        }
 		if (Boolean.getBoolean("metalcraft.compactHorizonTest")) {
             MetalCompactHorizonGameTest.run(context);
             return;
