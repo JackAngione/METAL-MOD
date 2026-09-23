@@ -165,7 +165,7 @@ contracts when replacing terrain meshes.
 
 ## Settings submenu
 
-Add **Video Settings → MetalCraft Settings → Level of Detail…**, implemented as
+Add **Video Settings → MetalCraft Settings → Terrain & Distance**, implemented as
 `MetalCraftLodOptionsScreen`. Use translated labels, tooltips, a scrollable layout,
 keyboard navigation, Done/back navigation, and Reset to Defaults. Settings belong
 in `metalcraft.json`, independently of the selected shader pack.

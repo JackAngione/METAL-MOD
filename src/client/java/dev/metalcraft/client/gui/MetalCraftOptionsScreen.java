@@ -5,11 +5,12 @@ import dev.metalcraft.api.MetalCraftShaderPackInfo;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.MetalCraftPlatform;
 import dev.metalcraft.client.MetalCraftRenderResolution;
-import dev.metalcraft.client.chunk.NativeLodSelection;
 import dev.metalcraft.client.shader.ShaderPack;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
@@ -27,22 +28,79 @@ import net.minecraft.network.chat.Component;
 /** MetalCraft's renderer settings screen. */
 public final class MetalCraftOptionsScreen extends Screen {
 	private static final Component TITLE = Component.translatable("metalcraft.options.title");
+	private enum Page { HOME, DISPLAY, SHADERS, SHADER_CATEGORY }
+	private final Page page;
+	private final String category;
 	private HeaderAndFooterLayout layout;
 	private final Screen lastScreen;
 	private StringWidget resolutionStatus;
 
 	public MetalCraftOptionsScreen(final Screen lastScreen) {
-		super(TITLE);
+		this(lastScreen, Page.HOME, null);
+	}
+
+	private MetalCraftOptionsScreen(final Screen lastScreen, final Page page, final String category) {
+		super(pageTitle(page, category));
 		this.lastScreen = lastScreen;
+		this.page = page;
+		this.category = category;
+	}
+
+	private static Component pageTitle(final Page page, final String category) {
+		return switch (page) {
+			case HOME -> TITLE;
+			case DISPLAY -> Component.translatable("metalcraft.options.display.title");
+			case SHADERS -> Component.translatable("metalcraft.options.shaders.title");
+			case SHADER_CATEGORY -> categoryLabel(category);
+		};
+	}
+
+	private static Component categoryLabel(final String category) {
+		return switch (category) {
+			case "tonemap" -> Component.translatable("metalcraft.options.shader_category.tonemap");
+			case "shadows" -> Component.translatable("metalcraft.options.shader_category.shadows");
+			case "water" -> Component.translatable("metalcraft.options.shader_category.water");
+			case "debug" -> Component.translatable("metalcraft.options.shader_category.debug");
+			default -> {
+				yield Component.literal(humanize(category));
+			}
+		};
 	}
 
 	@Override
 	protected void init() {
 		this.layout = new HeaderAndFooterLayout(this);
-		this.layout.addTitleHeader(TITLE, this.font);
-
-		LinearLayout contents = LinearLayout.vertical().spacing(12);
+		this.layout.addTitleHeader(this.title, this.font);
+		LinearLayout contents = LinearLayout.vertical().spacing(8);
 		contents.defaultCellSetting().alignHorizontallyCenter();
+		switch (this.page) {
+			case HOME -> this.addHomeControls(contents);
+			case DISPLAY -> this.addDisplayControls(contents);
+			case SHADERS -> this.addShaderPackControls(contents);
+			case SHADER_CATEGORY -> this.addShaderOptions(contents);
+		}
+		ScrollableLayout scrolling = new ScrollableLayout(this.minecraft, contents, Math.max(40, this.height - 70));
+		scrolling.setMinWidth(330);
+		this.layout.addToContents(scrolling, LayoutSettings::alignHorizontallyCenter);
+		this.layout.addToFooter(Button.builder(this.page == Page.HOME ? CommonComponents.GUI_DONE : Component.translatable("gui.back"),
+			button -> this.onClose()).width(200).build());
+		this.layout.visitWidgets(this::addRenderableWidget);
+		this.repositionElements();
+	}
+
+	private void addHomeControls(final LinearLayout contents) {
+		this.addPageButton(contents, "metalcraft.options.display.title", Page.DISPLAY);
+		contents.addChild(Button.builder(Component.translatable("metalcraft.options.terrain.title"),
+			button -> this.minecraft.gui.setScreen(new MetalCraftLodOptionsScreen(this))).width(310).build());
+		this.addPageButton(contents, "metalcraft.options.shaders.title", Page.SHADERS);
+	}
+
+	private void addPageButton(final LinearLayout contents, final String key, final Page destination) {
+		contents.addChild(Button.builder(Component.translatable(key),
+			button -> this.minecraft.gui.setScreen(new MetalCraftOptionsScreen(this, destination, null))).width(310).build());
+	}
+
+	private void addDisplayControls(final LinearLayout contents) {
 		MultiLineTextWidget description = new MultiLineTextWidget(Component.translatable("metalcraft.options.half_resolution.description"), this.font)
 			.setMaxWidth(310)
 			.setCentered(true);
@@ -69,67 +127,13 @@ public final class MetalCraftOptionsScreen extends Screen {
 			});
 		contents.addChild(unlockedFrameRate);
 
-		contents.addChild(CycleButton.onOffBuilder(MetalCraftConfig.clearDistanceFog())
-			.withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.clear_distance_fog.tooltip")))
-			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.clear_distance_fog"),
-				(button, enabled) -> MetalCraftConfig.setClearDistanceFog(enabled)));
-
-		this.addShaderPackControls(contents, appleSilicon);
-		contents.addChild(CycleButton.onOffBuilder(MetalCraftConfig.nativeTerrainLod())
-			.withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.native_lod.tooltip")))
-			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.native_lod"),
-				(button, enabled) -> MetalCraftConfig.setNativeTerrainLod(enabled)));
-		contents.addChild(CycleButton.<Integer>builder(
-			value -> Component.translatable("metalcraft.options.native_lod_reduction." + value), MetalCraftConfig.nativeLodReduction())
-			.withValues(0, 1, 2, 3, 4, 5)
-			.withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.native_lod_reduction.tooltip")))
-			.create(0, 0, 310, 20, Component.translatable("metalcraft.options.native_lod_reduction"),
-				(button, value) -> MetalCraftConfig.setNativeLodReduction(value)));
-		contents.addChild(nativeQualityDistanceSlider());
-        contents.addChild(CycleButton.onOffBuilder(MetalCraftConfig.nativeLodPixels())
-            .withTooltip(value -> Tooltip.create(Component.translatable("metalcraft.options.native_lod_pixels.tooltip")))
-            .create(0, 0, 310, 20, Component.translatable("metalcraft.options.native_lod_pixels"),
-                (button, enabled) -> MetalCraftConfig.setNativeLodPixels(enabled)));
-		contents.addChild(new MultiLineTextWidget(Component.translatable("metalcraft.options.native_distance"), this.font)
-			.setMaxWidth(310).setCentered(true));
-
 		this.resolutionStatus = new StringWidget(Component.empty(), this.font);
 		contents.addChild(this.resolutionStatus);
 		this.updateResolutionStatus();
-		ScrollableLayout scrolling = new ScrollableLayout(this.minecraft, contents, Math.max(40, this.height - 70));
-		scrolling.setMinWidth(330);
-		this.layout.addToContents(scrolling, LayoutSettings::alignHorizontallyCenter);
-		this.layout.addToFooter(Button.builder(CommonComponents.GUI_DONE, button -> this.onClose()).width(200).build());
-		this.layout.visitWidgets(this::addRenderableWidget);
-		this.repositionElements();
 	}
 
-	private AbstractSliderButton nativeQualityDistanceSlider() {
-		int minimum = NativeLodSelection.MIN_NATIVE_DISTANCE;
-		int span = NativeLodSelection.MAX_NATIVE_DISTANCE - minimum;
-		AbstractSliderButton slider = new AbstractSliderButton(0, 0, 310, 20,
-			Component.translatable("metalcraft.options.native_quality_distance", MetalCraftConfig.nativeQualityDistance()),
-			(MetalCraftConfig.nativeQualityDistance() - minimum) / (double)span) {
-			private int chunks() { return minimum + (int)Math.round(this.value * span); }
-
-			@Override
-			protected void updateMessage() {
-				this.setMessage(Component.translatable("metalcraft.options.native_quality_distance", chunks()));
-			}
-
-			@Override
-			protected void applyValue() {
-				int chunks = chunks();
-				this.value = (chunks - minimum) / (double)span;
-				MetalCraftConfig.setNativeQualityDistance(chunks);
-			}
-		};
-		slider.setTooltip(Tooltip.create(Component.translatable("metalcraft.options.native_quality_distance.tooltip")));
-		return slider;
-	}
-
-	private void addShaderPackControls(final LinearLayout contents, final boolean appleSilicon) {
-		contents.addChild(new StringWidget(Component.translatable("metalcraft.options.shader_pack_header"), this.font));
+	private void addShaderPackControls(final LinearLayout contents) {
+		boolean appleSilicon = MetalCraftPlatform.isAppleSilicon();
 		ShaderPackRuntime runtime = ShaderPackRuntime.active();
 		Button packButton = Button.builder(packMessage(runtime), button -> {
 			if (runtime == null) {
@@ -146,7 +150,7 @@ public final class MetalCraftOptionsScreen extends Screen {
 			MetalCraftShaderPackInfo next = packs.get((selected + 1) % packs.size());
 			try {
 				runtime.selectPack(next.id());
-				this.minecraft.gui.setScreen(new MetalCraftOptionsScreen(this.lastScreen));
+				this.minecraft.gui.setScreen(new MetalCraftOptionsScreen(this.lastScreen, Page.SHADERS, null));
 			} catch (RuntimeException error) {
 				button.setMessage(Component.translatable("metalcraft.options.shader_pack_failed", next.name()));
 				button.setTooltip(Tooltip.create(Component.literal(error.getMessage() == null ? error.toString() : error.getMessage())));
@@ -158,7 +162,32 @@ public final class MetalCraftOptionsScreen extends Screen {
 		if (runtime == null || !appleSilicon) {
 			return;
 		}
+		Map<String, Integer> categories = new LinkedHashMap<>();
 		for (ShaderPack.Option option : runtime.options()) {
+			categories.merge(option.category(), 1, Integer::sum);
+		}
+		if (ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId()) && categories.containsKey("debug")) {
+			int debugOptions = categories.remove("debug");
+			categories.put("debug", debugOptions);
+		}
+		for (Map.Entry<String, Integer> entry : categories.entrySet()) {
+			String selectedCategory = entry.getKey();
+			contents.addChild(Button.builder(Component.translatable("metalcraft.options.shader_category.open",
+				categoryLabel(selectedCategory), entry.getValue()), button ->
+				this.minecraft.gui.setScreen(new MetalCraftOptionsScreen(this, Page.SHADER_CATEGORY, selectedCategory)))
+				.width(310).build());
+		}
+		if (categories.isEmpty()) {
+			contents.addChild(new MultiLineTextWidget(Component.translatable("metalcraft.options.shader_no_options"), this.font)
+				.setMaxWidth(310).setCentered(true));
+		}
+	}
+
+	private void addShaderOptions(final LinearLayout contents) {
+		ShaderPackRuntime runtime = ShaderPackRuntime.active();
+		if (runtime == null || !MetalCraftPlatform.isAppleSilicon()) return;
+		for (ShaderPack.Option option : runtime.options()) {
+			if (!option.category().equals(this.category)) continue;
 			var optionWidget = option.type() == ShaderPack.OptionType.INT || option.type() == ShaderPack.OptionType.FLOAT
 				? numericSlider(runtime, option)
 				: Button.builder(optionMessage(runtime, option), button -> {
@@ -223,8 +252,16 @@ public final class MetalCraftOptionsScreen extends Screen {
 				: Component.translatable("metalcraft.water.value." + value);
 			return Component.translatable("metalcraft.water." + option.id(), label);
 		}
-		String name = option.id().replace('_', ' ');
-		return Component.literal(name + ": " + runtime.optionValue(option.id()));
+		Object value = runtime.optionValue(option.id());
+		Component valueLabel = value instanceof Boolean bool
+			? Component.translatable("metalcraft.options.value." + bool)
+			: value instanceof String string ? Component.literal(humanize(string)) : Component.literal(value.toString());
+		return Component.literal(humanize(option.id()) + ": ").append(valueLabel);
+	}
+
+	private static String humanize(final String identifier) {
+		String label = identifier.replace('_', ' ').replace('-', ' ');
+		return label.isEmpty() ? identifier : Character.toUpperCase(label.charAt(0)) + label.substring(1);
 	}
 
 	private static boolean isStandardWaterOption(final ShaderPackRuntime runtime, final ShaderPack.Option option) {

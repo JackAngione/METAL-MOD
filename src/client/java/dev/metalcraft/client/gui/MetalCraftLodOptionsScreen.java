@@ -2,28 +2,30 @@ package dev.metalcraft.client.gui;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
+import dev.metalcraft.client.chunk.NativeLodSelection;
 import dev.metalcraft.client.lod.LodCapabilities;
 import dev.metalcraft.client.lod.LodSettings;
 import java.util.Locale;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.MultiLineTextWidget;
 import net.minecraft.client.gui.components.ScrollableLayout;
+import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.layouts.HeaderAndFooterLayout;
 import net.minecraft.client.gui.layouts.LayoutSettings;
 import net.minecraft.client.gui.layouts.LinearLayout;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 
-/** Keyboard-accessible staged LOD settings, independent of shader-pack preferences. */
+/** Terrain and distance settings, including native detail and staged extended LOD. */
 public final class MetalCraftLodOptionsScreen extends Screen {
     private final Screen parent;
     private HeaderAndFooterLayout layout;
 
     public MetalCraftLodOptionsScreen(Screen parent) {
-        super(text("title"));
+        super(Component.translatable("metalcraft.options.terrain.title"));
         this.parent = parent;
     }
 
@@ -36,6 +38,9 @@ public final class MetalCraftLodOptionsScreen extends Screen {
         int width = Math.max(150, Math.min(310, this.width - 40));
         LinearLayout rows = LinearLayout.vertical().spacing(8);
         rows.defaultCellSetting().alignHorizontallyCenter();
+        rows.addChild(new StringWidget(Component.translatable("metalcraft.options.terrain.native_section"), font));
+        addNativeTerrainControls(rows, width);
+        rows.addChild(new StringWidget(Component.translatable("metalcraft.options.terrain.extended_section"), font));
         LodSettings settings = MetalCraftConfig.lod();
         LodCapabilities capabilities = LodCapabilities.current("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()));
         String reason = !capabilities.metal() ? "requires_metal" : capabilities.geometry() ? "experimental_geometry"
@@ -124,9 +129,57 @@ public final class MetalCraftLodOptionsScreen extends Screen {
         ScrollableLayout scroll = new ScrollableLayout(minecraft, rows, Math.max(40, height - 70));
         scroll.setMinWidth(width + 16);
         layout.addToContents(scroll, LayoutSettings::alignHorizontallyCenter);
-        layout.addToFooter(Button.builder(CommonComponents.GUI_DONE, b -> onClose()).width(Math.min(200, width)).build());
+        layout.addToFooter(Button.builder(Component.translatable("gui.back"), b -> onClose()).width(Math.min(200, width)).build());
         layout.visitWidgets(this::addRenderableWidget);
         repositionElements();
+    }
+
+    private void addNativeTerrainControls(LinearLayout rows, int width) {
+        rows.addChild(CycleButton.onOffBuilder(MetalCraftConfig.nativeTerrainLod())
+                .withTooltip(v -> Tooltip.create(Component.translatable("metalcraft.options.native_lod.tooltip")))
+                .create(0, 0, width, 20, Component.translatable("metalcraft.options.native_lod"),
+                        (b, v) -> MetalCraftConfig.setNativeTerrainLod(v)));
+        rows.addChild(CycleButton.<Integer>builder(
+                v -> Component.translatable("metalcraft.options.native_lod_reduction." + v), MetalCraftConfig.nativeLodReduction())
+                .withValues(0, 1, 2, 3, 4, 5)
+                .withTooltip(v -> Tooltip.create(Component.translatable("metalcraft.options.native_lod_reduction.tooltip")))
+                .create(0, 0, width, 20, Component.translatable("metalcraft.options.native_lod_reduction"),
+                        (b, v) -> MetalCraftConfig.setNativeLodReduction(v)));
+        rows.addChild(nativeQualityDistanceSlider(width));
+        rows.addChild(CycleButton.onOffBuilder(MetalCraftConfig.nativeLodPixels())
+                .withTooltip(v -> Tooltip.create(Component.translatable("metalcraft.options.native_lod_pixels.tooltip")))
+                .create(0, 0, width, 20, Component.translatable("metalcraft.options.native_lod_pixels"),
+                        (b, v) -> MetalCraftConfig.setNativeLodPixels(v)));
+        rows.addChild(CycleButton.onOffBuilder(MetalCraftConfig.clearDistanceFog())
+                .withTooltip(v -> Tooltip.create(Component.translatable("metalcraft.options.clear_distance_fog.tooltip")))
+                .create(0, 0, width, 20, Component.translatable("metalcraft.options.clear_distance_fog"),
+                        (b, v) -> MetalCraftConfig.setClearDistanceFog(v)));
+        rows.addChild(new MultiLineTextWidget(Component.translatable("metalcraft.options.native_distance"), font)
+                .setMaxWidth(width).setCentered(true));
+    }
+
+    private AbstractSliderButton nativeQualityDistanceSlider(int width) {
+        int minimum = NativeLodSelection.MIN_NATIVE_DISTANCE;
+        int span = NativeLodSelection.MAX_NATIVE_DISTANCE - minimum;
+        AbstractSliderButton slider = new AbstractSliderButton(0, 0, width, 20,
+                Component.translatable("metalcraft.options.native_quality_distance", MetalCraftConfig.nativeQualityDistance()),
+                (MetalCraftConfig.nativeQualityDistance() - minimum) / (double)span) {
+            private int chunks() { return minimum + (int)Math.round(this.value * span); }
+
+            @Override
+            protected void updateMessage() {
+                this.setMessage(Component.translatable("metalcraft.options.native_quality_distance", chunks()));
+            }
+
+            @Override
+            protected void applyValue() {
+                int chunks = chunks();
+                this.value = (chunks - minimum) / (double)span;
+                MetalCraftConfig.setNativeQualityDistance(chunks);
+            }
+        };
+        slider.setTooltip(Tooltip.create(Component.translatable("metalcraft.options.native_quality_distance.tooltip")));
+        return slider;
     }
 
     @Override protected void repositionElements() { if(layout != null) layout.arrangeElements(); }

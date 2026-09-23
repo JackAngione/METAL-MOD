@@ -39,9 +39,40 @@ final class MetalLodSettingsGameTest {
             check(MetalCraftConfig.halfResolution() == originalHalf, "global scale independent");
 
             context.setScreen(() -> new MetalCraftOptionsScreen(new TitleScreen()));
-            focusButton(context, "Level of Detail…");
+            focusButton(context, "Display & Performance");
+            context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
+            context.waitTicks(2);
+            context.runOnClient(c -> check(widgets(c.gui.screen()).stream()
+                    .anyMatch(w -> w.getMessage().getString().contains("Half-resolution rendering")),
+                    "display submenu contains render resolution control"));
+            context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
+            context.waitTicks(2);
+            context.runOnClient(c -> ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID));
+            focusButton(context, "Shader Packs");
+            context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
+            context.waitTicks(2);
+            context.runOnClient(c -> check(widgets(c.gui.screen()).stream()
+                    .anyMatch(w -> w.getMessage().getString().startsWith("Shader pack:")),
+                    "shader submenu contains pack selector"));
+            focusButton(context, "Water (");
+            context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
+            context.waitTicks(2);
+            context.runOnClient(c -> check(widgets(c.gui.screen()).stream()
+                    .anyMatch(w -> w.getMessage().getString().contains("Water effects")),
+                    "water category contains its shader controls"));
+            context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
+            context.waitTicks(2);
+            context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
+            context.waitTicks(2);
+            context.runOnClient(c -> ShaderPackRuntime.active().selectPack(pack));
+            focusButton(context, "Terrain & Distance");
             context.getInput().pressKey(GLFW.GLFW_KEY_ENTER);
             context.waitForScreen(MetalCraftLodOptionsScreen.class);
+            context.runOnClient(c -> check(widgets(c.gui.screen()).stream()
+                    .anyMatch(w -> w.getMessage().getString().contains("Distance-based terrain LOD"))
+                    && widgets(c.gui.screen()).stream()
+                    .anyMatch(w -> w.getMessage().getString().contains("Enable terrain LOD")),
+                    "one terrain submenu contains native and extended LOD controls"));
             context.getInput().resizeWindow(640, 480);
             context.waitTicks(5);
             context.takeScreenshot("metalcraft-lod-settings-small");
@@ -49,7 +80,7 @@ final class MetalLodSettingsGameTest {
                 var screen = c.gui.screen();
                 boolean available = dev.metalcraft.client.lod.LodCapabilities.current(true).geometry();
                 boolean horizon = dev.metalcraft.client.lod.LodCapabilities.current(true).extendedHorizon();
-                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 4 + (available ? 3 : 0) + (horizon ? 4 : 0),
+                check(widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).count() == 8 + (available ? 3 : 0) + (horizon ? 4 : 0),
                         "resize does not duplicate option widgets");
                 boolean disabled = widgets(screen).stream().filter(e -> e instanceof CycleButton<?>).map(e -> (CycleButton<?>)e)
                         .anyMatch(b -> !b.active && b.getMessage().getString().contains("Enable terrain LOD"));
@@ -73,8 +104,8 @@ final class MetalLodSettingsGameTest {
             context.getInput().pressKey(GLFW.GLFW_KEY_ESCAPE);
             context.waitForScreen(MetalCraftOptionsScreen.class);
             context.runOnClient(c -> check(widgets(c.gui.screen()).stream()
-                    .filter(w -> w instanceof Button && w.getMessage().getString().equals("Level of Detail…")).count() == 1,
-                    "back navigation does not duplicate the parent layout"));
+                    .filter(w -> w instanceof Button && w.getMessage().getString().equals("Terrain & Distance")).count() == 1,
+                    "back navigation keeps one terrain submenu entry"));
             check(pack.equals(context.computeOnClient(c -> ShaderPackRuntime.active() == null ? "" : ShaderPackRuntime.active().selectedPackId())), "pack selection unchanged");
             context.runOnClient(c -> {
                 ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);
