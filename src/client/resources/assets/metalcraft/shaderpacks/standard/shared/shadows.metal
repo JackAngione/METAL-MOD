@@ -167,5 +167,7 @@ struct MCResolveCamera {
     float4x4 inverseProjection;
     float4x4 viewToCameraRelative;
     float2 screenSize;
+    float4 cloudOrigin;   // sky frame camera/wind origin and cloud base
+    float4 cloudSettings; // mode, alpha, rain brightness, unused
 };
 #endif

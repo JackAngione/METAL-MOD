@@ -52,6 +52,24 @@ static inline float mc_sky_noise3(float3 p) {
     return mix(a, b, f.z);
 }
 
+// Shared by sky rendering and the terrain sunlight resolve.
+static inline float mc_cumulus_coverage(float2 p, float rainBrightness) {
+    return mc_sky_noise(p * 0.25) * 0.10 + (1.0 - rainBrightness) * 0.065;
+}
+
+static inline float mc_cumulus_shape(float3 volume, float footprint) {
+    return mix(mc_sky_noise3(volume), 0.5, smoothstep(0.25, 0.8, footprint)) * 0.57
+         + mix(mc_sky_noise3(volume * 2.0 + 17.0), 0.5, smoothstep(0.25, 0.8, footprint * 2.0)) * 0.28
+         + mix(mc_sky_noise3(volume * 4.0 + 41.0), 0.5, smoothstep(0.25, 0.8, footprint * 4.0)) * 0.15;
+}
+
+static inline float mc_cumulus_density(float shape, float coverage, float h) {
+    float profile = pow(abs(h - 0.34) / 0.66, 2.0) * 0.24;
+    // Raising the threshold leaves larger clear gaps between cloud banks.
+    return 0.5 * smoothstep(0.580 - coverage + profile, 0.740 - coverage + profile, shape)
+         * smoothstep(0.0, 0.10, h) * (1.0 - smoothstep(0.88, 1.0, h));
+}
+
 static inline float mc_sky_day(float sunHeight) {
     return smoothstep(-0.16, 0.14, sunHeight);
 }
@@ -99,7 +117,7 @@ static inline float4 mc_sky_cirrus(float3 ray, constant McSkyFrame& f) {
     float2 streak = float2(p.x + p.y * 0.25, p.y * 3.0);
     streak.y += mc_sky_noise(p * 0.5) * 2.5;
     float shape = mc_cloud_shape(streak, false);
-    float alpha = smoothstep(0.58, 0.82, shape) * 0.26 * fade * f.cloudSettings.y;
+    float alpha = smoothstep(0.62, 0.84, shape) * 0.13 * fade * f.cloudSettings.y;
     alpha *= 1.0 - smoothstep(0.25, 1.0, pixelAngle * distance * 3.0 / (128.0 * max(abs(ray.y), 0.08)));
     float day = mc_sky_day(f.sunRain.y);
     float dusk = mc_sky_twilight(f.sunRain.y) * f.sunRain.w;
@@ -144,24 +162,20 @@ static inline float4 mc_sky_cumulus(float3 ray, constant McSkyFrame& f) {
         float3 world = f.cloudOrigin.xyz + ray * distance;
         float h = saturate((world.y - base) / 96.0);
         float2 p = world.xz / 128.0;
-        float coverage = mc_sky_noise(p * 0.25) * 0.10 + (1.0 - f.sunRain.w) * 0.13;
+        float coverage = mc_cumulus_coverage(p, f.sunRain.w);
         float3 volume = float3(p.x, h * 1.25, p.y);
         // Procedural mip filtering: fade unresolved octaves to their mean instead
         // of letting the distant sheet alias into hard patches as the camera moves.
         float footprint = pixelAngle * distance / (128.0 * max(abs(ray.y), 0.08));
-        float shape = mix(mc_sky_noise3(volume), 0.5, smoothstep(0.25, 0.8, footprint)) * 0.57
-                    + mix(mc_sky_noise3(volume * 2.0 + 17.0), 0.5, smoothstep(0.25, 0.8, footprint * 2.0)) * 0.28
-                    + mix(mc_sky_noise3(volume * 4.0 + 41.0), 0.5, smoothstep(0.25, 0.8, footprint * 4.0)) * 0.15;
-        float profile = pow(abs(h - 0.34) / 0.66, 2.0) * 0.24;
-        float density = smoothstep(0.47 - coverage + profile, 0.63 - coverage + profile, shape)
-                      * smoothstep(0.0, 0.10, h) * (1.0 - smoothstep(0.88, 1.0, h));
-        float alpha = (1.0 - exp(-density * stepLength * 0.035));
+        float shape = mc_cumulus_shape(volume, footprint);
+        float density = mc_cumulus_density(shape, coverage, h);
+        float alpha = (1.0 - exp(-density * stepLength * 0.055));
         float relief = saturate(0.58 + (shape - mc_sky_noise3(volume + f.sunRain.xyz * 0.3)) * 1.7);
         float lighting = saturate(relief * 0.65 + h * 0.55 - density * 0.18);
         float3 color = mix(ambient, direct, lighting);
         color += direct * pow(saturate(dot(ray, f.sunRain.xyz)), 12.0)
                * pow(1.0 - density, 3.0) * 0.60 * f.sunRain.w;
-        color *= mix(0.45, 1.0, f.sunRain.w);
+        color *= mix(0.35, 1.0, f.sunRain.w);
         color = mix(atmosphere, color, exp(-distance / 10000.0));
         result += float4(color * alpha, alpha) * (1.0 - result.a);
         if (result.a > 0.985) break;

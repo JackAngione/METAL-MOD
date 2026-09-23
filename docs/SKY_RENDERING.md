@@ -40,10 +40,19 @@ uses a six-sample cumulus volume, and Fancy uses twelve samples plus high cirrus
   FOV changes. Normalizing a near-plane position instead caused the sky to swing
   when walking. World-space advection is calculated
   in double precision and wrapped over complete noise periods before GPU upload.
+  The current drift rate is 1.44 blocks/s on X and 0.48 blocks/s on Z; visible
+  clouds and ground shadows share this motion.
 - Cloud shading runs at half scene width and height in one reusable RGBA16F target.
   The target follows resize and half-resolution rendering. Clouds use premultiplied
   linear blending before the existing Standard exposure/tone-map/output transfer.
   Fast uses fewer volume samples and omits cirrus; Off skips both cloud passes.
+- Cumulus has wider clear gaps, while dense formations can still
+  cover the sun. Procedural cumulus density and cirrus opacity are scaled to 50%.
+  The opaque lighting resolve projects sunlight through the same
+  advected density field and darkens the sunlit share of terrain beneath clouds.
+  Dense cores can block up to 95% of that sunlight; mid-density clouds produce
+  visible soft shadows, while clear gaps stay lit. Cloud shadows turn off with
+  Minecraft's Clouds setting.
 - The vanilla cloud draw is suppressed only after a successful sky draw in the
   same HDR session. Fabulous retains its framegraph-cleared cloud target for its
   later transparency composition, and main color/depth samplers follow the HDR
@@ -52,9 +61,11 @@ uses a six-sample cumulus volume, and Fancy uses twelve samples plus high cirrus
 - Shader reload, pack changes, failure, and device close retire the sky pipelines,
   sampler, lunar texture, and cloud target. Uniform uploads remain immutable until the GPU finishes.
 
-The atmosphere and cloud lighting are artistic approximations. Clouds are composed
-as a sky background before terrain; this does not implement cloud shadows on the
-ground, terrain intersections inside clouds, or a multiple-scattering simulation.
+The atmosphere and cloud lighting are artistic approximations. Ground cloud
+shadows use one filtered sample through the cumulus core, within the existing
+terrain shadow distance. They soften near sunrise and sunset. Clouds remain a sky
+background before terrain; terrain intersections inside clouds and multiple
+scattering are not implemented.
 The bounded step count, early opacity exit, and reduced target limit work; they are
 not a claim of a measured whole-game frame-rate improvement.
 
@@ -97,6 +108,11 @@ and [sunset](evidence/sky/sunset.png). Custom models: [sun in game](evidence/sky
 [full moon in game](evidence/sky/moon-in-game.png), [quarter moon in game](evidence/sky/moon-quarter-in-game.png).
 Close GPU fixtures use a 12° vertical field of view: [full moon](evidence/sky/moon-full-detail.png)
 and [crescent](evidence/sky/moon-crescent-detail.png). These are direct renderer outputs.
+
+The 50% density adjustment passed Metal GPU readback with 14,885 dense day
+samples (32,616 before this adjustment) and 28,290 dense rain samples
+(50,046 before). The earlier short NORMAL-world 16/16 Metal sweep passed
+with 141,282 changed upper-frame pixels when clouds were toggled.
 
 Reproduce the GPU fixtures with `./gradlew shaderTranslationSmoke`; their previews
 are written to `build/reports/sky/`. Run the short live sweep with:

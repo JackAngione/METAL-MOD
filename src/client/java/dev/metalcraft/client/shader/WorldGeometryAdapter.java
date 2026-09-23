@@ -24,6 +24,7 @@ import dev.metalcraft.client.metal.MetalRenderPipeline;
 import dev.metalcraft.client.metal.MetalSampler;
 import dev.metalcraft.client.metal.MetalTexture;
 import dev.metalcraft.client.metal.MetalTextureView;
+import dev.metalcraft.client.shader.sky.SkyFrameInputs;
 import dev.metalcraft.client.shader.world.WorldLightingModule;
 import dev.metalcraft.client.shader.world.WorldShadowModule;
 import java.nio.ByteBuffer;
@@ -136,6 +137,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private @Nullable MetalTextureView unoccludedDepthView;
 	private @Nullable MetalSampler unoccludedSampler;
 	private @Nullable MetalBuffer unoccludedFrame;
+	private @Nullable SkyFrameInputs cloudFrame;
 	private boolean haveRasterProjection;
 	private boolean haveRasterView;
 	private boolean haveFog;
@@ -202,6 +204,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		device.setDeferredResolve(this::encodeMergedResolve);
 		device.setWorldUniformCapture(this::captureWorldUniform);
 		active = this;
+	}
+
+	public void setCloudFrame(final @Nullable SkyFrameInputs frame) {
+		this.cloudFrame = frame;
 	}
 
 	public void setShadowFrameSupplier(final Supplier<WorldShadowModule.@Nullable Frame> supplier) {
@@ -504,7 +510,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		try (
 			MetalBuffer uniforms = this.device.metal().createBuffer(
 				Math.max(4L, this.uniformOptions.size() * 4L), MetalBuffer.StorageMode.SHARED);
-			MetalBuffer camera = this.device.metal().createBuffer(160L, MetalBuffer.StorageMode.SHARED);
+			MetalBuffer camera = this.device.metal().createBuffer(176L, MetalBuffer.StorageMode.SHARED);
 			MetalBuffer lighting = this.device.metal().createBuffer(
 				WorldLightingModule.FRAME_BYTES, MetalBuffer.StorageMode.SHARED)
 		) {
@@ -789,6 +795,16 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			int height = this.sceneAttachment == null ? 1 : this.sceneAttachment.getHeight(0);
 			bytes.putFloat(128, width);
 			bytes.putFloat(132, height);
+			SkyFrameInputs clouds = this.cloudFrame;
+			if (clouds != null && clouds.hasClouds()) {
+				clouds.cloudOrigin().get(144, bytes);
+				bytes.putFloat(160, clouds.cloudSettings().x);
+				bytes.putFloat(164, clouds.cloudSettings().y);
+				bytes.putFloat(168, clouds.sunRain().w);
+				bytes.putFloat(172, 0.0F);
+			} else {
+				for (int i = 144; i < 176; i++) bytes.put(i, (byte)0);
+			}
 		}
 	}
 

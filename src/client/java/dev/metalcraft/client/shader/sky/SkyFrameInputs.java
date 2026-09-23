@@ -16,6 +16,8 @@ public record SkyFrameInputs(Matrix4f clipToWorld, Vector4f skyColor, Vector4f s
     public static final int UNIFORM_BYTES = 160;
     // Includes the lowest noise octave's 256-cell period (world / 256 / 4).
     private static final double WORLD_PERIOD = 262144.0;
+    private static final double WIND_X_BLOCKS_PER_SECOND = 1.44;
+    private static final double WIND_Z_BLOCKS_PER_SECOND = 0.48;
 
     public static SkyFrameInputs create(CameraRenderState camera, LevelRenderState level,
                                         CloudStatus clouds, float partialTick, Matrix4fc rasterProjection) {
@@ -33,8 +35,8 @@ public record SkyFrameInputs(Matrix4f clipToWorld, Vector4f skyColor, Vector4f s
             SceneColor.srgbToLinear((sky.skyColor & 255) / 255.0F), 1),
             new Vector4f(-(float)Math.sin(sky.sunAngle), (float)Math.cos(sky.sunAngle), 0,
                 Math.clamp(sky.rainBrightness, 0, 1)),
-            new Vector4f(wrap(camera.pos.x + seconds * 1.2), (float)camera.pos.y,
-                wrap(camera.pos.z + seconds * 0.4), level.cloudHeight),
+            new Vector4f(wrap(camera.pos.x + seconds * WIND_X_BLOCKS_PER_SECOND), (float)camera.pos.y,
+                wrap(camera.pos.z + seconds * WIND_Z_BLOCKS_PER_SECOND), level.cloudHeight),
             new Vector4f(cloudMode, cloudAlpha, 0, 0), SceneColor.decodeRgb(camera.fogData.color),
             new Vector4f(-(float)Math.sin(sky.moonAngle), (float)Math.cos(sky.moonAngle), 0,
                 sky.moonPhase.index()));

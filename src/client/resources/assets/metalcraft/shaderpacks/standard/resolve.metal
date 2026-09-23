@@ -24,6 +24,24 @@ vertex ResolveVaryings resolve_vertex(uint vertexId [[vertex_id]]) {
     return {float4(position, 0.0, 1.0), position * 0.5 + 0.5};
 }
 
+// Project sunlight through the same world-space density field used by the sky pass.
+// One filtered sample keeps the merged tile resolve inexpensive.
+static inline float mc_cloud_sun_visibility(float3 receiver, float3 sun,
+    float4 cloudOrigin, float4 cloudSettings) {
+    if (cloudSettings.x < 0.5 || cloudSettings.y <= 0.0 || sun.y <= 0.08
+        || !isfinite(cloudOrigin.w)) return 1.0;
+    float cloudY = cloudOrigin.w + 12.0 + 96.0 * 0.34;
+    float distance = (cloudY - (cloudOrigin.y + receiver.y)) / sun.y;
+    if (distance <= 0.0 || distance > 6000.0) return 1.0;
+    float2 p = (cloudOrigin.xz + receiver.xz + sun.xz * distance) / 128.0;
+    float footprint = max(length(dfdx(p)), length(dfdy(p)));
+    float shape = mc_cumulus_shape(float3(p.x, 0.34 * 1.25, p.y), footprint);
+    float density = mc_cumulus_density(shape, mc_cumulus_coverage(p, cloudSettings.z), 0.34);
+    // Preserve clear gaps while making the denser cloud cores visibly shade terrain.
+    float opacity = smoothstep(0.10, 0.38, density) * cloudSettings.y;
+    return 1.0 - opacity * 0.95 * smoothstep(0.08, 0.25, sun.y);
+}
+
 fragment ResolveTargets resolve_fragment(
     ResolveVaryings in [[stage_in]],
     ResolveTargets previous,
@@ -68,7 +86,12 @@ fragment ResolveTargets resolve_fragment(
     float visibility = validDepth
         ? mc_shadow_visibility(cameraRelative, viewDepth, bias, shadowFrame, shadowMap, shadowSampler, worldNormal)
         : 1.0;
-    visibility = mix(1.0, visibility, mc_shadow_distance_fade(viewDepth, shadowFrame));
+    float fade = mc_shadow_distance_fade(viewDepth, shadowFrame);
+    if (fade > 0.0 && validDepth && shadowFrame.cascadeCount > 0u) {
+        visibility *= mc_cloud_sun_visibility(cameraRelative, shadowFrame.directionToSun.xyz,
+            camera.cloudOrigin, camera.cloudSettings);
+    }
+    visibility = mix(1.0, visibility, fade);
     if (options.debugView == 2) {
         out.scene = mc_scene_seed(float4(previous.albedo.rgb, 1.0));
         out.albedo.a = 0.0;

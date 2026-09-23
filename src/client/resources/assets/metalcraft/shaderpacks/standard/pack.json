@@ -1,7 +1,7 @@
 {
   "format": 2,
   "name": "MetalCraft Standard",
-  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/water.metal", "shared/underwater.metal"],
+  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/water.metal", "shared/underwater.metal", "shared/sky.metal"],
   "targets": {
     "gbuffer_albedo": {
       "format": "rgba8_unorm",

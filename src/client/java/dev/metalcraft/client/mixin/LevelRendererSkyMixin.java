@@ -32,6 +32,7 @@ abstract class LevelRendererSkyMixin {
         var gpu = MetalGpuDevices.current();
         var runtime = ShaderPackRuntime.active();
         var camera = this.levelRenderState.cameraRenderState;
+        if (runtime != null && runtime.worldGeometry() != null) runtime.worldGeometry().setCloudFrame(null);
         if (gpu == null || runtime == null || runtime.worldSky() == null
             || runtime.worldSky().rasterProjection() == null
             || gpu.linearWorldSession() == null || gpu.linearWorldSession().isPoisoned()
@@ -51,6 +52,7 @@ abstract class LevelRendererSkyMixin {
                 pose.mulPose(Axis.XP.rotation(sky.starAngle));
                 ((SkyRendererStarsInvoker)this.skyRenderer).metalcraft$renderStars(sky.starBrightness, pose);
             });
+            if (runtime.worldGeometry() != null) runtime.worldGeometry().setCloudFrame(inputs);
             ci.cancel();
         } catch (RuntimeException error) {
             runtime.markFailed("Could not render Standard sky: " + error.getMessage(), error);
