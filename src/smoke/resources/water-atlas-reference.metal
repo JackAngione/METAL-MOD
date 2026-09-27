@@ -30,9 +30,6 @@ static inline float4 mc_sample_rgss(texture2d<float> atlas, sampler atlasSampler
 // MC_REFERENCE_ATLAS_FRAGMENT
     float2 pixelSize = 1.0 / float2(section.TextureSize);
     float4 texel =
-#ifdef MC_TERRAIN_LOD
-        in.lodMapV.z != 0.0 ? mc_lod_sample(atlas, atlasSampler, in.uv, in.lodMapU, in.lodMapV, in.lodBounds) :
-#endif
         globals.UseRgss == 1
         ? mc_sample_rgss(atlas, atlasSampler, in.uv, pixelSize)
         : mc_sample_nearest(atlas, atlasSampler, in.uv, pixelSize, dfdx(in.uv), dfdy(in.uv),

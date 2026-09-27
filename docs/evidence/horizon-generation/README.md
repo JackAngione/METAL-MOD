@@ -1,5 +1,8 @@
 # Compact-horizon generation throughput — September 23, 2026
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 The active compact-horizon streamer previously allowed just 16 concurrent FULL
 chunk requests on every machine. The saved configuration uses this streamer;
 the older `LodTerrainGeneration` path is disabled and was not changed.

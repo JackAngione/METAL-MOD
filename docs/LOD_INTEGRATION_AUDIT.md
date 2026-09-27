@@ -1,5 +1,10 @@
 # LOD integration audit
 
+> **Superseded (2026-09-26).** This document describes an earlier LOD prototype whose code has
+> been removed. The current system is described in
+> [the distant terrain evidence](evidence/distant-terrain/README.md) and
+> [the rewrite plan](LOD_REWRITE_PLAN.md).
+
 P1 completed, 2026-09-10. No live LOD rendering is enabled by this audit.
 
 ## Verified mapped interfaces

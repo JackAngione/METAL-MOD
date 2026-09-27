@@ -386,17 +386,6 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 	}
 
-	@Nullable RenderPipeline standInFor(final RenderPipeline pipeline) {
-		return this.substitutionFor(pipeline).map(Substitution::pipeline).orElse(null);
-	}
-
-	/** Preflight the existing opaque terrain contract before an LOD mesh is admitted. */
-	public @Nullable RenderPipeline preflightLodTerrain(final RenderPipeline original) {
-		if (!ShaderPackRuntime.BUILTIN_ID.equals(this.packId) || programFor(original) != Program.TERRAIN
-			|| isBlended(original)) return null;
-		return this.standInFor(original);
-	}
-
 	public void beginFrame() {
 		this.beginFrame(FrameBindings.ColorEncoding.LEGACY_ENCODED);
 	}

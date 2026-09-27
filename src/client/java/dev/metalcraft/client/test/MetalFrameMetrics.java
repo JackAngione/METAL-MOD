@@ -4,7 +4,8 @@ import dev.metalcraft.client.metal.MetalPassCensus;
 import dev.metalcraft.client.metal.MetalGpuFrameCapture;
 import dev.metalcraft.client.metal.MetalStallProbe;
 import dev.metalcraft.client.metal.MetalTaskCensus;
-import dev.metalcraft.client.lod.LodLoadedRenderer;
+import dev.metalcraft.client.lod.LodStats;
+import dev.metalcraft.client.lod.LodSystem;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
@@ -39,7 +40,7 @@ public final class MetalFrameMetrics {
 	private static long previousCollectionCount;
 	private static long previousCollectionMillis;
 	private static long frameStartNs;
-	private static LodLoadedRenderer.Stats lodStart = LodLoadedRenderer.stats();
+	private static LodStats lodStart = LodSystem.stats();
 
 	private MetalFrameMetrics() {
 	}
@@ -82,7 +83,7 @@ public final class MetalFrameMetrics {
 		MetalStallProbe.setEnabled(true);
 		MetalTaskCensus.reset();
 		MetalPassCensus.reset();
-		lodStart = LodLoadedRenderer.sample();
+		lodStart = LodSystem.stats();
 	}
 
 	/** Records that the render loop resumed, so time spent outside it can be separated out. */
@@ -127,7 +128,7 @@ public final class MetalFrameMetrics {
 		previousFrameEndNs = frameEndNs;
 		if (warmupFramesRemaining > 0) {
 			warmupFramesRemaining--;
-			lodStart = LodLoadedRenderer.sample();
+			lodStart = LodSystem.stats();
 			return;
 		}
 		if (cpuFrameTimeNs <= 0L || interval <= 0L) {
@@ -157,7 +158,7 @@ public final class MetalFrameMetrics {
 		MetalStallProbe.setEnabled(false);
 		return Phase.of(name, Arrays.copyOf(cpuFrameTimes, size), Arrays.copyOf(frameIntervals, size),
 			Arrays.copyOf(outsideLoopTimes, size), Arrays.copyOf(stalls, size * MetalStallProbe.slots()),
-			tasks, passes, lodStart, LodLoadedRenderer.sample(), MetalGpuFrameCapture.endCapture());
+			tasks, passes, lodStart, LodSystem.stats(), MetalGpuFrameCapture.endCapture());
 	}
 
 	/** One source's contribution to a set of frames. */
@@ -209,7 +210,7 @@ public final class MetalFrameMetrics {
 	}
 
 	/** Counters at retained-frame boundaries, plus selection/upload cost percentiles. */
-	public record LodPhase(LodLoadedRenderer.Stats start, LodLoadedRenderer.Stats end,
+	public record LodPhase(LodStats start, LodStats end,
 			double p50PrepareMs, double p95PrepareMs, double p99PrepareMs) { }
 
 	/** Frame-pacing statistics for one benchmark phase. */
@@ -242,7 +243,7 @@ public final class MetalFrameMetrics {
 				final long[] outsideLoopNs, final long[] stallsNs,
 				final List<MetalTaskCensus.TaskKind> taskKinds,
 				final List<MetalPassCensus.PassKind> passKinds,
-				final LodLoadedRenderer.Stats lodStart, final LodLoadedRenderer.Stats lodEnd,
+				final LodStats lodStart, final LodStats lodEnd,
 				final MetalGpuFrameCapture.Result gpuFrame) {
 			long[] prepare = column(stallsNs, cpuFrameTimesNs.length, MetalStallProbe.Source.LOD_PREPARE, MetalStallProbe.FIELD_NANOS);
 			Arrays.sort(prepare);

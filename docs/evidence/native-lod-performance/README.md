@@ -1,5 +1,8 @@
 # Native LOD performance — September 19, 2026
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 The active native chunk path now reduces solid-terrain texture sampling to half
 linear resolution at a 2-block grid and quarter resolution at grids 4–16. It uses
 Metal sampler minimum LOD 1/2 and anisotropy 1, bounded by the original sampler's

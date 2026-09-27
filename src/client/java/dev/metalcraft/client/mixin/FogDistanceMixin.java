@@ -40,8 +40,8 @@ abstract class FogDistanceMixin {
                     || level.getRainLevel(delta.getGameTimeDeltaPartialTick(false)) > 0.0F
                     || Minecraft.getInstance().gui.hud.getBossOverlay().shouldCreateWorldFog()) return;
             FogData fog = cir.getReturnValue();
-            // Finite, distinct endpoints beyond loaded terrain avoid shader infinities/NaNs.
-            float start = Math.max(1024.0F, chunks * 16.0F * 4.0F);
+            // Finite, distinct endpoints beyond loaded and distant terrain avoid shader infinities/NaNs.
+            float start = Math.max(1024.0F, Math.max(chunks, dev.metalcraft.client.lod.LodSystem.horizon()) * 16.0F * 4.0F);
             fog.renderDistanceStart = start;
             fog.renderDistanceEnd = start + 16.0F;
             fog.environmentalStart = start;

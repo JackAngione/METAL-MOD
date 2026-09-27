@@ -30,7 +30,6 @@ final class TerrainShadowRendererSmoke {
 			if (input == null) throw new AssertionError("Missing terrain shadow source");
 			source = new String(input.readAllBytes(), StandardCharsets.UTF_8);
 		} catch (IOException error) { throw new AssertionError(error); }
-		LodShadowSmoke.run(device, contract, source);
 		ShadowCasterMotionSmoke.run(device, contract, source);
 		for (int count = 1; count <= 4; count++) {
 			for (var layer : ChunkSectionLayerGroup.OPAQUE.layers()) {

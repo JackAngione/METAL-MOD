@@ -1,5 +1,8 @@
 # Exterior shell LOD — September 20, 2026
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 The active native compiler now builds a coarse solid exterior from its immutable
 section snapshot. It skips ordinary block-model tessellation for shell sections,
 including cutout/custom models. A horizontal tile stores only its lowest/highest

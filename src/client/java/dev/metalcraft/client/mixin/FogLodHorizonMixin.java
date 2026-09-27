@@ -1,6 +1,6 @@
 package dev.metalcraft.client.mixin;
 
-import dev.metalcraft.client.lod.LodDistantRenderer;
+import dev.metalcraft.client.lod.LodSystem;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -17,9 +17,11 @@ abstract class FogLodHorizonMixin {
     @Inject(method = "setupFog", at = @At("RETURN"))
     private void metalcraft$horizonFog(Camera camera,int distance,DeltaTracker delta,float darken,ClientLevel level,
                                      CallbackInfoReturnable<FogData> cir) {
-        int horizon=Math.max(LodDistantRenderer.horizon(),dev.metalcraft.client.horizon.NativeHorizon.horizon());
+        int horizon=LodSystem.horizon();
         if(horizon<=distance) return;
         FogData fog=cir.getReturnValue();
+        // Clear distance fog already pushed the cutoff beyond the whole view.
+        if(fog.renderDistanceStart>horizon*16) return;
         fog.renderDistanceStart=horizon*16*.9f;
         fog.renderDistanceEnd=horizon*16;
         // Scale long atmospheric haze, while preserving short biome/weather/status/fluid fog.

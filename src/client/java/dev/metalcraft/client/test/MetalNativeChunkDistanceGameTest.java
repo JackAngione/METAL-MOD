@@ -4,9 +4,7 @@ import com.google.gson.GsonBuilder;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.chunk.NativeChunkDistance;
-import dev.metalcraft.client.lod.LodCapabilities;
-import dev.metalcraft.client.lod.LodCompilerCapture;
-import dev.metalcraft.client.lod.LodTerrainGeneration;
+import dev.metalcraft.client.lod.LodSystem;
 import dev.metalcraft.client.mixin.ChunkMapDistanceAccessor;
 import io.netty.buffer.Unpooled;
 import java.nio.file.Files;
@@ -29,7 +27,7 @@ final class MetalNativeChunkDistanceGameTest {
     static void run(ClientGameTestContext context) {
         int savedDistance = context.computeOnClient(c -> c.options.renderDistance().get());
         int savedSimulation = context.computeOnClient(c -> c.options.simulationDistance().get());
-        var savedLod = MetalCraftConfig.lod();
+        boolean savedLod = MetalCraftConfig.lodEnabled();
         boolean savedFog = MetalCraftConfig.clearDistanceFog();
         var report = new LinkedHashMap<String, Object>();
         long started = System.nanoTime();
@@ -56,9 +54,7 @@ final class MetalNativeChunkDistanceGameTest {
                 c.options.renderDistance().set(DISTANCE);
                 c.options.simulationDistance().set(16);
                 MetalCraftConfig.setClearDistanceFog(false);
-                // A saved opt-in from an older build must not activate the old pipeline.
-                MetalCraftConfig.setLod(savedLod.withEnabled(true).withHorizon(256, true, 2048));
-                check(!LodCapabilities.current(true).effective(MetalCraftConfig.lod()).enabled(), "legacy preferences inactive");
+                MetalCraftConfig.setLodEnabled(false);
             });
             var builder = context.worldBuilder().adjustSettings(settings -> {
                 var normal = settings.getSettings().worldgenLoadContext()
@@ -99,7 +95,7 @@ final class MetalNativeChunkDistanceGameTest {
                 context.waitFor(c -> rendered(c, marker), 1200);
                 context.runOnClient(c -> {
                     check(c.levelRenderer.viewArea().getViewDistance() == DISTANCE, "native renderer distance");
-                    check(!LodCompilerCapture.capturing() && !LodTerrainGeneration.stats().active(), "no legacy LOD work");
+                    check(!LodSystem.active(), "distant terrain inactive for the native-only route");
                     check(c.options.simulationDistance().get() == 16, "simulation unchanged");
                     c.gui.hud.getChat().clearMessages(true);
                 });
@@ -134,7 +130,7 @@ final class MetalNativeChunkDistanceGameTest {
         } finally {
             context.runOnClient(c -> {
                 c.options.renderDistance().set(savedDistance); c.options.simulationDistance().set(savedSimulation);
-                MetalCraftConfig.setLod(savedLod);
+                MetalCraftConfig.setLodEnabled(savedLod);
                 MetalCraftConfig.setClearDistanceFog(savedFog);
             });
             try {

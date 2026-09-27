@@ -1,5 +1,8 @@
 # Shell performance investigation
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 September 21, 2026. Local captures occurred September 20, 20:46–20:52 EDT.
 
 The shell conversion removes distant block-model tessellation, but does not turn

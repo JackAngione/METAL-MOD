@@ -50,7 +50,6 @@ final class MetalWaterIdentityGameTest {
 			settings.setAllowCommands(true);
 			settings.getGameRules().set(GameRules.ADVANCE_TIME, false, null);
 			settings.getGameRules().set(GameRules.ADVANCE_WEATHER, false, null);
-			if (MetalLodTestScope.HORIZON>16) settings.getGameRules().set(GameRules.SPECTATORS_GENERATE_CHUNKS,true,null);
 		});
 		boolean originalDebug = WaterIdentityDebug.enabled();
 		WaterRoutingDebug.Mode originalRoutingDebug = WaterRoutingDebug.mode();
@@ -63,7 +62,6 @@ final class MetalWaterIdentityGameTest {
 		try (var world = builder.create()) {
 			this.context.waitFor(client -> client.level != null && client.player != null);
 			world.getServer().runCommand("gamemode spectator @a");
-			MetalLodTestScope.prepareHorizon(this.context,world);
 			world.getServer().runCommand("tp @a 0 193 18 180 40");
 			this.context.waitTicks(80);
 			world.getServer().runCommand("fill -14 180 -10 14 180 10 minecraft:white_concrete");

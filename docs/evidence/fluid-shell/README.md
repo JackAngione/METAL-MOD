@@ -1,5 +1,8 @@
 # Direct fluid shells — September 21
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 `NativeShellCompiler` now builds solid and fluid envelopes directly. Distant
 compilation no longer calls the ordinary block/fluid compiler first. Water uses
 the same 4/8/16-block horizontal grid as solid shells, capped at 320 quads per

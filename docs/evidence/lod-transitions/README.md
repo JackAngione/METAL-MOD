@@ -1,5 +1,8 @@
 # LOD approach restoration evidence
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 September 18, 2026, Apple Silicon/macOS. One short NORMAL world (`metalcraft` seed),
 render/simulation 16/16, Chunk Builder Threaded, Default graphics backend confirmed
 as Metal, no shader pack, Metal API validation enabled. Route duration: 17.54 seconds.

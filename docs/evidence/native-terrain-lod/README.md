@@ -1,5 +1,8 @@
 # Native terrain surface LOD — September 18, 2026
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 Apple M4 Max, macOS 27.0, Java 25, Minecraft 26.2. Native Default graphics
 backend reports Metal. NORMAL generated world, seed `metalcraft`, render/simulation
 16/16, native Chunk Builder = Threaded (`PrioritizeChunkUpdates.NONE`).

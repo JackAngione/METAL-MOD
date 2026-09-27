@@ -1,5 +1,8 @@
 # Compact horizon and hidden chunk costs
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 September 21, 2026. Implemented on the direct Metal backend.
 
 ## Diagnosis

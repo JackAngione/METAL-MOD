@@ -2,13 +2,9 @@ package dev.metalcraft.client;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import dev.metalcraft.client.lod.LodSettings;
-import dev.metalcraft.client.lod.LodSettingsCodec;
-import dev.metalcraft.client.lod.LodFrameSettings;
-import dev.metalcraft.client.lod.LodCapabilities;
-import dev.metalcraft.client.chunk.NativeLodSelection;
-import dev.metalcraft.client.horizon.HorizonDetail;
 import com.mojang.logging.LogUtils;
 import java.io.IOException;
 import java.io.Reader;
@@ -24,31 +20,13 @@ public final class MetalCraftConfig {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("metalcraft.json");
 	private static Data data = load();
-	private static final LodFrameSettings LOD_FRAMES = new LodFrameSettings();
-	static { LOD_FRAMES.request(data.lod); }
 
 	private MetalCraftConfig() {
-	}
-
-	public static synchronized LodSettings lod() {
-		return data.lod;
 	}
 
 	/** Re-read renderer preferences; resources adopt changes at their own frame boundary. */
 	public static synchronized void reload() {
 		data = load();
-		LOD_FRAMES.request(data.lod);
-	}
-
-	public static LodSettings beginLodFrame(final boolean metal) {
-		return LOD_FRAMES.beginFrame(LodCapabilities.current(metal));
-	}
-
-	public static synchronized void setLod(final LodSettings settings) {
-		if (data.lod.equals(settings)) return;
-		data.lod = java.util.Objects.requireNonNull(settings);
-		LOD_FRAMES.request(settings);
-		save();
 	}
 
 	public static synchronized boolean halfResolution() {
@@ -72,44 +50,32 @@ public final class MetalCraftConfig {
 		return data.clearDistanceFog;
 	}
 
-	public static synchronized boolean nativeLodPixels() { return data.nativeLodPixels; }
-    public static synchronized void setNativeLodPixels(boolean enabled) {
-        if (data.nativeLodPixels == enabled) return;
-        data.nativeLodPixels = enabled; save();
-    }
+	/** Distant terrain between the native distance and Minecraft's render distance. */
+	public static synchronized boolean lodEnabled() { return data.lodEnabled; }
 
-	public static synchronized boolean nativeTerrainLod() { return data.nativeTerrainLod; }
-
-	public static synchronized int nativeLodReduction() { return data.nativeLodReduction; }
-
-	public static synchronized int nativeQualityDistance() { return data.nativeQualityDistance; }
-
-	public static synchronized int horizonDetail() { return data.horizonDetail; }
-
-	public static synchronized void setHorizonDetail(final int level) {
-		int clamped = HorizonDetail.clamp(level);
-		if (data.horizonDetail == clamped) return;
-		data.horizonDetail = clamped;
+	public static synchronized void setLodEnabled(final boolean enabled) {
+		if (data.lodEnabled == enabled) return;
+		data.lodEnabled = enabled;
 		save();
 	}
 
-	public static synchronized void setNativeQualityDistance(final int chunks) {
-		int clamped = NativeLodSelection.clampNativeDistance(chunks);
-		if (data.nativeQualityDistance == clamped) return;
-		data.nativeQualityDistance = clamped;
+	/** Radius of ordinary full-quality chunks while distant terrain is enabled. */
+	public static synchronized int lodNativeDistance() { return data.lodNativeDistance; }
+
+	public static synchronized void setLodNativeDistance(final int chunks) {
+		int clamped = LodSettings.clampNativeDistance(chunks);
+		if (data.lodNativeDistance == clamped) return;
+		data.lodNativeDistance = clamped;
 		save();
 	}
 
-	public static synchronized void setNativeLodReduction(final int reduction) {
-		int clamped = NativeLodSelection.clampReduction(reduction);
-		if (data.nativeLodReduction == clamped) return;
-		data.nativeLodReduction = clamped;
-		save();
-	}
+	/** How slowly distant terrain loses detail, from 1 (fastest falloff) to 8. */
+	public static synchronized int lodDetail() { return data.lodDetail; }
 
-	public static synchronized void setNativeTerrainLod(final boolean enabled) {
-		if (data.nativeTerrainLod == enabled) return;
-		data.nativeTerrainLod = enabled;
+	public static synchronized void setLodDetail(final int detail) {
+		int clamped = LodSettings.clampDetail(detail);
+		if (data.lodDetail == clamped) return;
+		data.lodDetail = clamped;
 		save();
 	}
 
@@ -139,16 +105,11 @@ public final class MetalCraftConfig {
 			loaded.halfResolution = readBoolean(json, "halfResolution");
 			loaded.unlockedFrameRate = readBoolean(json, "unlockedFrameRate");
 			loaded.clearDistanceFog = readBoolean(json, "clearDistanceFog");
-			var nativeLod = json.get("nativeTerrainLod");
-			loaded.nativeTerrainLod = nativeLod == null || !nativeLod.isJsonPrimitive()
-				|| !nativeLod.getAsJsonPrimitive().isBoolean() || nativeLod.getAsBoolean();
-			var pixels = json.get("nativeLodPixels");
-            loaded.nativeLodPixels = pixels == null || !pixels.isJsonPrimitive()
-                || !pixels.getAsJsonPrimitive().isBoolean() || pixels.getAsBoolean();
-            loaded.nativeLodReduction = NativeLodSettingsCodec.readReduction(json.get("nativeLodReduction"));
-			loaded.nativeQualityDistance = NativeLodSettingsCodec.readNativeDistance(json.get("nativeQualityDistance"));
-			loaded.horizonDetail = NativeLodSettingsCodec.readHorizonDetail(json.get("horizonDetail"));
-			loaded.lod = LodSettingsCodec.read(json.get("lod"));
+			// The prototype's on/off switch is not carried over; its native radius is.
+			loaded.lodEnabled = readBoolean(json, "lodEnabled", LodSettings.DEFAULT_ENABLED);
+			loaded.lodNativeDistance = LodSettings.clampNativeDistance(readInteger(json.has("lodNativeDistance")
+				? json.get("lodNativeDistance") : json.get("nativeQualityDistance"), LodSettings.DEFAULT_NATIVE_DISTANCE));
+			loaded.lodDetail = LodSettings.clampDetail(readInteger(json.get("lodDetail"), LodSettings.DEFAULT_DETAIL));
 			return loaded;
 		} catch (IOException | RuntimeException error) {
 			LOGGER.warn("Could not read MetalCraft settings from {}", PATH, error);
@@ -157,8 +118,19 @@ public final class MetalCraftConfig {
 	}
 
 	private static boolean readBoolean(final JsonObject json, final String key) {
+		return readBoolean(json, key, false);
+	}
+
+	private static boolean readBoolean(final JsonObject json, final String key, final boolean fallback) {
 		var value = json.get(key);
-		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() && value.getAsBoolean();
+		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() ? value.getAsBoolean() : fallback;
+	}
+
+	/** Whole numbers only; missing or malformed values use the fallback. */
+	private static int readInteger(final JsonElement value, final int fallback) {
+		if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) return fallback;
+		double number = value.getAsDouble();
+		return Double.isFinite(number) && number == Math.rint(number) ? (int)Math.clamp(number, Integer.MIN_VALUE, Integer.MAX_VALUE) : fallback;
 	}
 
 	private static void save() {
@@ -188,11 +160,8 @@ public final class MetalCraftConfig {
 		private boolean halfResolution;
 		private boolean unlockedFrameRate;
 		private boolean clearDistanceFog;
-		private boolean nativeTerrainLod = true;
-        private boolean nativeLodPixels = true;
-		private int nativeLodReduction = NativeLodSelection.DEFAULT_REDUCTION;
-		private int nativeQualityDistance = NativeLodSelection.DEFAULT_NATIVE_DISTANCE;
-		private int horizonDetail = HorizonDetail.DEFAULT;
-		private LodSettings lod = LodSettings.defaults();
+		private boolean lodEnabled = LodSettings.DEFAULT_ENABLED;
+		private int lodNativeDistance = LodSettings.DEFAULT_NATIVE_DISTANCE;
+		private int lodDetail = LodSettings.DEFAULT_DETAIL;
 	}
 }

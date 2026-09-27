@@ -1,5 +1,8 @@
 # Geometric LOD correction — September 18, 2026
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 The earlier implementation only merged coplanar faces. It saved vertices but
 preserved block-sized terrain silhouettes, making the visual effect weak even at
 level 5. The new path clusters actual terrain vertices and removes collapsed

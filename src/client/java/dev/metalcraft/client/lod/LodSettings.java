@@ -1,73 +1,34 @@
 package dev.metalcraft.client.lod;
 
-/** Renderer-owned immutable preferences. Capabilities determine what may actually run. */
-public record LodSettings(boolean enabled, Preset preset, int fullDetailChunks, double errorPixels,
-        Shading shading, int horizonChunks, boolean smoothTransitions, int meshBudgetMiB,
-        Work backgroundWork, boolean diskCache, int diskBudgetMiB, boolean diagnostics, boolean generateTerrain) {
-    public enum Preset { QUALITY, BALANCED, PERFORMANCE, CUSTOM }
-    public enum Shading { FULL, HALF, QUARTER, AUTO }
-    public enum Work { LOW, BALANCED, HIGH }
+/**
+ * Limits and derived policy for distant terrain.
+ *
+ * <p>Total distance is Minecraft's render distance. Native distance is the radius of ordinary
+ * chunks. Detail sets the distance at which each LOD level begins: a level-{@code L} cell is
+ * {@code 2^L} blocks wide and is used from {@code levelDistance(detail) * 2^L} blocks, which
+ * keeps a cell under roughly {@link #pixelError} pixels at a 1080p, 70-degree reference view.
+ */
+public final class LodSettings {
+    public static final boolean DEFAULT_ENABLED = true;
+    public static final int MIN_NATIVE_DISTANCE = 2;
+    public static final int MAX_NATIVE_DISTANCE = 256;
+    public static final int DEFAULT_NATIVE_DISTANCE = 12;
+    public static final int MIN_DETAIL = 1;
+    public static final int MAX_DETAIL = 8;
+    public static final int DEFAULT_DETAIL = 5;
+    /** Blocks per level at each detail step; each step is about 1.5x the previous one. */
+    private static final int[] LEVEL_DISTANCE = {32, 48, 64, 96, 128, 192, 256, 384};
+    /** Pixels per radian of a 1080-pixel-tall, 70-degree view. */
+    private static final double REFERENCE_PIXELS_PER_RADIAN = 1080 / (2 * Math.tan(Math.toRadians(35)));
 
-    public LodSettings {
-        preset = preset == null ? Preset.BALANCED : preset;
-        fullDetailChunks = Math.clamp(fullDetailChunks, 2, 12);
-        errorPixels = Double.isFinite(errorPixels) ? Math.clamp(errorPixels, 0.5, 8.0) : 2.0;
-        shading = shading == null ? Shading.FULL : shading;
-        horizonChunks = switch (horizonChunks) { case 32, 64, 128, 256 -> horizonChunks; default -> 16; };
-        meshBudgetMiB = meshBudgetMiB == 0 ? 0 : Math.clamp(meshBudgetMiB, 128, 2048);
-        backgroundWork = backgroundWork == null ? Work.BALANCED : backgroundWork;
-        diskBudgetMiB = Math.clamp(diskBudgetMiB, 512, 8192);
-        if (preset != Preset.CUSTOM && (fullDetailChunks != radius(preset) || errorPixels != error(preset))) {
-            preset = Preset.CUSTOM;
-        }
-    }
+    private LodSettings() { }
 
-    public static LodSettings defaults() {
-        return new LodSettings(false, Preset.BALANCED, 4, 2, Shading.FULL, 16, true, 0,
-                Work.BALANCED, true, 2048, false, true);
-    }
+    public static int clampNativeDistance(int chunks) { return Math.clamp(chunks, MIN_NATIVE_DISTANCE, MAX_NATIVE_DISTANCE); }
 
-    private static int radius(Preset preset) { return switch (preset) { case QUALITY -> 6; case PERFORMANCE -> 2; default -> 4; }; }
-    private static double error(Preset preset) { return switch (preset) { case QUALITY -> 1; case PERFORMANCE -> 4; default -> 2; }; }
+    public static int clampDetail(int detail) { return Math.clamp(detail, MIN_DETAIL, MAX_DETAIL); }
 
-    public LodSettings withPreset(Preset value) {
-        if (value == null || value == Preset.CUSTOM) return withGeometry(fullDetailChunks, errorPixels);
-        return new LodSettings(enabled, value, radius(value), error(value), shading, horizonChunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics, generateTerrain);
-    }
+    public static int levelDistance(int detail) { return LEVEL_DISTANCE[clampDetail(detail) - 1]; }
 
-    public LodSettings withGeometry(int radius, double error) {
-        return new LodSettings(enabled, Preset.CUSTOM, radius, error, shading, horizonChunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics, generateTerrain);
-    }
-
-    public LodSettings withEnabled(boolean value) {
-        return new LodSettings(value, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics, generateTerrain);
-    }
-
-    public LodSettings withHorizon(int chunks, boolean cache, int diskMiB) {
-        return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, chunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, cache, diskMiB, diagnostics, generateTerrain);
-    }
-
-    public LodSettings withRuntimeLimits(boolean smoothing, int memoryMiB, Work work) {
-        return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
-                smoothing, memoryMiB, work, diskCache, diskBudgetMiB, diagnostics, generateTerrain);
-    }
-
-    public LodSettings withGeneration(boolean value) {
-        return new LodSettings(enabled, preset, fullDetailChunks, errorPixels, shading, horizonChunks,
-                smoothTransitions, meshBudgetMiB, backgroundWork, diskCache, diskBudgetMiB, diagnostics, value);
-    }
-
-    /** Keep headroom for the rest of the renderer; retirement remains charged under pressure. */
-    public long meshBudgetBytes(long workingSet, long allocatedBytes, long currentLodBytes) {
-        long requested = meshBudgetMiB == 0
-                ? Math.clamp(workingSet / 32, 128L << 20, 512L << 20) : (long)meshBudgetMiB << 20;
-        if (workingSet <= 0) return requested;
-        long otherRendererBytes = Math.max(0, allocatedBytes - currentLodBytes);
-        long headroom = Math.max(1, workingSet - workingSet / 5 - otherRendererBytes);
-        return Math.min(requested, headroom);
-    }
+    /** Approximate on-screen size of one cell at the start of its level, for the settings text. */
+    public static double pixelError(int detail) { return REFERENCE_PIXELS_PER_RADIAN / levelDistance(detail); }
 }

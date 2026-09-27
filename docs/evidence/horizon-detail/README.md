@@ -1,5 +1,8 @@
 # Maximum-detail horizon coverage and performance — September 23, 2026
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 The original detail-5/F3 capture at 64 render distance showed 36 FPS and missing
 distant terrain. Generation had completed successfully; rendering was the failure.
 

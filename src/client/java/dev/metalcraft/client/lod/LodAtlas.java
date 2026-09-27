@@ -1,49 +1,70 @@
 package dev.metalcraft.client.lod;
 
-import java.util.ArrayList;
-import java.util.List;
-import org.jspecify.annotations.Nullable;
+import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import java.nio.ByteBuffer;
+import org.lwjgl.system.MemoryUtil;
 
-/** Immutable atlas index published after upload. Compiler workers never retain live sprites. */
-public final class LodAtlas {
-    private static final int GRID = 64;
-    private static volatile LodAtlas current = new LodAtlas(List.of());
-    private final List<List<LodBakedMesh.Sprite>> buckets;
-    private final String fingerprint;
+/**
+ * One RGBA texture holding every resident node's 32×32 cell colours, bound as {@code Sampler0}
+ * for all distant draws. Slot 0 is solid white for fluids, whose colour is in their vertices.
+ *
+ * <p>Slot writes are GPU-ordered blits, so a slot released by one node can be handed to another
+ * at once: frames already submitted read the old texels before the new ones land.
+ */
+final class LodAtlas implements AutoCloseable {
+    static final int SIZE = 2048;
+    static final int SLOT = LodTile.CELLS;
+    private static final int PER_ROW = SIZE / SLOT;
+    static final int SLOTS = PER_ROW * PER_ROW;
+    static final float WHITE_UV = (SLOT / 2 + 0.5F) / SIZE;
 
-    public LodAtlas(List<LodBakedMesh.Sprite> sprites) {
-        fingerprint = LodDistantStore.digest(sprites.stream().sorted(java.util.Comparator.comparing(LodBakedMesh.Sprite::name))
-                .map(Object::toString).collect(java.util.stream.Collectors.joining("\n")));
-        if (sprites.size() > 65536) throw new IllegalArgumentException("LOD atlas sprite limit exceeded");
-        var cells = new ArrayList<List<LodBakedMesh.Sprite>>(GRID * GRID);
-        for (int i = 0; i < GRID * GRID; i++) cells.add(new ArrayList<>());
-        long references = 0;
-        for (var sprite : sprites) {
-            for (int y = cell(sprite.v0()); y <= cell(sprite.v1()); y++) {
-                for (int x = cell(sprite.u0()); x <= cell(sprite.u1()); x++) {
-                    if (++references > 1_048_576) throw new IllegalArgumentException("LOD atlas index budget exceeded");
-                    cells.get(x + GRID * y).add(sprite);
-                }
-            }
+    private final GpuTexture texture;
+    private final GpuTextureView view;
+    final LodTextureBinding binding;
+    private final IntArrayList free = new IntArrayList(SLOTS);
+
+    LodAtlas() {
+        var device = RenderSystem.getDevice();
+        this.texture = device.createTexture("MetalCraft distant terrain colours",
+            GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, SIZE, SIZE, 1, 1);
+        this.view = device.createTextureView(this.texture);
+        this.binding = new LodTextureBinding(this.view, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+        ByteBuffer white = MemoryUtil.memAlloc(SLOT * SLOT * 4);
+        try {
+            while (white.hasRemaining()) white.put((byte)-1);
+            white.flip();
+            this.upload(0, white);
+        } finally {
+            MemoryUtil.memFree(white);
         }
-        buckets = cells.stream().map(List::copyOf).toList();
+        for (int slot = SLOTS - 1; slot > 0; slot--) this.free.add(slot);
     }
 
-    private static int cell(float uv) { return Math.clamp((int)(uv * GRID), 0, GRID - 1); }
-    public static LodAtlas current() { return current; }
-    public static void publish(LodAtlas atlas) { current = java.util.Objects.requireNonNull(atlas); }
-    public static void clear() { current = new LodAtlas(List.of()); }
-    public String fingerprint() { return fingerprint; }
+    static int slotX(int slot) { return slot % PER_ROW * SLOT; }
 
-    /** Require one real sprite containing the entire emitted footprint; ambiguous/custom UVs decline. */
-    public LodBakedMesh.@Nullable Sprite resolve(float u0, float v0, float u1, float v1) {
-        if (!(u0 >= 0 && v0 >= 0 && u1 <= 1 && v1 <= 1 && u1 > u0 && v1 > v0)) return null;
-        LodBakedMesh.Sprite found = null;
-        for (var sprite : buckets.get(cell((u0 + u1) * .5f) + GRID * cell((v0 + v1) * .5f))) {
-            if (u0 < sprite.u0() || v0 < sprite.v0() || u1 > sprite.u1() || v1 > sprite.v1()) continue;
-            if (found != null) return null;
-            found = sprite;
-        }
-        return found;
+    static int slotY(int slot) { return slot / PER_ROW * SLOT; }
+
+    /** A free slot, or -1 when every slot is in use. */
+    int allocate() { return this.free.isEmpty() ? -1 : this.free.removeInt(this.free.size() - 1); }
+
+    void release(int slot) {
+        if (slot > 0) this.free.add(slot);
+    }
+
+    int available() { return this.free.size(); }
+
+    void upload(int slot, ByteBuffer rgba) {
+        RenderSystem.getDevice().createCommandEncoder().writeToTexture(this.texture, rgba, 0, 0, slotX(slot), slotY(slot), SLOT, SLOT);
+    }
+
+    @Override
+    public void close() {
+        this.view.close();
+        this.texture.close();
     }
 }

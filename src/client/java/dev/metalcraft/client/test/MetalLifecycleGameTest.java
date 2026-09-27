@@ -3,6 +3,7 @@ package dev.metalcraft.client.test;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
+import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.MetalCraftRenderResolution;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import dev.metalcraft.client.metal.MetalSurfaceProbe;
@@ -61,44 +62,25 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 
 	@Override
 	public void runTest(final ClientGameTestContext context) {
-        // These routes measure native chunk delivery/section compilation in isolation.
-        // The compact-horizon route separately validates the model-only integrated path.
-        boolean nativeOnly = Boolean.getBoolean("metalcraft.geometricLodTest")
-                || Boolean.getBoolean("metalcraft.nativeTerrainLodTest") || Boolean.getBoolean("metalcraft.nativeChunkDistanceTest");
-        String horizonOverride = System.getProperty("metalcraft.disableHorizon");
-        if (nativeOnly) System.setProperty("metalcraft.disableHorizon", "true");
-        try (var lod = new MetalLodTestScope(context)) {
-            this.runConfiguredTest(context);
-        } finally {
-            if (nativeOnly) {
-                if (horizonOverride == null) System.clearProperty("metalcraft.disableHorizon");
-                else System.setProperty("metalcraft.disableHorizon", horizonOverride);
-            }
-        }
+		boolean lod = MetalCraftConfig.lodEnabled();
+		try {
+			this.runConfiguredTest(context);
+		} finally {
+			context.runOnClient(client -> MetalCraftConfig.setLodEnabled(lod));
+		}
 	}
 
 	private void runConfiguredTest(final ClientGameTestContext context) {
-        if(Boolean.getBoolean("metalcraft.horizonDetailTest")) {
-            MetalHorizonDetailGameTest.run(context);
-            return;
-        }
-		if (Boolean.getBoolean("metalcraft.horizonGenerationTest")) {
-            MetalHorizonGenerationGameTest.run(context);
-            return;
-        }
-		if (Boolean.getBoolean("metalcraft.compactHorizonTest")) {
-            MetalCompactHorizonGameTest.run(context);
-            return;
-        }
-		if (Boolean.getBoolean("metalcraft.geometricLodTest")) {
-			MetalGeometricLodGameTest.run(context);
+		if (Boolean.getBoolean("metalcraft.lodTest")) {
+			MetalLodGameTest.run(context);
 			return;
 		}
-		if (Boolean.getBoolean("metalcraft.nativeTerrainLodTest")) {
-			MetalNativeTerrainLodGameTest.run(context);
-			return;
+		// Native-distance routes measure ordinary chunk delivery and meshing in isolation.
+		boolean nativeOnly = Boolean.getBoolean("metalcraft.nativeChunkDistanceTest");
+		if (nativeOnly || !Boolean.getBoolean("metalcraft.lifecycleBenchmark")) {
+			context.runOnClient(client -> MetalCraftConfig.setLodEnabled(false));
 		}
-		if (Boolean.getBoolean("metalcraft.nativeChunkDistanceTest")) {
+		if (nativeOnly) {
 			MetalNativeChunkDistanceGameTest.run(context);
 			return;
 		}
@@ -113,27 +95,6 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			throw new AssertionError("Lifecycle test selected unexpected backend: " + backend + " (expected " + expectedBackend + ")");
 		}
 		LOGGER.info("Metal lifecycle validation: {} backend selected", backend);
-		if (Boolean.getBoolean("metalcraft.lodGenerationTest")) {
-			MetalLodGenerationGameTest.run(context);
-			return;
-		}
-		if (Boolean.getBoolean("metalcraft.lodHorizonTest")) {
-			MetalLodHorizonGameTest.run(context);
-			return;
-		}
-		if (Boolean.getBoolean("metalcraft.lodRenderTest")) {
-			MetalLodRenderGameTest.run(context);
-			return;
-		}
-		if (Boolean.getBoolean("metalcraft.lodCompilerTest")) {
-			MetalLodCompilerGameTest.run(context);
-			return;
-		}
-		if (Boolean.getBoolean("metalcraft.lodSettingsTest")) {
-			MetalLodSettingsGameTest.run(context);
-			return;
-		}
-
 		if (Boolean.getBoolean("metalcraft.waterIdentityTest")) {
 			new MetalWaterIdentityGameTest(context).run();
 			return;

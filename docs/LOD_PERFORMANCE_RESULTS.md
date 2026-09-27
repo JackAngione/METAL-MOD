@@ -1,5 +1,10 @@
 # LOD measurements, 2026-09-11–12
 
+> **Superseded (2026-09-26).** This document describes an earlier LOD prototype whose code has
+> been removed. The current system is described in
+> [the distant terrain evidence](evidence/distant-terrain/README.md) and
+> [the rewrite plan](LOD_REWRITE_PLAN.md).
+
 Loaded-terrain geometry and composition validation pass. P6 implements the
 plan-authorized full-resolution reduced-lighting fallback; half/quarter pixel
 resolution remains deferred. P8 is complete as an **opt-in explored-terrain preview**, following the user's

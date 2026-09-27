@@ -1,5 +1,8 @@
 # Native distant pixel resolution — September 20, 2026
 
+> **Superseded (2026-09-26):** historical record of a removed LOD prototype. The current system is
+> described in [the distant terrain evidence](../distant-terrain/README.md).
+
 The active native terrain path renders eligible SOLID draws into two cached Metal
 color/D32 targets: ceil(scene extent / 2) for geometry tier 2, and
 ceil(scene extent / 4) for tiers 4–16. The existing camera/FOV/native-radius policy

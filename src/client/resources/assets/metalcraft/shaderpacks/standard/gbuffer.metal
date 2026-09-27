@@ -16,10 +16,6 @@
 #include <metal_stdlib>
 using namespace metal;
 
-#ifdef MC_TERRAIN_LOD
-#include "shared/lod.metal"
-#endif
-
 #ifdef MC_PASS_GBUFFER
 
 // ---- Minecraft's uniform blocks, in the layout std140 gives them -------------------------------
@@ -120,11 +116,6 @@ struct GBufferVaryings {
     float2 lightLevels;
     float sphericalDistance;
     float cylindricalDistance;
-#ifdef MC_TERRAIN_LOD
-    float4 lodMapU [[flat]];
-    float4 lodMapV [[flat]];
-    float4 lodBounds [[flat]];
-#endif
 #ifdef MC_WATER_FORWARD
     float waterMaterial [[flat]];
     float3 waterFlow;
@@ -229,10 +220,6 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     constant McGlobals &globals [[buffer(MC_SLOT_GLOBALS)]],
     texture2d<float> lightMap [[texture(MC_SLOT_SAMPLER2)]],
     sampler lightSampler [[sampler(MC_SLOT_SAMPLER2)]]
-#ifdef MC_TERRAIN_LOD
-    , uint lodVertexId [[vertex_id]]
-    , device const McLodVertex *lodVertices [[buffer(14)]]
-#endif
 #ifdef MC_WATER_FORWARD
     , uint vertexId [[vertex_id]]
     , device const WaterVertexMetadata *waterMetadata [[buffer(14)]]
@@ -262,12 +249,6 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
 #endif
     out.lightMapColor = mc_sample_lightmap(lightMap, lightSampler, uv2);
     out.uv = in.UV0;
-#ifdef MC_TERRAIN_LOD
-    McLodVertex lod = lodVertices[lodVertexId];
-    out.lodMapU = lod.mapU;
-    out.lodMapV = lod.mapV;
-    out.lodBounds = lod.bounds;
-#endif
     out.lightLevels = saturate(uv2 / 240.0);
     out.sphericalDistance = mc_fog_spherical_distance(relative);
     out.cylindricalDistance = mc_fog_cylindrical_distance(relative);
@@ -369,9 +350,6 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     float4 texel;
 #endif
     texel =
-#ifdef MC_TERRAIN_LOD
-        in.lodMapV.z != 0.0 ? mc_lod_sample(atlas, atlasSampler, in.uv, in.lodMapU, in.lodMapV, in.lodBounds) :
-#endif
         globals.UseRgss == 1
         ? mc_sample_rgss(atlas, atlasSampler, in.uv, pixelSize, atlasDx, atlasDy, texelScreenSize)
         : mc_sample_nearest(atlas, atlasSampler, in.uv, pixelSize, atlasDx, atlasDy, texelScreenSize);
