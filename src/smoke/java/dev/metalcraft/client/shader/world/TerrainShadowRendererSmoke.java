@@ -31,17 +31,19 @@ final class TerrainShadowRendererSmoke {
 			source = new String(input.readAllBytes(), StandardCharsets.UTF_8);
 		} catch (IOException error) { throw new AssertionError(error); }
 		LodShadowSmoke.run(device, contract, source);
+		ShadowCasterMotionSmoke.run(device, contract, source);
 		for (int count = 1; count <= 4; count++) {
 			for (var layer : ChunkSectionLayerGroup.OPAQUE.layers()) {
-				check(device, contract, source, count, layer, false);
-				check(device, contract, source, count, layer, true);
+				check(device, contract, source, count, layer, false, 15);
+				check(device, contract, source, count, layer, true, 15);
+				check(device, contract, source, count, layer, false, 10);
 			}
 		}
-		System.out.println("Terrain shadows: 1–4 cascades, depth draws, cutouts, visibility, split boundaries and PCF edges passed");
+		System.out.println("Terrain shadows: 1–4 cascades, depth draws, cutouts, visibility, split boundaries, sparse cascade masks and PCF edges passed");
 	}
 
 	private static void check(final MetalDevice device, final String contract, final String source,
-		final int count, final ChunkSectionLayer layer, final boolean transparent) {
+		final int count, final ChunkSectionLayer layer, final boolean transparent, final int mask) {
 		var settings = new ShadowCascades.Settings(count, 32, 0.1F, 96, 0.6F, 96);
 		var camera = new Vector3d();
 		var orientation = new Quaternionf();
@@ -50,7 +52,7 @@ final class TerrainShadowRendererSmoke {
 		boolean cutout = layer.pipeline().getShaderDefines().values().containsKey("ALPHA_CUTOUT");
 		StringBuilder checks = new StringBuilder();
 		for (int i = 0; i < Math.max(2,count); i++) {
-			float expected = i >= count || transparent && cutout ? 1 : cascades.get(i)
+			float expected = i >= count || (mask & (1 << i)) == 0 || transparent && cutout ? 1 : cascades.get(i)
 				.cameraRelativeToShadow().transformPosition(new Vector3f(0,8,0)).z;
 			checks.append("ok = ok && abs(map.sample(s,float2(0.5),").append(i).append(") - ")
 				.append(expected).append(") < 0.0001;\n");
@@ -65,7 +67,7 @@ final class TerrainShadowRendererSmoke {
 			checks.append("ok = ok && mc_shadow_cascade(").append(Math.nextUp(cascades.get(i).far()))
 				.append(", f) == ").append(i + 1).append(";\n");
 			for (int height : new int[]{0, 16}) {
-				int visibility = height == 16 || transparent && cutout ? 1 : 0;
+				int visibility = height == 16 || (mask & (1 << i)) == 0 || transparent && cutout ? 1 : 0;
 				checks.append("ok = ok && abs(mc_shadow_visibility(float3(0,").append(height).append(",-")
 					.append(viewDepth).append("), ").append(viewDepth).append(", 0.00001, f, map, s) - ")
 					.append(visibility).append(") < 0.0001;\n");
@@ -78,7 +80,7 @@ final class TerrainShadowRendererSmoke {
 				new Vector3f(-1 + 1.0F / settings.resolution(), 0, receiverDepth));
 			checks.append("ok = ok && abs(mc_shadow_visibility(float3(").append(edge.x).append(',')
 				.append(edge.y).append(',').append(edge.z).append("), ").append(viewDepth)
-				.append(", 0.00001, f, map, s) - ").append(transparent && cutout ? "1.0" : "(1.0 / 3.0)")
+				.append(", 0.00001, f, map, s) - ").append((mask & (1 << i)) == 0 || transparent && cutout ? "1.0" : "(1.0 / 3.0)")
 				.append(") < 0.0001;\n");
 		}
 		checks.append("""
@@ -136,8 +138,8 @@ final class TerrainShadowRendererSmoke {
 			pixel.put(new byte[]{-1,-1,-1,(byte)(transparent ? 0 : 255)}).flip();
 			atlas.upload(queue,0,pixel);
 			List<TerrainShadowRenderer.Draw> draws = List.of(
-				new TerrainShadowRenderer.Draw(layer,vertices,32,indices,4,MetalRenderPass.IndexType.UINT16,6,0,0,0),
-				new TerrainShadowRenderer.Draw(layer,vertices,32,indices,4,MetalRenderPass.IndexType.UINT16,6,0,8,0));
+				new TerrainShadowRenderer.Draw(layer,vertices,32,indices,4,MetalRenderPass.IndexType.UINT16,6,0,0,0,mask),
+				new TerrainShadowRenderer.Draw(layer,vertices,32,indices,4,MetalRenderPass.IndexType.UINT16,6,0,8,0,mask));
 			try (var commands = queue.createCommandBuffer()) {
 				try (var pass = commands.beginRenderPass(module.depthPass())) {
 					renderer.encode(pass,frame,draws,atlasView,sampler);

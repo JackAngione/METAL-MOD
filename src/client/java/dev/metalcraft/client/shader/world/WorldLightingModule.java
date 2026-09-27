@@ -5,8 +5,8 @@ import java.nio.ByteBuffer;
 import org.joml.Vector4fc;
 
 /**
- * Vanilla lightmap lighting contract for deferred resolve. No occupancy volume, point-light
- * list, or extraBuffers bag.
+ * Vanilla lightmap/fog contract for deferred resolve. Nearby source and blocker data are
+ * owned separately by {@link WorldLocalLighting}.
  *
  * <p>G-buffer (see {@code shared/lighting.metal}):
  * <ul>
@@ -22,7 +22,8 @@ import org.joml.Vector4fc;
  * visibility. The RGB lightmap mixes sky and block energy isotropically (no {@code N·L}),
  * so the shadowed sun term is that sky share of the recovered seed, not a Lambert facing
  * term. Gating on {@code N·L} leaves dawn ground unshadowed. {@code visibility = 1} is an
- * identity on the unfogged seed. Fog is decoded and reapplied after lighting.
+ * identity on the unfogged seed. The local-light compose then shades the block-light share
+ * and adds moving emitters. Fog is decoded and reapplied after lighting.
  *
  * <p>{@link #FRAME_BYTES} matches {@code sizeof(McFog)} in MSL (40-byte members, 16-byte
  * aligned). Uncaptured fog uses starts/ends beyond any world distance so the original fog
@@ -59,20 +60,38 @@ public final class WorldLightingModule {
 			throw new IllegalArgumentException("Lighting frame buffer is smaller than " + FRAME_BYTES);
 		}
 		try (MetalBuffer.Mapping mapping = buffer.map()) {
-			ByteBuffer bytes = mapping.bytes();
-			for (int index = 0; index < FRAME_BYTES; index++) {
-				bytes.put(index, (byte)0);
-			}
-			bytes.putFloat(0, fogRed);
-			bytes.putFloat(4, fogGreen);
-			bytes.putFloat(8, fogBlue);
-			bytes.putFloat(12, fogAlpha);
-			bytes.putFloat(16, environmentalStart);
-			bytes.putFloat(20, environmentalEnd);
-			bytes.putFloat(24, renderDistanceStart);
-			bytes.putFloat(28, renderDistanceEnd);
-			bytes.putFloat(32, skyEnd);
-			bytes.putFloat(36, cloudsEnd);
+			write(mapping.bytes(), fogRed, fogGreen, fogBlue, fogAlpha,
+				environmentalStart, environmentalEnd, renderDistanceStart, renderDistanceEnd, skyEnd, cloudsEnd);
 		}
+	}
+
+	/** Writes at offset zero of a native-order mapped slice, including the ABI's tail padding. */
+	public static void write(final ByteBuffer bytes, final Vector4fc fogColor,
+		final float environmentalStart, final float environmentalEnd,
+		final float renderDistanceStart, final float renderDistanceEnd,
+		final float skyEnd, final float cloudsEnd) {
+		write(bytes, fogColor.x(), fogColor.y(), fogColor.z(), fogColor.w(),
+			environmentalStart, environmentalEnd, renderDistanceStart, renderDistanceEnd, skyEnd, cloudsEnd);
+	}
+
+	private static void write(final ByteBuffer bytes, final float fogRed, final float fogGreen,
+		final float fogBlue, final float fogAlpha,
+		final float environmentalStart, final float environmentalEnd,
+		final float renderDistanceStart, final float renderDistanceEnd,
+		final float skyEnd, final float cloudsEnd) {
+		if (bytes.limit() < FRAME_BYTES) {
+			throw new IllegalArgumentException("Lighting frame buffer is smaller than " + FRAME_BYTES);
+		}
+		bytes.putFloat(0, fogRed);
+		bytes.putFloat(4, fogGreen);
+		bytes.putFloat(8, fogBlue);
+		bytes.putFloat(12, fogAlpha);
+		bytes.putFloat(16, environmentalStart);
+		bytes.putFloat(20, environmentalEnd);
+		bytes.putFloat(24, renderDistanceStart);
+		bytes.putFloat(28, renderDistanceEnd);
+		bytes.putFloat(32, skyEnd);
+		bytes.putFloat(36, cloudsEnd);
+		bytes.putLong(40, 0L);
 	}
 }

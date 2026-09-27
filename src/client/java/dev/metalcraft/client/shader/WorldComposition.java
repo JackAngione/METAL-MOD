@@ -13,8 +13,8 @@ import org.jspecify.annotations.Nullable;
  * A linear world session wraps {@code LevelRenderer.render} and grades with
  * {@code gradeLinearWorld} into the encoded main color at that same seam; otherwise the
  * encoded {@code gradeWorld} path remains. Presentation copies the completed scene without
- * running the pack again. World consumers receive a stored depth snapshot taken before hand
- * and HUD can overwrite main depth.
+ * running the pack again. Packs whose executable passes read depth receive a stored snapshot
+ * taken before hand and HUD can overwrite main depth; other packs omit the snapshot.
  */
 public final class WorldComposition {
 	/**
@@ -82,8 +82,8 @@ public final class WorldComposition {
 		final MetalTextureView sceneView,
 		final int width,
 		final int height,
-		final MetalTexture worldDepth,
-		final MetalTextureView worldDepthView,
+		final @Nullable MetalTexture worldDepth,
+		final @Nullable MetalTextureView worldDepthView,
 		final @Nullable Matrix4fc worldProjection
 	) {
 		return world(scene, sceneView, width, height, worldDepth, worldDepthView, worldProjection,
@@ -91,7 +91,7 @@ public final class WorldComposition {
 	}
 
 	public static FrameBindings world(final MetalTexture scene, final MetalTextureView sceneView,
-		final int width, final int height, final MetalTexture worldDepth, final MetalTextureView worldDepthView,
+		final int width, final int height, final @Nullable MetalTexture worldDepth, final @Nullable MetalTextureView worldDepthView,
 		final @Nullable Matrix4fc worldProjection, final FrameBindings.ColorEncoding colorEncoding) {
 		return new FrameBindings(
 			scene,
@@ -101,8 +101,8 @@ public final class WorldComposition {
 			worldDepth,
 			worldDepthView,
 			worldProjection,
-			worldDepth.descriptor().width(),
-			worldDepth.descriptor().height(),
+			worldDepth == null ? 0 : worldDepth.descriptor().width(),
+			worldDepth == null ? 0 : worldDepth.descriptor().height(),
 			PACK_POST,
 			colorEncoding
 		);

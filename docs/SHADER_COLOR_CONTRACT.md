@@ -69,7 +69,7 @@ does not enable this variant. `HdrCompositionSmoke` tests real RGBA16_FLOAT stor
 two coverage-blended forward draws with linear fog, and the actual grade shader against
 independent CPU values. This extends isolated transfer tests to synthetic composition;
 it does not satisfy the live HDR routing requirement. Build and the legacy standard-world
-water/HUD fixture pass; detailed logs and progress are in `WATER_EFFECTS_PLAN.md`.
+water/HUD fixture pass.
 
 
 W2 host mechanics (2026-09-05): FrameBindings now explicitly distinguishes legacy
@@ -86,9 +86,9 @@ chunk-fade, fog and deferred fog-reconstruction semantics under `MC_SCENE_LINEAR
 The completed unfogged vanilla seed is decoded as the documented lightmap/brightness
 compatibility policy; alpha and metadata are unchanged. Production shared functions
 pass independent GPU references in both legacy and linear variants, including values
-above 1. Build and the standard-world water/exposure/HUD fixture pass; evidence is in
-`WATER_EFFECTS_PLAN.md`. Live activation, full linear geometry/forward/Fabulous coverage
-and actual display validation remain open; the HDR gate is still unchecked.
+above 1. Build and the standard-world water/exposure/HUD fixture pass. Live activation,
+full linear geometry/forward/Fabulous coverage and actual display validation remain open;
+the HDR gate is still unchecked.
 
 
 W2d/W2e preparation (2026-09-06): source-verified terrain/block/entity/particle/cloud
@@ -97,9 +97,8 @@ Unknown/replaced sources fail closed; format selection alone still changes no se
 Thirty actual vanilla pipeline combinations compile in both modes; actual transformed
 particle GPU draws validate HDR, fog, alpha and overlap against independent references.
 Thirty production Standard geometry draws additionally verify the opt-in linear G-buffer
-programs, fading/cutouts and metadata. Build and GPU smoke pass; logs and detailed
-scope are in `WATER_EFFECTS_PLAN.md`. Other forward producers and all coordinated
-world/Fabulous/sky/clear activation remain open, as does display validation. The live
+programs, fading/cutouts and metadata. Build and GPU smoke pass. Other forward producers
+and all coordinated world/Fabulous/sky/clear activation remain open, as does display validation. The live
 renderer is still legacy and the PR 7b / W2 acceptance gate remains unchecked.
 
 
@@ -108,7 +107,7 @@ variants now cover sky, stars, position/color/texture, world border, glint and l
 Compatibility RGB seeds are decoded before fog/attenuation; alpha and original discard
 ordering remain unchanged. Glint and lightning keep their distinct native blend policies.
 This does not activate live HDR. Remaining producers, world/Fabulous target routing and
-display validation still gate PR 7b / W2. See `WATER_EFFECTS_PLAN.md` for final evidence.
+display validation still gate PR 7b / W2.
 GPU checks pass: 51 vanilla pipeline combinations compile in both modes; 216 new
 actual fragment draws validate independent numeric references, including special
 glint/lightning/overlay blend states. Build passed (`/tmp/water-w2f-build.log`);
@@ -129,7 +128,7 @@ Live activation still requires explicit native G-buffer/resolve linear selection
 world and cached-sky routing, linear clears, Fabulous intermediates/composition, and
 encoded outline-to-linear-world composition. Depth-only WATER_MASK needs verified
 handling; GUI, atlas maintenance and artistic lightmap paths retain their contracts.
-The live HDR / W2 gate remains unchecked; see `WATER_EFFECTS_PLAN.md`.
+The live HDR / W2 gate remains unchecked.
 Standard-world water/HUD regression passed in 40 seconds, with refreshed identity and
 half-exposure/HUD captures visually inspected; `/tmp/water-w2h-client.log`.
 
@@ -142,9 +141,9 @@ with #if; the host's legacy zero define must not enable linear seed/fog math. GP
 cover pending-resolve flush, native contract rejection/reuse/retirement, HDR seed storage,
 linear debug transfer and legacy restoration. Build passed (`/tmp/water-w2i-build.log`);
 standard-world water/exposure/HUD regression passed in 40 seconds with inspected captures
-(`/tmp/water-w2i-client.log`). See WATER_EFFECTS_PLAN.md for task evidence and exact routing
-audit. Live world/sky/Fabulous/outline routing and physical display checks remain open;
-PR 7b / W2 remains unchecked. The live no-argument frame entry retains legacy semantics.
+(`/tmp/water-w2i-client.log`). Live world/sky/Fabulous/outline routing and physical
+display checks remain open; PR 7b / W2 remains unchecked. The live no-argument frame
+entry retains legacy semantics.
 
 
 W2 outline policy clarification (2026-09-06): retain Minecraft's final entity-outline
@@ -165,8 +164,7 @@ Actual post shaders pass GPU composition/copy, alpha/depth ordering and cache/so
 eight graph mutations are rejected. `./gradlew build` passed (`/tmp/water-w2m-build.log`).
 These APIs are opt-in; no live HDR activation is claimed. W2 / PR 7b remains open for
 scoped routing, complete preflight/recovery, target promotion and physical display checks.
-Final outlines remain encoded overlays at their original post-grade position. See
-WATER_EFFECTS_PLAN.md for task evidence and the unresolved unseen-pipeline recovery policy.
+Final outlines remain encoded overlays at their original post-grade position.
 Standard-world lifecycle/water identity regression passed in 40 seconds with numeric
 exposure/HUD assertions and visually inspected refreshed captures (`/tmp/water-w2m-client.log`).
 This remains legacy-route evidence; the live HDR gate is unchecked.
@@ -180,8 +178,7 @@ discard, poison/grade, forced-legacy begin, and native-generation poison.
 `./gradlew build` passed (`/tmp/water-w2o-build.log`). Standard-world water/HUD
 regression passed in 39 seconds with inspected captures (`/tmp/water-w2o-client.log`).
 Live GameRenderer wrapping, Fabulous target promotion, ShaderManager/PostChain mixins
-and physical display checks remain open; W2 / PR 7b stays unchecked. See
-WATER_EFFECTS_PLAN.md.
+and physical display checks remain open; W2 / PR 7b stays unchecked.
 
 
 W2q/W2r/W2s (2026-09-06): reload ShaderSource is installed from ShaderManager.apply;
@@ -191,7 +188,7 @@ begin is gated after LINEAR_SRGB identity routing dropped rebuilt terrain in the
 standard-world water identity fixture. `./gradlew build` passed
 (`/tmp/water-w2qrs-build.log`). Encoded-route water identity and exposure/HUD
 regression passed in 37 seconds (`/tmp/water-w2qrs-client.log`). Physical display
-validation remains open; W2 / PR 7b stays unchecked. See WATER_EFFECTS_PLAN.md.
+validation remains open; W2 / PR 7b stays unchecked.
 
 
 W2 live HDR (2026-09-06): `beginLive` now opens the HDR session. First-time LINEAR
@@ -202,4 +199,4 @@ water identity with live HDR, linear half-exposure/HUD, and lifecycle fixtures
 passed (`/tmp/water-w2-live-client.log`, `/tmp/water-w2-live-lifecycle.log`).
 Inspected captures show rebuilt terrain, water-only magenta, restored water, and
 a white HUD over a darkened world. `CAMetalLayer` remains `kCGColorSpaceSRGB`.
-W2 / PR 7b is complete; GGX remains open. See WATER_EFFECTS_PLAN.md.
+W2 / PR 7b is complete; GGX remains open.

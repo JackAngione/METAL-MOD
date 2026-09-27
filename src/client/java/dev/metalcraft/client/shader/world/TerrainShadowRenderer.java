@@ -2,6 +2,7 @@ package dev.metalcraft.client.shader.world;
 
 import dev.metalcraft.client.metal.Blaze3DMetalMappings;
 import dev.metalcraft.client.metal.MetalBuffer;
+import dev.metalcraft.client.metal.MetalCommandStream;
 import dev.metalcraft.client.metal.MetalDevice;
 import dev.metalcraft.client.metal.MetalRenderPass;
 import dev.metalcraft.client.metal.MetalRenderPipeline;
@@ -17,9 +18,17 @@ import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
 public final class TerrainShadowRenderer implements AutoCloseable {
 	public record Draw(ChunkSectionLayer layer, MetalBuffer vertices, long vertexOffset,
 		MetalBuffer indices, long indexOffset, MetalRenderPass.IndexType indexType, int indexCount,
-		float relativeX, float relativeY, float relativeZ) { }
+		float relativeX, float relativeY, float relativeZ, int cascadeMask) {
+		public Draw(ChunkSectionLayer layer, MetalBuffer vertices, long vertexOffset,
+			MetalBuffer indices, long indexOffset, MetalRenderPass.IndexType indexType, int indexCount,
+			float relativeX, float relativeY, float relativeZ) {
+			this(layer, vertices, vertexOffset, indices, indexOffset, indexType, indexCount, relativeX, relativeY, relativeZ, 15);
+		}
+	}
 
 	private final MetalDevice device;
+	private final MetalCommandStream commands = new MetalCommandStream();
+	private static final boolean BATCHING = Boolean.parseBoolean(System.getProperty("metalcraft.commandBatching", "true"));
 	private final EnumMap<ChunkSectionLayer, MetalRenderPipeline> pipelines = new EnumMap<>(ChunkSectionLayer.class);
 
 	public TerrainShadowRenderer(final MetalDevice device, final String sharedSource, final String terrainSource) {
@@ -47,26 +56,45 @@ public final class TerrainShadowRenderer implements AutoCloseable {
 
 	public void encode(final MetalRenderPass pass, final WorldShadowModule.Frame frame,
 		final List<Draw> draws, final MetalTextureView atlas, final MetalSampler sampler) {
-		if (draws.isEmpty()) return;
+		if (draws.isEmpty() || frame.cascadeCount() == 0) return;
+		int activeMask = (1 << frame.cascadeCount()) - 1;
 		try (MetalBuffer offsets = this.device.createBuffer(Math.multiplyExact((long)draws.size(), 16), MetalBuffer.StorageMode.SHARED)) {
 			try (var mapping = offsets.map()) {
 				for (Draw draw : draws) {
-					mapping.bytes().putFloat(draw.relativeX()).putFloat(draw.relativeY()).putFloat(draw.relativeZ()).putFloat(0);
+					mapping.bytes().putFloat(draw.relativeX()).putFloat(draw.relativeY()).putFloat(draw.relativeZ())
+						.putInt(draw.cascadeMask() & activeMask);
 				}
 			}
 			frame.bindUniforms(pass, 0, MetalRenderPass.STAGE_VERTEX);
 			pass.setUniformBuffer(1, offsets, 0, MetalRenderPass.STAGE_VERTEX);
 			pass.setTexture(0, atlas, MetalRenderPass.STAGE_FRAGMENT);
 			pass.setSampler(0, sampler, MetalRenderPass.STAGE_FRAGMENT);
+			this.commands.reset();
+			MetalRenderPipeline bound = null;
 			for (int index = 0; index < draws.size(); index++) {
 				Draw draw = draws.get(index);
+				int instances = Integer.bitCount(draw.cascadeMask() & activeMask);
+				if (instances == 0) continue;
 				MetalRenderPipeline pipeline = this.pipelines.get(draw.layer());
 				if (pipeline == null) throw new IllegalArgumentException("Unsupported shadow terrain layer " + draw.layer());
-				pass.setPipeline(pipeline);
-				pass.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, draw.vertices(), draw.vertexOffset());
-				pass.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, draw.indices(), draw.indexOffset(), draw.indexType(),
-					draw.indexCount(), frame.cascadeCount(), 0, Math.multiplyExact(index, frame.cascadeCount()));
+				if (bound != pipeline) {
+					if (bound == null || !BATCHING) pass.setPipeline(pipeline);
+					else pass.recordPipeline(this.commands, pipeline);
+					bound = pipeline;
+				}
+				if (BATCHING) {
+					this.commands.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, draw.vertices(), draw.vertexOffset());
+					this.commands.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, draw.indices(), draw.indexOffset(), draw.indexType(),
+						draw.indexCount(), instances, 0, Math.multiplyExact(index, frame.cascadeCount()));
+				} else {
+					pass.setVertexBuffer(Blaze3DMetalMappings.VERTEX_BUFFER_BASE_INDEX, draw.vertices(), draw.vertexOffset());
+					pass.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, draw.indices(), draw.indexOffset(), draw.indexType(),
+						draw.indexCount(), instances, 0, Math.multiplyExact(index, frame.cascadeCount()));
+				}
 			}
+			// Replay before releasing the immutable section offsets or borrowed mesh buffers.
+			if (BATCHING && this.commands.commandCount() > 0) pass.submit(this.commands);
+			this.commands.reset();
 		}
 	}
 

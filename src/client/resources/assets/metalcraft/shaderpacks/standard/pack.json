@@ -1,7 +1,7 @@
 {
   "format": 2,
   "name": "MetalCraft Standard",
-  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/water.metal", "shared/underwater.metal", "shared/sky.metal"],
+  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/local_lights.metal", "shared/water.metal", "shared/underwater.metal", "shared/sky.metal"],
   "targets": {
     "gbuffer_albedo": {
       "format": "rgba8_unorm",
@@ -53,6 +53,13 @@
   ],
   "options": [
     {
+      "id": "local_lights",
+      "category": "shadows",
+      "type": "bool",
+      "default": true,
+      "apply": "recompile"
+    },
+    {
       "id": "exposure",
       "category": "tonemap",
       "type": "float",
@@ -74,7 +81,7 @@
       "id": "debug_view",
       "category": "debug",
       "type": "enum",
-      "values": ["off", "scene", "albedo", "normal", "light", "receiver", "cascade", "visibility", "vanilla"],
+      "values": ["off", "scene", "albedo", "normal", "light", "receiver", "cascade", "visibility", "vanilla", "local_visibility"],
       "default": "off",
       "apply": "uniform"
     },

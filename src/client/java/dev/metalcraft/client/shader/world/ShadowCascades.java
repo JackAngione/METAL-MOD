@@ -20,6 +20,9 @@ import org.joml.Vector3fc;
  * precision only for world-locked texel snapping; large world coordinates never reach MSL.
  */
 public final class ShadowCascades {
+	/** Keep in sync with mc_shadow_blend_start in shared/shadows.metal. */
+	private static final double BLEND_FRACTION = 0.1;
+
 	private ShadowCascades() {
 	}
 
@@ -63,14 +66,19 @@ public final class ShadowCascades {
 		double diagonal = tanHalfFov * tanHalfFov * (1.0 + (double)aspect * aspect);
 		List<Cascade> result = new ArrayList<>(settings.count());
 		float near = settings.near();
+		float previousNear = 0;
 		for (int index = 1; index <= settings.count(); index++) {
 			double fraction = (double)index / settings.count();
 			double logarithmic = settings.near() * Math.pow(settings.distance() / settings.near(), fraction);
 			double uniform = settings.near() + (settings.distance() - settings.near()) * fraction;
 			float far = index == settings.count() ? settings.distance()
 				: (float)(settings.splitWeight() * logarithmic + (1.0 - settings.splitWeight()) * uniform);
-			double middle = (near + (double)far) * 0.5;
-			double halfDepth = (far - (double)near) * 0.5;
+			// The next cascade must also contain the preceding split's transition band.
+			// Keep the logical near/far depths unchanged for cascade selection, but fit
+			// receivers and their sunward casters over the overlapping physical volume.
+			double fittedNear = index == 1 ? near : near - (near - previousNear) * BLEND_FRACTION;
+			double middle = (fittedNear + far) * 0.5;
+			double halfDepth = (far - fittedNear) * 0.5;
 			// A rotation-invariant bounding sphere around all eight slice corners. Quantization
 			// keeps the footprint stable; one texel of guard covers the snapping displacement.
 			double radius = Math.ceil(Math.sqrt(far * (double)far * diagonal + halfDepth * halfDepth) * 16.0) / 16.0;
@@ -89,6 +97,7 @@ public final class ShadowCascades {
 				.m32((float)((centerZ + radius + settings.casterExtension()) / depthRange));
 			if (!matrix.isFinite()) throw new IllegalArgumentException("Shadow projection exceeds finite range");
 			result.add(new Cascade(near, far, (float)texel, matrix));
+			previousNear = index == 1 ? 0 : near;
 			near = far;
 		}
 		return List.copyOf(result);

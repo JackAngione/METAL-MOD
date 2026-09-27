@@ -2957,7 +2957,12 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 			return 0;
 		}
 		NSError *fragmentLibraryError = nil;
-		id<MTLLibrary> fragmentLibrary = [device newLibraryWithSource:fragmentSource options:nil error:&fragmentLibraryError];
+		// Native packs put both entry points in one source. Reuse this pipeline's library
+		// instead of compiling the identical program twice; distinct translated stages
+		// still compile separately. No cache survives resource reload or device teardown.
+		id<MTLLibrary> fragmentLibrary = [vertexSource isEqualToString:fragmentSource]
+			? vertexLibrary
+			: [device newLibraryWithSource:fragmentSource options:nil error:&fragmentLibraryError];
 		if (fragmentLibrary == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal fragment-shader compilation failed: %@", fragmentLibraryError.localizedDescription]);
 			return 0;

@@ -13,9 +13,4 @@ This is a Minecraft mod which the entire purpose is to maximally optimize Minecr
 ## Testing:
 - Use 16 render and simulation distance for shaders testing. When doing LOD testing, use 128 render distance. Default graphics engine so that metal is used. 
 - Keep live in-game test runs to a minimum. Do not run unnecessarily long test. It wastes time. Only increase in-game test time/complexity when absolutely necessary.
-
-When implementing, reviewing, or validating water shader effects, read
-[docs/WATER_EFFECTS_PLAN.md](docs/WATER_EFFECTS_PLAN.md) first. Follow its progress protocol:
-claim the relevant task, update partial progress or blockers, and mark its checkbox complete
-with validation evidence when its acceptance criteria pass. Include the plan update in the
-same change as the water implementation.
+- Reuse an existing standard-world save for test runs when practical. Do not create a new world unless the test explicitly needs a fresh world or different world configuration.

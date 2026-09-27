@@ -4,13 +4,13 @@
 #if MC_SCENE_LINEAR_HDR
 #include "shared/color.metal"
 #endif
-// G-buffer and deferred lighting contract (PR 7a). No occupancy, point lights, or GGX.
+// G-buffer and directional lighting contract. Local sources are in shared/local_lights.metal.
 //
 // Attachments:
 //   scene        fogged(albedo * RGB lightmap * overlays). Emissive skips the lightmap.
 //   albedo.rgb   surface before light. albedo.a = (materialId + 1) / 255; 0 means empty/sky.
 //   normal.rg    octahedral unit normal in view space (same space as reconstructed viewPos).
-//   normal.b     roughness placeholder (dielectric/Lambert in 7a; unused here).
+//   normal.b     exact terrain shadow axis (byte 1=X, 2=Y, 3=Z); otherwise unused roughness placeholder.
 //   light.rg     UV2 block/sky in [0, 1], from Minecraft's 0..240 range.
 //   normal.a + light.ba  24-bit linear view depth over [0, 1024].
 //
@@ -23,7 +23,7 @@
 //   lit       = unfogged - unfogged * sunWeight * (1 - visibility)
 // Gating on N·L would leave dawn ground and walls unshadowed because the seed still
 // carries full sky lightmap on those faces. vis = 1 is an identity. Blocklight, emission,
-// and fog stay unshadowed. cascadeCount == 0 (night, other dimensions, missing frame)
+// and fog stay unshadowed by this directional stage. cascadeCount == 0 (other dimensions, missing frame)
 // leaves sunWeight = 0.
 
 #ifndef MC_MATERIAL_SOLID
@@ -124,7 +124,7 @@ static inline float3 mc_decode_normal(float2 encoded) {
 }
 
 static inline bool mc_sun_active(constant MCShadowFrame &frame) {
-    // cascadeCount is the CPU night/dimension gate. Do not also require directionToSun.y > 0:
+    // cascadeCount is the CPU dimension/frame gate; the moon supplies the night direction. Do not also require directionToSun.y > 0:
     // dawn is y ≈ 0 and is when ground shadows are longest.
     return frame.cascadeCount > 0u;
 }

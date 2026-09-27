@@ -332,12 +332,15 @@ public final class MetalShaderTranslationSmoke {
 			dev.metalcraft.client.shader.world.WorldShadowModuleSmoke.run(device);
 			dev.metalcraft.client.shader.world.WorldLightingModuleSmoke.run(device);
 			StandardSkySmoke.run(device);
+			CloudPerformanceSmoke.run(device);
 			assertMemorylessPassMerge();
 			WorldHdrTargetsSmoke.run();
+			WorldGradeDepthSmoke.run();
 			OpaqueSnapshotSmoke.run();
 			WaterForwardPipelineSmoke.run();
 			WaterDepthDebugSmoke.run();
 			WaterSurfaceSmoke.run();
+			WaterFilteringSmoke.run();
 			WaterReflectionSmoke.run();
 			WaterOptionsPersistenceSmoke.run();
 			UnderwaterSurfaceSmoke.run();
@@ -1510,11 +1513,67 @@ public final class MetalShaderTranslationSmoke {
 					assertBgraDelta(scene.readback(queue, 0), (byte)51, (byte)102, (byte)153, 2, "world tile resolve");
 				}
 			}
+			assertWorldResolveArenaRetirement(gpu, runtime, encoder, depthView, queue, seed);
 			assertWorldResolveColorEncoding(gpu, runtime, encoder, scene, sceneView, depthView, queue, seed);
 			assertWorldShadowDebugViews(gpu, runtime, encoder, scene, sceneView, depthView, queue);
 		} finally {
 			gpu.forgetNativePipeline(seed);
 		}
+	}
+
+	/** Submit beyond the arena ring without CPU waits; every resolve must keep its own options. */
+	private static void assertWorldResolveArenaRetirement(
+		final MetalGpuDevice gpu,
+		final ShaderPackRuntime runtime,
+		final CommandEncoder encoder,
+		final MetalGpuTextureView depth,
+		final MetalCommandQueue readbackQueue,
+		final RenderPipeline seed
+	) {
+		List<MetalTexture> scenes = new java.util.ArrayList<>();
+		List<MetalGpuTextureView> views = new java.util.ArrayList<>();
+		try {
+			for (int frame = 0; frame < 8; frame++) {
+				MetalTexture scene = gpu.metal().createTexture(new MetalTexture.Descriptor(
+					MetalTexture.Format.RGBA8_UNORM, 32, 32, 1,
+					MetalTexture.USAGE_RENDER_TARGET | MetalTexture.USAGE_SHADER_READ));
+				scenes.add(scene);
+				MetalGpuTextureView view = gpu.wrapAttachment(scene, "resolve-arena-" + frame);
+				views.add(view);
+				runtime.setOption("debug_view", frame % 2 == 0 ? "off" : "albedo");
+				runtime.worldGeometry().beginFrame();
+				try (RenderPass pass = WorldGeometryAdapter.beginWorldPass(encoder, () -> "world-resolve-arena-smoke",
+					view, Optional.of(new Vector4f(0, 0, 0, 1)), depth, OptionalDouble.of(1),
+					List.of(RenderPipelines.SOLID_TERRAIN))) {
+					WorldGeometryAdapter.substitute(pass, RenderPipelines.SOLID_TERRAIN);
+					pass.setPipeline(seed);
+					pass.draw(3, 1, 0, 0);
+				}
+				// Resolve is intentionally left pending until submit. Its arena must be retained
+				// along with all other uploads recorded earlier in the same command buffer.
+				encoder.submit();
+			}
+			try (var fence = encoder.createFence()) {
+				encoder.submit();
+				if (!fence.awaitCompletion(5_000_000_000L)) {
+					throw new AssertionError("World resolve arena submissions timed out");
+				}
+			}
+			for (int frame = 0; frame < scenes.size(); frame++) {
+				boolean shaded = frame % 2 == 0;
+				assertBgraDelta(scenes.get(frame).readback(readbackQueue, 0),
+					(byte)(shaded ? 144 : 51), (byte)(shaded ? 96 : 102), (byte)(shaded ? 48 : 153),
+					2, "immutable resolve arena submission " + frame);
+			}
+			MetalTransientMemory arena = (MetalTransientMemory)gpu.createCommandEncoder().transientMemory();
+			if (arena.nativeAllocationCountForTesting() != 3) {
+				throw new AssertionError("Small resolve uploads must reuse the three submission arenas");
+			}
+		} finally {
+			for (MetalGpuTextureView view : views) view.close();
+			for (MetalTexture scene : scenes) scene.close();
+		}
+		System.out.println("World resolve uploads: mixed options/cameras and eight arena submissions preserved pixels");
 	}
 
 	private static void assertWorldResolveColorEncoding(

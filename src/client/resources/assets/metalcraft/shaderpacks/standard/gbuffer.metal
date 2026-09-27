@@ -88,8 +88,10 @@ static inline float3 mc_water_view_from_device_depth(
     float2 pixel, float deviceDepth, float2 extent, float4x4 inverseProjection
 ) {
     float2 uv = pixel / max(extent, float2(1.0));
-    float2 metalNdc = uv * 2.0 - 1.0;
-    float4 viewH = inverseProjection * float4(metalNdc.x, -metalNdc.y, deviceDepth, 1.0);
+    // mc_clip_position flips clip Y and Metal's viewport flips it back into top-left
+    // pixels. Undo both together: pixel Y maps directly to the original projection Y.
+    float2 ndc = uv * 2.0 - 1.0;
+    float4 viewH = inverseProjection * float4(ndc, deviceDepth, 1.0);
     return viewH.xyz / max(abs(viewH.w), 1.0e-7);
 }
 
@@ -244,7 +246,9 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     GBufferVaryings out;
     out.position = mc_clip_position(projection.ProjMat * float4(viewPos, 1.0));
     out.worldPos = viewPos;
-    out.normal = float3(0.0);
+    // Terrain has no vertex normals. Carry its unrotated local position so the
+    // fragment can preserve exact axis-aligned shadow planes in G-buffer metadata.
+    out.normal = in.Position;
     out.tint = in.Color;
 #ifdef MC_WATER_FORWARD
     uint localVertex = vertexId - waterDraw.baseVertex;
@@ -284,10 +288,10 @@ static inline float4 mc_sample_nearest(
 }
 
 /// Minecraft's rotated-grid supersampled atlas fetch, for the same reason.
-static inline float4 mc_sample_rgss(texture2d<float> atlas, sampler atlasSampler, float2 uv, float2 pixelSize) {
-    float2 du = dfdx(uv);
-    float2 dv = dfdy(uv);
-    float2 texelScreenSize = sqrt(du * du + dv * dv);
+static inline float4 mc_sample_rgss(
+    texture2d<float> atlas, sampler atlasSampler, float2 uv, float2 pixelSize,
+    float2 du, float2 dv, float2 texelScreenSize
+) {
     float maxTexelSize = max(texelScreenSize.x, texelScreenSize.y);
     float minPixelSize = min(pixelSize.x, pixelSize.y);
     float blendFactor = smoothstep(minPixelSize, minPixelSize * 2.0, maxTexelSize);
@@ -349,17 +353,32 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     }
 #endif
     float2 pixelSize = 1.0 / float2(section.TextureSize);
-    float4 texel =
+    // Evaluate derivatives before the per-material branch so neighboring glass/water lanes
+    // retain the same atlas footprint, including RGSS and explicit-gradient nearest sampling.
+    float2 atlasDx = dfdx(in.uv), atlasDy = dfdy(in.uv);
+    float2 texelScreenSize = sqrt(atlasDx * atlasDx + atlasDy * atlasDy);
+#ifdef MC_WATER_FORWARD
+    bool shadeWater = MC_OPTION_WATER_ENABLED && in.waterMaterial == 1.0
+        && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u
+            || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u);
+    // Enabled water uses biome tint/lightmap only. Avoid fetching the vanilla animated atlas
+    // when its RGB and alpha would both be replaced; other blocks and debug modes still sample it.
+    float4 texel = float4(1.0);
+    if (!shadeWater) {
+#else
+    float4 texel;
+#endif
+    texel =
 #ifdef MC_TERRAIN_LOD
         in.lodMapV.z != 0.0 ? mc_lod_sample(atlas, atlasSampler, in.uv, in.lodMapU, in.lodMapV, in.lodBounds) :
 #endif
         globals.UseRgss == 1
-        ? mc_sample_rgss(atlas, atlasSampler, in.uv, pixelSize)
-        : mc_sample_nearest(atlas, atlasSampler, in.uv, pixelSize, dfdx(in.uv), dfdy(in.uv),
-            sqrt(dfdx(in.uv) * dfdx(in.uv) + dfdy(in.uv) * dfdy(in.uv)));
-
-    // The order below is vanilla's: the visibility fade changes alpha, so the cutout test has to
-    // see the faded value or a chunk fading in would cut out differently than it does today.
+        ? mc_sample_rgss(atlas, atlasSampler, in.uv, pixelSize, atlasDx, atlasDy, texelScreenSize)
+        : mc_sample_nearest(atlas, atlasSampler, in.uv, pixelSize, atlasDx, atlasDy, texelScreenSize);
+#ifdef MC_WATER_FORWARD
+    }
+#endif
+    // The visibility fade changes alpha, so the cutout test has to see the faded value.
     float4 shaded = texel * in.tint * in.lightMapColor;
     shaded = mc_chunk_fade(mc_scene_seed(shaded), section.ChunkVisibility, fog);
 #if MC_HAS_ALPHA_CUTOUT
@@ -371,12 +390,9 @@ fragment GBufferTargets gbuffer_terrain_fragment(
 #ifdef MC_WATER_FORWARD
     float3 waterPixelDx = dfdx(in.waterPeriodicWorldPosition);
     float3 waterPixelDy = dfdy(in.waterPeriodicWorldPosition);
-    if (MC_OPTION_WATER_ENABLED && in.waterMaterial == 1.0
-        && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u
-            || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u)) {
+    if (shadeWater) {
         if (waterFrame.cameraSubmerged != 0u) {
-            // Viewed from below, the atlas/biome tint otherwise looks like a blue sheet.
-            // Keep a faint surface texture; distance fog owns the submerged water color.
+            // Desaturate the biome tint from below; distance fog owns the submerged color.
             float surfaceLuminance = dot(shaded.rgb, float3(0.2126, 0.7152, 0.0722));
             shaded.rgb = mix(float3(surfaceLuminance), shaded.rgb, 0.2);
             shaded.a *= 0.45;
@@ -428,8 +444,11 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                     float contactFoam = mc_water_contact_foam(
                         thickness, in.waterNormalWorld, in.waterPeriodicWorldPosition,
                         waterFrame.animationSeconds, waterDraw.debugMode == 7u ? 0.0 : MC_OPTION_WATER_FOAM);
+                    float3 baseNormalView = mc_water_safe_normalize(
+                        viewRotation * in.waterNormalWorld, float3(0.0, 1.0, 0.0));
                     float2 refractedPixel = surfacePixel
-                        + mc_water_refraction_offset_pixels(normalView, thickness, MC_OPTION_WATER_REFRACTION_STRENGTH);
+                        + mc_water_refraction_offset_pixels(normalView, baseNormalView,
+                            thickness, MC_OPTION_WATER_REFRACTION_STRENGTH);
                     uint2 sampleCoord = undistortedCoord;
                     float3 backgroundView = undistortedView;
                     if (mc_water_sample_in_bounds(refractedPixel, extent)) {
@@ -457,9 +476,11 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                         transmitted, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
                         waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
                     );
-                    // Keep the approximation restrained and in the same linear/fog ownership as
-                    // the water surface. Biome tint remains visible beneath the warm foam crest.
-                    surface = mix(surface, float3(0.82, 0.86, 0.84), contactFoam * 0.34);
+                    // Foam is a lit surface, not emission. Apply the water's sampled lightmap
+                    // before the scene-color conversion, preserving night and block-light color.
+                    float3 foamColor = mc_scene_seed(float4(
+                        float3(0.82, 0.86, 0.84) * in.lightMapColor.rgb, 1.0)).rgb;
+                    surface = mix(surface, foamColor, contactFoam * 0.34);
                     shaded = float4(surface, 1.0);
                 } else {
                     shaded = float4(mc_water_configured_reflection_with_ssr(
@@ -488,6 +509,8 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     mc_write_gbuffer(
         out, (texel * in.tint).rgb, mc_reconstruct_normal(in.worldPos), in.lightLevels, max(0.0, -in.worldPos.z)
     );
+    uint shadowAxis = mc_shadow_axis_tag(in.normal);
+    if (shadowAxis != 0u) out.normal.b = float(shadowAxis) / 255.0;
     return out;
 #endif
 }

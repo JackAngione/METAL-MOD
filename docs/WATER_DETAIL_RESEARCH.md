@@ -2,7 +2,7 @@
 
 Research date: 2026-09-10. Scope: Standard pack's direct Metal forward water path.
 These are implementation recommendations, not a claim that the live renderer has
-been visually validated. The coordinating agent owns progress in WATER_EFFECTS_PLAN.md.
+been visually validated.
 
 ## What established game implementations do
 

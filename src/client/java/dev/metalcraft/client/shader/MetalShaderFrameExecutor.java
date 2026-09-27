@@ -133,6 +133,12 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 	}
 
 	@Override
+	public boolean requiresWorldDepth() {
+		this.requireOpen();
+		return this.readsDepth;
+	}
+
+	@Override
 	public boolean encode(final MetalCommandBuffer commands, final FrameBindings bindings) {
 		this.requireOpen();
 		return this.encodeGraph(commands, bindings, null);

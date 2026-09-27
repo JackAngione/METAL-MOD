@@ -33,6 +33,8 @@ public final class WorldTerrainShadows implements AutoCloseable {
 	private @Nullable WorldShadowModule.Frame frame;
 	private long renderedFrames;
 	private int lastDrawCount;
+	private static final boolean PROFILE = Boolean.getBoolean("metalcraft.localLightingBenchmark");
+	private record Caster(SectionRenderDispatcher.RenderSection section, int mask) { }
 
 	public WorldTerrainShadows(final MetalGpuDevice device, final ShadowCascades.Settings settings,
 		final String sharedSource, final String terrainSource) {
@@ -52,6 +54,8 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		ShaderPackRuntime runtime = ShaderPackRuntime.active();
 		if (runtime == null || runtime.worldShadows() == null) return;
 		try {
+			if (runtime.worldGeometry() != null && runtime.worldGeometry().localLighting() != null)
+				runtime.worldGeometry().localLighting().prepare(camera);
 			runtime.worldShadows().renderTerrain(levelRenderer, camera, sky, sections, sampler);
 		} catch (RuntimeException error) {
 			runtime.markFailed("Could not render terrain shadows: " + error.getMessage(), error);
@@ -63,8 +67,9 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		final GpuSampler sampler) {
 		this.endFrame();
 		this.lastDrawCount = 0;
-		if (!camera.initialized || sky.skybox != DimensionType.Skybox.OVERWORLD
-			|| !Float.isFinite(sky.sunAngle) || Math.cos(sky.sunAngle) < 0
+		if (PROFILE && Boolean.getBoolean("metalcraft.benchmarkSkipMoon") && Math.cos(sky.sunAngle) < 0
+			|| !camera.initialized || sky.skybox != DimensionType.Skybox.OVERWORLD
+			|| !Float.isFinite(sky.sunAngle)
 			|| Minecraft.getInstance().wireframe) {
 			this.frame = this.resources.prepareUnoccludedFrame();
 			return;
@@ -72,9 +77,11 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		var projection = camera.projectionMatrix;
 		float fov = 2 * (float)Math.atan(1.0 / Math.abs(projection.m11()));
 		float aspect = Math.abs(projection.m11() / projection.m00());
+		// The moon occupies the opposite direction at night; its dim lightmap seed is preserved.
+		float celestialSign = Math.cos(sky.sunAngle) < 0 ? -1.0F : 1.0F;
 		this.frame = this.resources.prepareFrame(new Vector3d(camera.pos.x, camera.pos.y, camera.pos.z),
 			camera.orientation, fov, aspect,
-			new Vector3f(-(float)Math.sin(sky.sunAngle), (float)Math.cos(sky.sunAngle), 0),
+			new Vector3f(-(float)Math.sin(sky.sunAngle) * celestialSign, (float)Math.cos(sky.sunAngle) * celestialSign, 0),
 			new Matrix4f(projection).invert());
 		var dispatcher = levelRenderer.sectionRenderDispatcher();
 		if (dispatcher == null) {
@@ -83,28 +90,33 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		}
 		List<TerrainShadowRenderer.Draw> draws = new ArrayList<>();
 		List<LodWorldMesh> lodDraws = new ArrayList<>();
-		List<SectionRenderDispatcher.RenderSection> casters = new ArrayList<>();
+		List<Caster> casters = new ArrayList<>();
 		var sequential = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
 		// Keep the uber-buffer slices stable through encoding, as vanilla does while preparing draws.
 		dispatcher.lock();
 		try {
 			for (var section : sections) {
+				var mesh = section.getSectionMesh();
+				// Most loaded sections are air or only translucent. They have no shadow draws,
+				// so reject them before testing four six-plane light volumes.
+				if (!mesh.hasRenderableLayers() || mesh.isEmpty(ChunkSectionLayer.SOLID) && mesh.isEmpty(ChunkSectionLayer.CUTOUT)) continue;
 				var box = section.getBoundingBox();
-				if (!this.frame.intersects((float)(box.minX - camera.pos.x), (float)(box.minY - camera.pos.y),
-					(float)(box.minZ - camera.pos.z), (float)(box.maxX - camera.pos.x),
-					(float)(box.maxY - camera.pos.y), (float)(box.maxZ - camera.pos.z))) continue;
-				casters.add(section);
+				int mask = this.frame.cascadeMask((float)(box.minX - camera.pos.x - 1), (float)(box.minY - camera.pos.y - 1),
+					(float)(box.minZ - camera.pos.z - 1), (float)(box.maxX - camera.pos.x + 1),
+					(float)(box.maxY - camera.pos.y + 1), (float)(box.maxZ - camera.pos.z + 1));
+				if (mask != 0) casters.add(new Caster(section, mask));
 			}
 			int maxIndices = 0;
-			for (var section : casters) {
+			for (var caster : casters) {
 				for (var layer : ChunkSectionLayerGroup.OPAQUE.layers()) {
-					var draw = section.getSectionMesh().getSectionDraw(layer);
+					var draw = caster.section().getSectionMesh().getSectionDraw(layer);
 					if (draw != null && !draw.hasCustomIndexBuffer()) maxIndices = Math.max(maxIndices, draw.indexCount());
 				}
 			}
 			// Grow once before retaining any slices: a later growth closes the previous index buffer.
 			var sharedIndices = maxIndices == 0 ? null : sequential.getBuffer(maxIndices);
-			for (var section : casters) {
+			for (var caster : casters) {
+				var section = caster.section();
 				var mesh = section.getSectionMesh();
 				var origin = section.getRenderOrigin();
 				for (var layer : ChunkSectionLayerGroup.OPAQUE.layers()) {
@@ -122,7 +134,7 @@ public final class WorldTerrainShadows implements AutoCloseable {
 						draw.hasCustomIndexBuffer() ? slice.indexBufferOffset() : 0,
 						type == IndexType.SHORT ? MetalRenderPass.IndexType.UINT16 : MetalRenderPass.IndexType.UINT32,
 						lod != null ? lod.indexCount() : draw.indexCount(), (float)(origin.getX() - camera.pos.x),
-						(float)(origin.getY() - camera.pos.y), (float)(origin.getZ() - camera.pos.z)));
+						(float)(origin.getY() - camera.pos.y), (float)(origin.getZ() - camera.pos.z), caster.mask()));
 				}
 			}
 			var atlas = Minecraft.getInstance().getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();

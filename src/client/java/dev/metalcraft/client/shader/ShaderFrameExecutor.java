@@ -7,6 +7,11 @@ import dev.metalcraft.client.metal.MetalTexture;
  * Encodes pack passes into a command buffer. Does not present and does not write a drawable.
  */
 public interface ShaderFrameExecutor {
+	/** Whether any executable pack pass needs the stored pre-hand world-depth snapshot. */
+	default boolean requiresWorldDepth() {
+		return true;
+	}
+
 	/**
 	 * Encodes every executable fullscreen/compute pass into {@code commands} in compiled
 	 * group order. Geometry, shadow, and merged-resolve groups are owned by the world adapter.

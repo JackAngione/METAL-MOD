@@ -1,0 +1,132 @@
+{
+  "baseline": "14f9896cce7e39b8555bf73e6c170d27e59e7cad",
+  "device": "Apple M4 Max",
+  "date": "2026-09-24",
+  "method": "Metal compute kernel, compile-time high detail, 65536 invocations, 5 warm-up pairs then 15 alternating-order measured pairs per footprint. GPU command buffer timestamps. Three separate runs; no game FPS measurement.",
+  "equivalence": {
+    "cases": 36864,
+    "maximumAbsoluteError": 5.9604645e-08
+  },
+  "runs": [
+    {
+      "run": 1,
+      "measurements": [
+        {
+          "invocations": 65536,
+          "footprint": 0.0002,
+          "referenceMedianMs": 0.0808,
+          "optimizedMedianMs": 0.0818,
+          "changePercent": 1.2
+        },
+        {
+          "invocations": 65536,
+          "footprint": 0.04,
+          "referenceMedianMs": 0.0808,
+          "optimizedMedianMs": 0.0558,
+          "changePercent": -31.0
+        },
+        {
+          "invocations": 65536,
+          "footprint": 0.2,
+          "referenceMedianMs": 0.0423,
+          "optimizedMedianMs": 0.021,
+          "changePercent": -50.3
+        },
+        {
+          "invocations": 65536,
+          "footprint": 1.0,
+          "referenceMedianMs": 0.042,
+          "optimizedMedianMs": 0.0121,
+          "changePercent": -71.2
+        },
+        {
+          "invocations": 65536,
+          "footprint": 16.0,
+          "referenceMedianMs": 0.0422,
+          "optimizedMedianMs": 0.0074,
+          "changePercent": -82.4
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "measurements": [
+        {
+          "invocations": 65536,
+          "footprint": 0.0002,
+          "referenceMedianMs": 0.0806,
+          "optimizedMedianMs": 0.0817,
+          "changePercent": 1.4
+        },
+        {
+          "invocations": 65536,
+          "footprint": 0.04,
+          "referenceMedianMs": 0.0806,
+          "optimizedMedianMs": 0.0556,
+          "changePercent": -31.1
+        },
+        {
+          "invocations": 65536,
+          "footprint": 0.2,
+          "referenceMedianMs": 0.0809,
+          "optimizedMedianMs": 0.0378,
+          "changePercent": -53.3
+        },
+        {
+          "invocations": 65536,
+          "footprint": 1.0,
+          "referenceMedianMs": 0.0809,
+          "optimizedMedianMs": 0.02,
+          "changePercent": -75.3
+        },
+        {
+          "invocations": 65536,
+          "footprint": 16.0,
+          "referenceMedianMs": 0.0808,
+          "optimizedMedianMs": 0.0121,
+          "changePercent": -85.0
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "measurements": [
+        {
+          "invocations": 65536,
+          "footprint": 0.0002,
+          "referenceMedianMs": 0.0806,
+          "optimizedMedianMs": 0.0821,
+          "changePercent": 1.8
+        },
+        {
+          "invocations": 65536,
+          "footprint": 0.04,
+          "referenceMedianMs": 0.0808,
+          "optimizedMedianMs": 0.0559,
+          "changePercent": -30.8
+        },
+        {
+          "invocations": 65536,
+          "footprint": 0.2,
+          "referenceMedianMs": 0.0806,
+          "optimizedMedianMs": 0.038,
+          "changePercent": -52.9
+        },
+        {
+          "invocations": 65536,
+          "footprint": 1.0,
+          "referenceMedianMs": 0.081,
+          "optimizedMedianMs": 0.0199,
+          "changePercent": -75.5
+        },
+        {
+          "invocations": 65536,
+          "footprint": 16.0,
+          "referenceMedianMs": 0.0808,
+          "optimizedMedianMs": 0.0121,
+          "changePercent": -85.0
+        }
+      ]
+    }
+  ]
+}

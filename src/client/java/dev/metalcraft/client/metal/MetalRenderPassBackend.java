@@ -316,8 +316,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		boolean waterEligible = geometry != null && this.device.opaqueWaterInputs().isPresent()
 			&& this.device.linearWorldSession().waterFrameInputs() != null
 			&& draws.stream().anyMatch(draw -> ((Object)draw) instanceof WaterDrawSource source && source.metalcraft$waterMesh() != null);
-		// Per-draw immutable uniforms are retired after encoding; don't defer their native binds.
-		MetalCommandStream batch = BATCHING && !waterEligible ? this.beginRecording() : null;
+		// Water draw uniforms use immutable arena slices retained through GPU completion,
+		// so their binds can share the same command stream as the rest of the terrain.
+		MetalCommandStream batch = BATCHING ? this.beginRecording() : null;
 		boolean lodDraws = dev.metalcraft.client.lod.LodLoadedRenderer.trackingDraws();
 		try {
 			for (RenderPass.Draw<T> draw : draws) {
@@ -353,18 +354,17 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 				RenderPipeline selected = metadata == null ? baseline : geometry.waterPipeline(baseline).orElse(baseline);
 				if (selected != this.originalPipeline) this.setPipeline(selected);
 				if (selected != baseline) {
-					try (MetalBuffer waterDraw = this.device.metal().createBuffer(16, MetalBuffer.StorageMode.SHARED)) {
-						try (MetalBuffer.Mapping mapping = waterDraw.map()) {
-							mapping.bytes().putInt(draw.baseVertex()).putInt(water.vertexCount())
-								.putInt(WaterRoutingDebug.mode().gpuValue).putInt(0);
-						}
+					try (GpuBufferSlice.MappedView mapping = this.device.createCommandEncoder().transientMemory()
+						.allocateGpuMapped(16, 256, GpuBuffer.USAGE_UNIFORM, 16, 1)) {
+						mapping.data().putInt(draw.baseVertex()).putInt(water.vertexCount())
+							.putInt(WaterRoutingDebug.mode().gpuValue).putInt(0);
 						this.device.linearWorldSession().recordWaterDraw();
 						this.encodeUniformBuffer(13, this.device.linearWorldSession().waterFrameBuffer(), 0, MetalRenderPass.STAGE_VERTEX | MetalRenderPass.STAGE_FRAGMENT);
 						var opaque = this.device.opaqueWaterInputs().orElseThrow();
 						this.encodeTexture(12, opaque.color().metal(), MetalRenderPass.STAGE_FRAGMENT);
 						this.encodeTexture(13, opaque.depth().metal(), MetalRenderPass.STAGE_FRAGMENT);
 						this.encodeUniformBuffer(14, metadata, 0, MetalRenderPass.STAGE_VERTEX);
-						this.encodeUniformBuffer(15, waterDraw, 0,
+						this.encodeUniformBuffer(15, this.device.nativeBuffer(mapping.slice().buffer()), mapping.slice().offset(),
 							MetalRenderPass.STAGE_VERTEX | MetalRenderPass.STAGE_FRAGMENT);
 						this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
 					}

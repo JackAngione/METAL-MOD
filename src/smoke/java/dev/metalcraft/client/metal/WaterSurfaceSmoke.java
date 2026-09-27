@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 /** GPU checks for the production animated-water and reflection helpers. */
 final class WaterSurfaceSmoke {
-	private static final int RESULT_COUNT = 81;
+	private static final int RESULT_COUNT = 93;
 	private static final int FLOAT4_BYTES = 4 * Float.BYTES;
 	private static final float EPSILON = 2.0e-5F;
 
@@ -41,11 +41,8 @@ final class WaterSurfaceSmoke {
 			    out[9] = float4(mc_water_periodic_world_position(int3(2, -3, 5), float3(3.25, 7.5, 11.75)), 0);
 			    out[10] = float4(mc_water_periodic_world_position(int3(258, 253, 261), float3(3.25, 7.5, 11.75)), 0);
 
-			    out[11] = float4(
-			        mc_water_fresnel(1.0, 0.0),
-			        mc_water_fresnel(0.0, 0.0),
-			        mc_water_fresnel(0.0, 1.0),
-			        mc_water_fresnel(-2.0, -1.0));
+			    out[11] = float4(mc_water_fresnel(1.0), mc_water_fresnel(0.5),
+			        mc_water_fresnel(0.2), mc_water_fresnel(0.0));
 			    float3 base = float3(0.08, 0.16, 0.24);
 			    out[12] = float4(mc_water_reflection(base, float3(0, 1, 0), float3(1, 1.0e-8, 0), 0.0, 1.0,
 			        float4(normalize(float3(0.2, 1, 0.1)), 64.0), float4(4, 3, 2, 1)), 0);
@@ -73,8 +70,9 @@ final class WaterSurfaceSmoke {
 			    out[27] = float4(mc_water_thickness(float3(0, 0, -1), float3(0, 0, -100), 0.01), 0, 0, 0);
 			    out[28] = float4(mc_water_thickness(float3(0, 0, -1), float3(0, 0, -100), 0.0), 0, 0, 0);
 			    out[29] = float4(mc_water_thickness(float3(0, 0, -1), float3(0, 0, -0.5), 0.8), 0, 0, 0);
-			    out[30] = float4(mc_water_refraction_offset_pixels(float3(0.5, -0.5, 1), 24, 0), 0, 0);
-			    out[31] = float4(mc_water_refraction_offset_pixels(float3(2, -2, 0), 24, 2), 0, 0);
+			    out[30] = float4(mc_water_refraction_offset_pixels(float3(0.5, -0.5, 1), float3(0, 0, 1), 24, 0), 0, 0);
+			    out[31] = float4(mc_water_refraction_offset_pixels(float3(2, -2, 0), float3(0, 0, 1), 24, 2), 0, 0);
+			    out[92] = float4(mc_water_refraction_offset_pixels(float3(0.2, -0.1, 0.97), float3(0, 0, 1), 1, 1), 0, 0);
 			    out[32] = float4(
 			        mc_water_sample_in_bounds(float2(0.5, 0.5), float2(8, 4)) ? 1.0 : 0.0,
 			        mc_water_sample_in_bounds(float2(7.5, 3.5), float2(8, 4)) ? 1.0 : 0.0,
@@ -149,6 +147,21 @@ final class WaterSurfaceSmoke {
 			    out[78] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,17.25,1,3,float3(100,0,0),float3(0,0,100),128,16),0);
 			    out[79] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,17.25,0,3,float3(1,0,0),float3(0,0,1),128,16),0);
 			    out[80] = float4(mc_water_detailed_normal(float3(0,1,0),float3(0),position,17.25,1,3,float3(1,0,0),float3(0,0,1),256,16),0);
+			    float2 currentSample = float2(43.37,89.61);
+			    out[81] = float4(mc_water_current_warp(currentSample,17.25).offset,0,0);
+			    out[82] = float4(mc_water_current_warp(currentSample+float2(256),17.25).offset,0,0);
+			    out[83] = float4(mc_water_current_warp(currentSample,1041.25).offset,0,0);
+			    out[84] = float4(mc_water_current_warp(currentSample+float2(17,11),17.25).offset,0,0);
+			    out[85] = float4(mc_water_current_warp(currentSample,25.25).offset,0,0);
+			    out[86] = float4(mc_water_height_noise_gradient(float2(12.9999,4.37)),0);
+			    out[87] = float4(mc_water_height_noise_gradient(float2(13.0001,4.37)),0);
+			    out[88] = float4(mc_water_height_noise_gradient(float2(31.9999,4.37)),0);
+			    out[89] = float4(mc_water_height_noise_gradient(float2(0.0001,4.37)),0);
+			    float3 obliqueView = normalize(float3(1,0.2,0));
+			    out[90] = float4(mc_water_reflection(base,float3(0,1,0),obliqueView,0.0,1,
+			        float4(0),float4(0.2,0.4,0.8,1)),0);
+			    out[91] = float4(mc_water_reflection(base,float3(0,1,0),obliqueView,1.0,1,
+			        float4(0),float4(0.2,0.4,0.8,1)),0);
 			}
 			""";
 
@@ -175,8 +188,9 @@ final class WaterSurfaceSmoke {
 				assertEqual(bytes, 5, 6, EPSILON, "positive chunk seam");
 				assertPeriodOffset(bytes, 7, 8, "negative wrapped chunk seam");
 				assertEqual(bytes, 9, 10, EPSILON, "256-block world period");
-				assertVector(bytes, 11, new float[]{0.02F, 1.0F, 0.02F, 1.0F}, 3.0e-5F,
-					"Fresnel endpoints and clamping");
+				assertVector(bytes, 11, new float[]{0.02037319F, 0.05969092F, 0.29813202F, 1.0F}, 3.0e-5F,
+					"air-to-water Fresnel at normal, oblique, and grazing angles");
+				assertEqual(bytes, 90, 91, EPSILON, "roughness must not change dielectric Fresnel");
 				assertFinite(bytes, 12, "roughness zero grazing reflection");
 				assertFinite(bytes, 13, "roughness one grazing reflection");
 				assertFinite(bytes, 14, "degenerate reflection inputs");
@@ -195,6 +209,7 @@ final class WaterSurfaceSmoke {
 				assertVector(bytes, 29, new float[]{-1}, EPSILON, "foreground depth rejection");
 				assertVector(bytes, 30, new float[]{0, 0}, EPSILON, "refraction-off identity");
 				assertVector(bytes, 31, new float[]{8, -8}, EPSILON, "bounded refraction offset");
+				assertVector(bytes, 92, new float[]{4, -2}, EPSILON, "animated one-block refraction");
 				assertVector(bytes, 32, new float[]{1, 1, 0, 0}, EPSILON, "image-bound rejection");
 				assertVector(bytes, 33, new float[]{0.8F, 0.6F, 0.4F}, EPSILON, "zero-thickness absorption identity");
 				assertAbsorptionOrdering(bytes, 34);
@@ -232,6 +247,12 @@ final class WaterSurfaceSmoke {
 				assertEqual(bytes, 47, 78, EPSILON, "unresolved distant detail filters out");
 				assertVector(bytes, 79, new float[]{0,1,0}, EPSILON, "zero strength disables distant waves");
 				assertEqual(bytes, 47, 80, EPSILON, "detail fades at selected chunk range");
+				assertEqual(bytes, 81, 82, 2.0e-4F, "current field world-period invariance");
+				assertEqual(bytes, 81, 83, EPSILON, "current field animation-period invariance");
+				assertDifferent(bytes, 81, 84, 0.01F, "current field must vary across the surface");
+				assertDifferent(bytes, 81, 85, 0.005F, "current field must evolve over time");
+				assertEqual(bytes, 86, 87, 0.003F, "rounded noise cell boundary");
+				assertEqual(bytes, 88, 89, 0.003F, "rounded noise period boundary");
 				assertFinite(bytes, 71, "bounded crest glint");
 				if (get(bytes, 71, 0) < 0.1F || get(bytes, 72, 0) > get(bytes, 71, 0) * 0.1F) {
 					throw new AssertionError("Sun reflection does not resolve individual wave slopes");
@@ -239,7 +260,7 @@ final class WaterSurfaceSmoke {
 				assertVector(bytes, 73, new float[]{0,0,0}, EPSILON, "cave suppresses glints");
 				assertEqual(bytes, 67, 68, 0.002F, "noise analytic gradient matches height differences");
 				assertEqual(bytes, 69, 70, 0.02F, "full height gradient includes clump envelope derivatives");
-				if (Math.abs(get(bytes, 65, 2) - get(bytes, 66, 2)) < 0.003F) {
+				if (Math.abs(get(bytes, 65, 2) - get(bytes, 66, 2)) < 0.001F) {
 					throw new AssertionError("Water lighting ignores reflected sky direction: fine normals cannot reveal sky detail");
 				}
 				if (Math.abs(get(bytes, 60, 0) - get(bytes, 60, 1)) > EPSILON

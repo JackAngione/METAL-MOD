@@ -1,0 +1,586 @@
+{
+  "device": "Apple M4 Max",
+  "world": "Existing standard-world save copy; fixed lighting fixture",
+  "renderDistance": 16,
+  "simulationDistance": 16,
+  "requestedFramebuffer": [
+    1920,
+    1080
+  ],
+  "nativePresentationDrawable": [
+    3840,
+    2160
+  ],
+  "halfResolution": false,
+  "shadows": {
+    "cascades": 4,
+    "resolution": 1792,
+    "distance": 256,
+    "casterDistance": 256
+  },
+  "method": "Local lights OFF, ON, ON, OFF per scene; 16 warmup ticks; 30 capture ticks; discard first 8 frames. Same local-light and visual options before/after. FPS measured under the Fabric harness; compare work counters and frame times as well.",
+  "baselinePatchSha256": "f6cfce95318062be5ea2332d35acfc21a47419dd7824c26a173e7f30b009e2d0",
+  "runs": {
+    "before": [
+      {
+        "scene": "night_empty",
+        "localLights": false,
+        "frames": 129,
+        "fps": 90.01596996350465,
+        "onePercentLowFps": 57.86869592893724,
+        "cpuP50Ms": 6.453417,
+        "gpuP50Ms": 3.257791,
+        "buffersCreatedPerFrame": 558.0232558139535,
+        "bufferCreationTotalMs": 134.15294,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "night_empty",
+        "localLights": true,
+        "frames": 114,
+        "fps": 80.47556825281188,
+        "onePercentLowFps": 54.96883953908628,
+        "cpuP50Ms": 8.564458,
+        "gpuP50Ms": 4.083625,
+        "buffersCreatedPerFrame": 930.0,
+        "bufferCreationTotalMs": 185.661059,
+        "localProfileBefore": {
+          "calls": 59,
+          "nanos": 6861086,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 9,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 181,
+          "nanos": 15138827,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 9,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "night_empty",
+        "localLights": true,
+        "frames": 114,
+        "fps": 81.4625068469237,
+        "onePercentLowFps": 51.02631914579697,
+        "cpuP50Ms": 8.219709,
+        "gpuP50Ms": 3.892375,
+        "buffersCreatedPerFrame": 930.2894736842105,
+        "bufferCreationTotalMs": 175.041661,
+        "localProfileBefore": {
+          "calls": 59,
+          "nanos": 4074255,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 9,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 181,
+          "nanos": 9264295,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 9,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "night_empty",
+        "localLights": false,
+        "frames": 120,
+        "fps": 85.1914989532982,
+        "onePercentLowFps": 57.77083937158961,
+        "cpuP50Ms": 7.994667,
+        "gpuP50Ms": 5.409666,
+        "buffersCreatedPerFrame": 929.0,
+        "bufferCreationTotalMs": 184.795053,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "night_torch",
+        "localLights": false,
+        "frames": 118,
+        "fps": 83.27252557101664,
+        "onePercentLowFps": 58.379602330408645,
+        "cpuP50Ms": 7.952584,
+        "gpuP50Ms": 4.517416,
+        "buffersCreatedPerFrame": 929.0,
+        "bufferCreationTotalMs": 179.421623,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "night_torch",
+        "localLights": true,
+        "frames": 114,
+        "fps": 81.4301152272274,
+        "onePercentLowFps": 57.96800351703471,
+        "cpuP50Ms": 8.193833,
+        "gpuP50Ms": 4.859125,
+        "buffersCreatedPerFrame": 930.4912280701755,
+        "bufferCreationTotalMs": 175.799358,
+        "localProfileBefore": {
+          "calls": 61,
+          "nanos": 4157417,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 183,
+          "nanos": 9285957,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "night_torch",
+        "localLights": true,
+        "frames": 113,
+        "fps": 80.83532697392945,
+        "onePercentLowFps": 57.894241693985514,
+        "cpuP50Ms": 8.113376,
+        "gpuP50Ms": 4.915791,
+        "buffersCreatedPerFrame": 930.0,
+        "bufferCreationTotalMs": 172.59408,
+        "localProfileBefore": {
+          "calls": 54,
+          "nanos": 3680340,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 175,
+          "nanos": 8185340,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "night_torch",
+        "localLights": false,
+        "frames": 114,
+        "fps": 80.76229215210428,
+        "onePercentLowFps": 56.922351338243054,
+        "cpuP50Ms": 8.028042,
+        "gpuP50Ms": 4.491875,
+        "buffersCreatedPerFrame": 929.2982456140351,
+        "bufferCreationTotalMs": 175.055699,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "day_torch",
+        "localLights": false,
+        "frames": 122,
+        "fps": 86.60558031031331,
+        "onePercentLowFps": 57.049540394640196,
+        "cpuP50Ms": 7.866917,
+        "gpuP50Ms": 5.105125,
+        "buffersCreatedPerFrame": 929.0,
+        "bufferCreationTotalMs": 183.830959,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "day_torch",
+        "localLights": true,
+        "frames": 120,
+        "fps": 85.2045671624745,
+        "onePercentLowFps": 55.40901563972105,
+        "cpuP50Ms": 7.95975,
+        "gpuP50Ms": 4.841,
+        "buffersCreatedPerFrame": 930.0,
+        "bufferCreationTotalMs": 182.609007,
+        "localProfileBefore": {
+          "calls": 63,
+          "nanos": 4228381,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 191,
+          "nanos": 9564966,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "day_torch",
+        "localLights": true,
+        "frames": 119,
+        "fps": 84.47034331355455,
+        "onePercentLowFps": 58.09548533302496,
+        "cpuP50Ms": 7.868541,
+        "gpuP50Ms": 4.86225,
+        "buffersCreatedPerFrame": 930.0,
+        "bufferCreationTotalMs": 177.368734,
+        "localProfileBefore": {
+          "calls": 65,
+          "nanos": 4017630,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 192,
+          "nanos": 8607254,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "day_torch",
+        "localLights": false,
+        "frames": 120,
+        "fps": 85.49147611939382,
+        "onePercentLowFps": 58.70654970482494,
+        "cpuP50Ms": 7.888292,
+        "gpuP50Ms": 5.310166,
+        "buffersCreatedPerFrame": 929.0,
+        "bufferCreationTotalMs": 185.74181,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      }
+    ],
+    "after": [
+      {
+        "scene": "night_empty",
+        "localLights": false,
+        "frames": 160,
+        "fps": 111.23868148501614,
+        "onePercentLowFps": 59.851492884764745,
+        "cpuP50Ms": 4.269916,
+        "gpuP50Ms": 2.94225,
+        "buffersCreatedPerFrame": 7.75625,
+        "bufferCreationTotalMs": 11.141246,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "night_empty",
+        "localLights": true,
+        "frames": 161,
+        "fps": 112.77717856593202,
+        "onePercentLowFps": 61.92573556162772,
+        "cpuP50Ms": 4.457959,
+        "gpuP50Ms": 3.326959,
+        "buffersCreatedPerFrame": 5.0,
+        "bufferCreationTotalMs": 7.506191,
+        "localProfileBefore": {
+          "calls": 85,
+          "nanos": 9852173,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 9,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 254,
+          "nanos": 19265468,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 9,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "night_empty",
+        "localLights": true,
+        "frames": 155,
+        "fps": 109.45766929502402,
+        "onePercentLowFps": 59.764898634697786,
+        "cpuP50Ms": 4.616125,
+        "gpuP50Ms": 3.393875,
+        "buffersCreatedPerFrame": 5.0,
+        "bufferCreationTotalMs": 7.345866,
+        "localProfileBefore": {
+          "calls": 84,
+          "nanos": 6787874,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 9,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 247,
+          "nanos": 14820086,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 9,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "night_empty",
+        "localLights": false,
+        "frames": 156,
+        "fps": 109.44913173642472,
+        "onePercentLowFps": 53.422369190721355,
+        "cpuP50Ms": 4.522834,
+        "gpuP50Ms": 3.94275,
+        "buffersCreatedPerFrame": 4.006410256410256,
+        "bufferCreationTotalMs": 6.223499,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "night_torch",
+        "localLights": false,
+        "frames": 163,
+        "fps": 114.57561432850636,
+        "onePercentLowFps": 57.59649868580629,
+        "cpuP50Ms": 4.500042,
+        "gpuP50Ms": 3.303541,
+        "buffersCreatedPerFrame": 4.0,
+        "bufferCreationTotalMs": 6.847682,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "night_torch",
+        "localLights": true,
+        "frames": 157,
+        "fps": 111.01787927035444,
+        "onePercentLowFps": 48.84765213515774,
+        "cpuP50Ms": 4.486084,
+        "gpuP50Ms": 3.806291,
+        "buffersCreatedPerFrame": 5.0,
+        "bufferCreationTotalMs": 6.490714,
+        "localProfileBefore": {
+          "calls": 87,
+          "nanos": 5442380,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 252,
+          "nanos": 13251760,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "night_torch",
+        "localLights": true,
+        "frames": 162,
+        "fps": 112.6328846684182,
+        "onePercentLowFps": 60.71491877573345,
+        "cpuP50Ms": 4.49225,
+        "gpuP50Ms": 3.4275,
+        "buffersCreatedPerFrame": 5.0,
+        "bufferCreationTotalMs": 7.373476,
+        "localProfileBefore": {
+          "calls": 83,
+          "nanos": 5187293,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 253,
+          "nanos": 13207035,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "night_torch",
+        "localLights": false,
+        "frames": 159,
+        "fps": 111.21238222548395,
+        "onePercentLowFps": 60.439774303377206,
+        "cpuP50Ms": 4.4445,
+        "gpuP50Ms": 3.343875,
+        "buffersCreatedPerFrame": 4.0,
+        "bufferCreationTotalMs": 5.895708,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "day_torch",
+        "localLights": false,
+        "frames": 156,
+        "fps": 109.46161147815468,
+        "onePercentLowFps": 55.71244023970277,
+        "cpuP50Ms": 4.469208,
+        "gpuP50Ms": 3.358541,
+        "buffersCreatedPerFrame": 4.0,
+        "bufferCreationTotalMs": 5.992004,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      },
+      {
+        "scene": "day_torch",
+        "localLights": true,
+        "frames": 151,
+        "fps": 105.94962081356923,
+        "onePercentLowFps": 57.30590554261859,
+        "cpuP50Ms": 4.65925,
+        "gpuP50Ms": 3.78675,
+        "buffersCreatedPerFrame": 5.0,
+        "bufferCreationTotalMs": 6.613133,
+        "localProfileBefore": {
+          "calls": 83,
+          "nanos": 5182674,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 242,
+          "nanos": 12945629,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "day_torch",
+        "localLights": true,
+        "frames": 150,
+        "fps": 104.82748017450281,
+        "onePercentLowFps": 55.510388602695826,
+        "cpuP50Ms": 4.996333,
+        "gpuP50Ms": 3.12975,
+        "buffersCreatedPerFrame": 5.0,
+        "bufferCreationTotalMs": 7.633135,
+        "localProfileBefore": {
+          "calls": 81,
+          "nanos": 5573166,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        },
+        "localProfileAfter": {
+          "calls": 239,
+          "nanos": 14485081,
+          "captures": 343,
+          "uploads": 1,
+          "sources": 10,
+          "moving": 0
+        }
+      },
+      {
+        "scene": "day_torch",
+        "localLights": false,
+        "frames": 150,
+        "fps": 104.80286796429824,
+        "onePercentLowFps": 58.27229916998394,
+        "cpuP50Ms": 4.92875,
+        "gpuP50Ms": 3.247584,
+        "buffersCreatedPerFrame": 4.0,
+        "bufferCreationTotalMs": 6.841166,
+        "localProfileBefore": null,
+        "localProfileAfter": null
+      }
+    ]
+  },
+  "summary": [
+    {
+      "scene": "night_empty",
+      "before": {
+        "fps": 80.96903754986779,
+        "cpuP50Ms": 8.3920835,
+        "gpuP50Ms": 3.9879999999999995,
+        "buffersCreatedPerFrame": 930.1447368421052
+      },
+      "after": {
+        "fps": 111.11742393047803,
+        "cpuP50Ms": 4.537042,
+        "gpuP50Ms": 3.360417,
+        "buffersCreatedPerFrame": 5.0
+      }
+    },
+    {
+      "scene": "night_torch",
+      "before": {
+        "fps": 81.13272110057844,
+        "cpuP50Ms": 8.1536045,
+        "gpuP50Ms": 4.887458,
+        "buffersCreatedPerFrame": 930.2456140350878
+      },
+      "after": {
+        "fps": 111.82538196938631,
+        "cpuP50Ms": 4.489167,
+        "gpuP50Ms": 3.6168955,
+        "buffersCreatedPerFrame": 5.0
+      }
+    },
+    {
+      "scene": "day_torch",
+      "before": {
+        "fps": 84.83745523801453,
+        "cpuP50Ms": 7.9141455,
+        "gpuP50Ms": 4.851625,
+        "buffersCreatedPerFrame": 930.0
+      },
+      "after": {
+        "fps": 105.38855049403602,
+        "cpuP50Ms": 4.8277915,
+        "gpuP50Ms": 3.45825,
+        "buffersCreatedPerFrame": 5.0
+      }
+    }
+  ],
+  "previousCascadeShaderCost": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "currentGpuMs": [
+        0.412083,
+        0.642708,
+        0.721916
+      ],
+      "previousGpuMs": [
+        0.391416,
+        0.743875,
+        0.791708
+      ]
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "currentGpuMs": [
+        1.095874,
+        1.332999,
+        1.334249
+      ],
+      "previousGpuMs": [
+        1.044875,
+        1.260375,
+        1.265375
+      ]
+    }
+  ]
+}

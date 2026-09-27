@@ -127,10 +127,18 @@ public final class WorldShadowModule implements AutoCloseable {
 		/** Conservative union of the fitted Metal clip volumes, including the caster extension. */
 		public boolean intersects(final float minX, final float minY, final float minZ,
 			final float maxX, final float maxY, final float maxZ) {
-			for (var cascade : this.cascades) {
-				if (ShadowCasterVolume.intersects(cascade.cameraRelativeToShadow(), minX, minY, minZ, maxX, maxY, maxZ)) return true;
+			return this.cascadeMask(minX, minY, minZ, maxX, maxY, maxZ) != 0;
+		}
+
+		/** Per-cascade conservative caster membership, including each fitted overlap/extension. */
+		public int cascadeMask(final float minX, final float minY, final float minZ,
+			final float maxX, final float maxY, final float maxZ) {
+			int mask = 0;
+			for (int i = 0; i < this.cascades.size(); i++) {
+				if (ShadowCasterVolume.intersects(this.cascades.get(i).cameraRelativeToShadow(),
+					minX, minY, minZ, maxX, maxY, maxZ)) mask |= 1 << i;
 			}
-			return false;
+			return mask;
 		}
 
 		public int cascadeCount() {

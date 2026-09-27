@@ -51,6 +51,13 @@ fragment ResolveTargets resolve_fragment(
     constant McFog &fog [[buffer(MC_BUFFER_LIGHTING_FRAME)]],
     depth2d_array<float> shadowMap [[texture(MC_TEX_SHADOW_MAP)]],
     sampler shadowSampler [[sampler(MC_TEX_SHADOW_MAP)]]
+#if MC_OPTION_LOCAL_LIGHTS
+    , constant MCLocalFrame &localFrame [[buffer(MC_BUFFER_LOCAL_FRAME)]]
+    , device const uint *localScene [[buffer(MC_BUFFER_LOCAL_SCENE)]]
+    , device const MCLocalLight *localLights [[buffer(MC_BUFFER_LOCAL_LIGHTS)]]
+    , device const uint *localClusters [[buffer(MC_BUFFER_LOCAL_CLUSTERS)]]
+    , device const MCLocalLight *localMoving [[buffer(MC_BUFFER_LOCAL_MOVING)]]
+#endif
 ) {
     ResolveTargets out = previous;
     if (previous.albedo.a <= 0.0) {
@@ -66,7 +73,7 @@ fragment ResolveTargets resolve_fragment(
 #define MC_REDUCE_DISTANT_LIGHTING 1
 #endif
 #if MC_REDUCE_DISTANT_LIGHTING && defined(MC_OPTION_SHADOW_DISTANCE) && MC_OPTION_SHADOW_DISTANCE < 128
-    if (options.debugView == 0 && isfinite(viewDepth) && viewDepth >= shadowFrame.shadowDistance) {
+    if (options.debugView == 0 && isfinite(viewDepth) && viewDepth >= max(shadowFrame.shadowDistance, 32.0)) {
         out.albedo.a = 0.0;
         return out;
     }
@@ -81,10 +88,11 @@ fragment ResolveTargets resolve_fragment(
         : float3(0.0);
     float3 viewNormal = mc_decode_normal(previous.normal.rg);
     float3 worldNormal = normalize((camera.viewToCameraRelative * float4(viewNormal, 0.0)).xyz);
+    float3 shadowNormal = mc_shadow_receiver_normal(cameraRelative, worldNormal, previous.normal.b);
     uint cascade = validDepth ? mc_shadow_cascade(viewDepth, shadowFrame) : shadowFrame.cascadeCount;
-    float bias = mc_shadow_receiver_bias(worldNormal, viewDepth, shadowFrame);
+    float bias = mc_shadow_receiver_bias(shadowNormal, viewDepth, shadowFrame);
     float visibility = validDepth
-        ? mc_shadow_visibility(cameraRelative, viewDepth, bias, shadowFrame, shadowMap, shadowSampler, worldNormal)
+        ? mc_shadow_visibility(cameraRelative, viewDepth, bias, shadowFrame, shadowMap, shadowSampler, shadowNormal)
         : 1.0;
     float fade = mc_shadow_distance_fade(viewDepth, shadowFrame);
     if (fade > 0.0 && validDepth && shadowFrame.cascadeCount > 0u) {
@@ -132,6 +140,17 @@ fragment ResolveTargets resolve_fragment(
         previous.scene, previous.albedo, previous.light.rg, cameraRelative, visibility, fog, shadowFrame,
         options.shadowStrength
     );
+#if MC_OPTION_LOCAL_LIGHTS
+    // Placed lights only modulate the block-light seed. With no block energy and no
+    // moving emitters, this stage is an identity; don't trace invisible underground lights.
+    bool tracePlaced = options.debugView == 9 || previous.light.r > 0.0;
+    if (validDepth && (tracePlaced || localFrame.counts.z > 0u)) {
+        float2 local = mc_local_lighting(cameraRelative, worldNormal, localFrame, localScene, localLights, localClusters, localMoving, tracePlaced);
+        out.scene = options.debugView == 9
+            ? mc_scene_seed(float4(float3(local.x), 1.0))
+            : mc_compose_local_lighting(out.scene, previous.albedo, previous.light.rg, cameraRelative, local, fog);
+    }
+#endif
     out.albedo.a = 0.0;
     return out;
 }

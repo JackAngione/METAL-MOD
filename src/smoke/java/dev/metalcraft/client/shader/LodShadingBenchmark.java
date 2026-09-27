@@ -31,6 +31,10 @@ public final class LodShadingBenchmark {
             MetalRenderPipeline.ColorTarget.opaque(BYTE), MetalRenderPipeline.ColorTarget.opaque(BYTE));
 
     public static void main(String[] args) throws Exception {
+        if (args.length == 2 && args[0].equals("--shadow-cost")) {
+            shadowCost(Path.of(args[1]));
+            return;
+        }
         Files.createDirectories(OUTPUT);
         String source = productionSource();
         Files.writeString(OUTPUT.resolve("fixture.metal"), "#define MC_REDUCE_DISTANT_LIGHTING 0\n" + source);
@@ -92,7 +96,9 @@ public final class LodShadingBenchmark {
         var pack = ShaderPackLoader.loadBundled(LodShadingBenchmark.class.getClassLoader(),
                 ShaderPackRuntime.BUILTIN_ID, "assets/metalcraft/shaderpacks/standard");
         var declaration = pack.manifest().passes().stream().filter(p -> p.id().equals("resolve")).findFirst().orElseThrow();
-        String source = ShaderPassCompiler.source(pack, declaration, Map.of())
+        // This directional-distance fixture supplies no world voxel/source buffers. Local
+        // visibility has its own Metal readback suite in LocalLightingSmoke.
+        String source = ShaderPassCompiler.source(pack, declaration, Map.of("local_lights", false))
                 .replace("#define MC_SCENE_LINEAR_HDR 0\n", "#define MC_SCENE_LINEAR_HDR 1\n");
         source = "#define MC_TARGET_GBUFFER_ALBEDO 1\n#define MC_TARGET_GBUFFER_NORMAL 2\n#define MC_TARGET_GBUFFER_LIGHT 3\n" + source;
         // Keep the production function and extract its body for sampled-input calls.
@@ -109,6 +115,34 @@ public final class LodShadingBenchmark {
                 + Files.readString(Path.of("src/smoke/resources/lod-shading-fused.metal"))
                 + Files.readString(Path.of("src/smoke/resources/lod-shading-direct.metal"));
         return source;
+    }
+
+    /** Paired cost of the previous/current directional shader; no local lights or world CPU work. */
+    private static void shadowCost(Path previousFile) throws Exception {
+        Files.createDirectories(OUTPUT);
+        String current = productionSource();
+        String contract = Files.readString(Path.of("src/client/resources/assets/metalcraft/shaderpacks/standard/shared/shadows.metal"));
+        String previous = current.replace(contract, Files.readString(previousFile));
+        if (previous.equals(current)) throw new AssertionError("Previous shadow source was not substituted");
+        var rows = new ArrayList<Object>();
+        MetalStallProbe.setEnabled(true);
+        try (var device = MetalNative.openDefaultDevice().orElseThrow()) {
+            for (int[] size : new int[][]{{1920,1080}, {3840,2160}}) {
+                String distance = "#define MC_OPTION_SHADOW_DISTANCE 256\n";
+                try (var before = new Scene(device, previous.replace("#define MC_OPTION_SHADOW_DISTANCE 96\n", distance), size[0], size[1], 256);
+                     var after = new Scene(device, current.replace("#define MC_OPTION_SHADOW_DISTANCE 96\n", distance), size[0], size[1], 256)) {
+                    for (int i = 0; i < 20; i++) { before.draw(Variant.MERGED, i % 16); after.draw(Variant.MERGED, i % 16); }
+                    double[] a = new double[40], b = new double[40];
+                    for (int i = 0; i < 40; i++) {
+                        if ((i & 1) == 0) { a[i] = before.draw(Variant.MERGED, i % 16); b[i] = after.draw(Variant.MERGED, i % 16); }
+                        else { b[i] = after.draw(Variant.MERGED, i % 16); a[i] = before.draw(Variant.MERGED, i % 16); }
+                    }
+                    rows.add(Map.of("width", size[0], "height", size[1], "previousGpuMs", quantiles(a), "currentGpuMs", quantiles(b)));
+                    System.out.printf("SHADOW_COST %dx%d previous=%.4f current=%.4f ms%n", size[0], size[1], median(a), median(b));
+                }
+            }
+            Files.writeString(OUTPUT.resolve("shadow-transition-cost.json"), new GsonBuilder().setPrettyPrinting().create().toJson(rows));
+        } finally { MetalStallProbe.setEnabled(false); }
     }
 
     /** Correctness gate for the production specialization, independent of timing noise. */
@@ -189,7 +223,9 @@ public final class LodShadingBenchmark {
             halfView = own(half.createView()); quarterView = own(quarter.createView()); shadowView = own(shadow.createView());
             sampler = own(device.createSampler(new MetalSampler.Descriptor(MetalSampler.Filter.NEAREST,
                     MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE)));
-            options = buffer(16); frame = buffer(432); camera = buffer(160); fog = buffer(48); parameters = buffer(16);
+            // MCResolveCamera includes cloudOrigin at 144 and cloudSettings at 160.
+            // Match the full 176-byte production ABI even when fixture clouds are off.
+            options = buffer(16); frame = buffer(432); camera = buffer(176); fog = buffer(48); parameters = buffer(16);
             try (var m = options.map()) { m.bytes().putFloat(0,1).putFloat(12,1); }
             try (var m = frame.map()) {
                 var b = m.bytes();

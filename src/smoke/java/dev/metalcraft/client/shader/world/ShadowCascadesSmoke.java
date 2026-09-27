@@ -19,10 +19,11 @@ public final class ShadowCascadesSmoke {
 				List<ShadowCascades.Cascade> cascades = ShadowCascades.fit(settings,
 					new Vector3d(29_000_000, 128, -29_000_000), rotation, fov, aspect, sun);
 				float near = settings.near();
+				float previousNear = 0;
 				for (var cascade : cascades) {
 					if (cascade.near() != near || cascade.far() <= near) throw new AssertionError("Cascade gap or overlap");
-					near = cascade.far();
-					for (float distance : new float[]{cascade.near(), cascade.far()}) {
+					float overlapNear = cascade == cascades.getFirst() ? near : near - (near - previousNear) * 0.1F;
+					for (float distance : new float[]{overlapNear, cascade.near(), cascade.far()}) {
 						for (int x : new int[]{-1, 1}) for (int y : new int[]{-1, 1}) {
 							float halfHeight = distance * (float)Math.tan(fov * 0.5);
 							Vector3f corner = rotation.transform(new Vector3f(x * halfHeight * aspect, y * halfHeight, -distance));
@@ -32,6 +33,8 @@ public final class ShadowCascadesSmoke {
 							assertInside(cascade.cameraRelativeToShadow().transformPosition(corner));
 						}
 					}
+					previousNear = cascade == cascades.getFirst() ? 0 : near;
+					near = cascade.far();
 				}
 				if (near != settings.distance()) throw new AssertionError("Shadow distance was not covered");
 			}

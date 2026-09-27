@@ -75,6 +75,22 @@ tasks.named('check') {
 	dependsOn tasks.named('shaderTranslationSmoke')
 }
 
+// Paired GPU cost probe for zero-weight water bands; timings are not a build gate.
+tasks.register('waterFilteringBenchmark', JavaExec) {
+	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.metal.WaterFilteringSmoke'
+}
+
+// Original-vs-production cloud output and paired Metal GPU timing (not a timing gate).
+tasks.register('cloudPerformanceBenchmark', JavaExec) {
+	dependsOn tasks.named('clientClasses'), tasks.named('compileShaderSmokeJava')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.metal.CloudPerformanceSmoke'
+}
+
 tasks.register('lodSmoke', JavaExec) {
 	dependsOn tasks.named('compileShaderSmokeJava')
 	classpath = sourceSets.shaderSmoke.runtimeClasspath
@@ -192,6 +208,7 @@ tasks.named('runClient') {
 	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
 		systemProperty 'fabric.client.gametest', 'true'
 		systemProperty 'metalcraft.waterIdentityTest', providers.gradleProperty('metalWaterIdentityTest').getOrElse('false')
+		systemProperty 'metalcraft.localLightingTest', providers.gradleProperty('metalLocalLightingTest').getOrElse('false')
 		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
 		systemProperty 'metalcraft.skyTest', providers.gradleProperty('metalSkyTest').getOrElse('false')
 		systemProperty 'metalcraft.skyMotionTest', providers.gradleProperty('metalSkyMotionTest').getOrElse('false')
@@ -292,3 +309,12 @@ tasks.register('lightSectionSnapshotsSmoke', JavaExec) {
     maxHeapSize = '512m'
 }
 tasks.named('check') { dependsOn tasks.named('lightSectionSnapshotsSmoke') }
+
+// Real Metal readback checks for local emission and block-shape occlusion.
+tasks.register('localLightingSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
+    onlyIf { isAppleSiliconBuild }
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.shader.world.LocalLightingSmoke'
+}
+tasks.named('check') { dependsOn tasks.named('localLightingSmoke') }

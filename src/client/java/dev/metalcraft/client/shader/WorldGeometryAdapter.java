@@ -1,6 +1,8 @@
 package dev.metalcraft.client.shader;
 
 import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
@@ -26,6 +28,7 @@ import dev.metalcraft.client.metal.MetalTexture;
 import dev.metalcraft.client.metal.MetalTextureView;
 import dev.metalcraft.client.shader.sky.SkyFrameInputs;
 import dev.metalcraft.client.shader.world.WorldLightingModule;
+import dev.metalcraft.client.shader.world.WorldLocalLighting;
 import dev.metalcraft.client.shader.world.WorldShadowModule;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -57,6 +60,8 @@ import org.slf4j.Logger;
  */
 public final class WorldGeometryAdapter implements AutoCloseable {
 	private static final Logger LOGGER = LogUtils.getLogger();
+	private static final int UNIFORM_ALIGNMENT = 256;
+	private static final int RESOLVE_CAMERA_BYTES = 176;
 	private static volatile @Nullable WorldGeometryAdapter active;
 
 	public enum Program {
@@ -109,10 +114,15 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final String resolveSource;
 	private final Function<String, Object> optionValue;
 	private final List<ShaderPack.Option> uniformOptions;
+	private final int optionBytes;
+	private final int resolveCameraOffset;
+	private final int lightingFrameOffset;
+	private final int resolveFrameBytes;
 	private final int shadowMapSlot;
 	private final int shadowFrameSlot;
 	private final int resolveCameraSlot;
 	private final int lightingFrameSlot;
+	private final @Nullable WorldLocalLighting localLighting;
 	private Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
 	private Map<RenderPipeline, Optional<RenderPipeline>> waterSubstitutions = new IdentityHashMap<>();
 	private Map<RenderPipeline, RenderPipeline> linearColorPipelines = new IdentityHashMap<>();
@@ -176,6 +186,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		this.resolvePass = resolvePass;
 		this.resolveSource = resolveSource;
 		this.uniformOptions = List.copyOf(uniformOptions);
+		this.optionBytes = Math.max(4, Math.multiplyExact(this.uniformOptions.size(), 4));
+		this.resolveCameraOffset = Math.addExact(this.optionBytes, UNIFORM_ALIGNMENT - 1) & -UNIFORM_ALIGNMENT;
+		this.lightingFrameOffset = Math.addExact(this.resolveCameraOffset, UNIFORM_ALIGNMENT);
+		this.resolveFrameBytes = Math.addExact(this.lightingFrameOffset, WorldLightingModule.FRAME_BYTES);
 		this.optionValue = optionValue;
 		int textureSlot = 0;
 		int shadowMap = -1;
@@ -197,6 +211,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		this.shadowFrameSlot = shadowFrame;
 		this.resolveCameraSlot = bufferSlot;
 		this.lightingFrameSlot = bufferSlot + 1;
+		this.localLighting = ShaderPackRuntime.BUILTIN_ID.equals(packId) && Boolean.TRUE.equals(optionValue.apply("local_lights"))
+			? new WorldLocalLighting(device.metal()) : null;
 		this.channels = this.captureChannels();
 		if (this.shadowMapSlot >= 0 || this.shadowFrameSlot >= 0) {
 			this.createUnoccludedBindings();
@@ -205,6 +221,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		device.setWorldUniformCapture(this::captureWorldUniform);
 		active = this;
 	}
+
+	public @Nullable WorldLocalLighting localLighting() { return this.localLighting; }
 
 	public void setCloudFrame(final @Nullable SkyFrameInputs frame) {
 		this.cloudFrame = frame;
@@ -505,27 +523,28 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		if (!this.pendingResolve || this.resolvePipeline == null) {
 			return false;
 		}
-		// Each resolve owns immutable uploads. Native command-buffer pinning keeps them alive
-		// after close; neither a later draw group nor the next frame can overwrite their bytes.
-		try (
-			MetalBuffer uniforms = this.device.metal().createBuffer(
-				Math.max(4L, this.uniformOptions.size() * 4L), MetalBuffer.StorageMode.SHARED);
-			MetalBuffer camera = this.device.metal().createBuffer(176L, MetalBuffer.StorageMode.SHARED);
-			MetalBuffer lighting = this.device.metal().createBuffer(
-				WorldLightingModule.FRAME_BYTES, MetalBuffer.StorageMode.SHARED)
+		// Reserve immutable, aligned slices from the encoder's existing upload arena. The arena
+		// retires only after this submission completes, including resolves flushed during submit.
+		// Allocating through transientMemory does not close or split the active Metal render pass.
+		try (GpuBufferSlice.MappedView mapping = this.device.createCommandEncoder().transientMemory().allocateGpuMapped(
+			this.resolveFrameBytes, UNIFORM_ALIGNMENT, GpuBuffer.USAGE_UNIFORM, this.resolveFrameBytes, 1)
 		) {
-			this.writeUniforms(uniforms);
-			this.writeResolveCamera(camera);
-			WorldLightingModule.write(lighting, this.fogColor,
+			ByteBuffer bytes = mapping.data();
+			this.writeUniforms(bytes.slice(0, this.optionBytes).order(bytes.order()));
+			this.writeResolveCamera(bytes.slice(this.resolveCameraOffset, RESOLVE_CAMERA_BYTES).order(bytes.order()));
+			WorldLightingModule.write(bytes.slice(this.lightingFrameOffset, WorldLightingModule.FRAME_BYTES).order(bytes.order()), this.fogColor,
 				this.fogEnvironmentalStart, this.fogEnvironmentalEnd,
 				this.fogRenderDistanceStart, this.fogRenderDistanceEnd,
 				this.fogSkyEnd, this.fogCloudsEnd);
+			GpuBufferSlice slice = mapping.slice();
+			MetalBuffer uniforms = this.device.nativeBuffer(slice.buffer());
 			openPass.setScissor(0, 0, this.sceneAttachment.getWidth(0), this.sceneAttachment.getHeight(0));
 			openPass.setPipeline(this.resolvePipeline);
-			openPass.setUniformBuffer(0, uniforms, 0L, MetalRenderPass.STAGE_FRAGMENT);
-			openPass.setUniformBuffer(this.resolveCameraSlot, camera, 0L, MetalRenderPass.STAGE_FRAGMENT);
-			openPass.setUniformBuffer(this.lightingFrameSlot, lighting, 0L, MetalRenderPass.STAGE_FRAGMENT);
+			openPass.setUniformBuffer(0, uniforms, slice.offset(), MetalRenderPass.STAGE_FRAGMENT);
+			openPass.setUniformBuffer(this.resolveCameraSlot, uniforms, slice.offset() + this.resolveCameraOffset, MetalRenderPass.STAGE_FRAGMENT);
+			openPass.setUniformBuffer(this.lightingFrameSlot, uniforms, slice.offset() + this.lightingFrameOffset, MetalRenderPass.STAGE_FRAGMENT);
 			this.bindShadowResources(openPass);
+			if (this.localLighting != null) this.localLighting.bind(openPass, this.lightingFrameSlot + 1);
 			openPass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 			this.pendingResolve = false;
 			return true;
@@ -766,45 +785,40 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		return this.encodedSource(preamble + this.source);
 	}
 
-	private void writeUniforms(final MetalBuffer uniforms) {
-		try (MetalBuffer.Mapping mapping = uniforms.map()) {
-			ByteBuffer bytes = mapping.bytes();
-			bytes.clear();
-			while (bytes.hasRemaining()) {
-				bytes.put((byte)0);
-			}
-			bytes.rewind();
-			for (ShaderPack.Option option : this.uniformOptions) {
-				Object value = this.optionValue.apply(option.id());
-				switch (option.type()) {
-					case BOOL -> bytes.putInt(Boolean.TRUE.equals(value) ? 1 : 0);
-					case INT -> bytes.putInt(((Number)value).intValue());
-					case FLOAT -> bytes.putFloat(((Number)value).floatValue());
-					case ENUM -> bytes.putInt(option.values().indexOf(value));
-				}
+	private void writeUniforms(final ByteBuffer bytes) {
+		bytes.clear();
+		while (bytes.hasRemaining()) {
+			bytes.put((byte)0);
+		}
+		bytes.rewind();
+		for (ShaderPack.Option option : this.uniformOptions) {
+			Object value = this.optionValue.apply(option.id());
+			switch (option.type()) {
+				case BOOL -> bytes.putInt(Boolean.TRUE.equals(value) ? 1 : 0);
+				case INT -> bytes.putInt(((Number)value).intValue());
+				case FLOAT -> bytes.putFloat(((Number)value).floatValue());
+				case ENUM -> bytes.putInt(option.values().indexOf(value));
 			}
 		}
 	}
 
-	private void writeResolveCamera(final MetalBuffer camera) {
-		try (MetalBuffer.Mapping mapping = camera.map()) {
-			ByteBuffer bytes = mapping.bytes();
-			this.inverseProjection.get(0, bytes);
-			this.viewToCameraRelative.get(64, bytes);
-			int width = this.sceneAttachment == null ? 1 : this.sceneAttachment.getWidth(0);
-			int height = this.sceneAttachment == null ? 1 : this.sceneAttachment.getHeight(0);
-			bytes.putFloat(128, width);
-			bytes.putFloat(132, height);
-			SkyFrameInputs clouds = this.cloudFrame;
-			if (clouds != null && clouds.hasClouds()) {
-				clouds.cloudOrigin().get(144, bytes);
-				bytes.putFloat(160, clouds.cloudSettings().x);
-				bytes.putFloat(164, clouds.cloudSettings().y);
-				bytes.putFloat(168, clouds.sunRain().w);
-				bytes.putFloat(172, 0.0F);
-			} else {
-				for (int i = 144; i < 176; i++) bytes.put(i, (byte)0);
-			}
+	private void writeResolveCamera(final ByteBuffer bytes) {
+		this.inverseProjection.get(0, bytes);
+		this.viewToCameraRelative.get(64, bytes);
+		int width = this.sceneAttachment == null ? 1 : this.sceneAttachment.getWidth(0);
+		int height = this.sceneAttachment == null ? 1 : this.sceneAttachment.getHeight(0);
+		bytes.putFloat(128, width);
+		bytes.putFloat(132, height);
+		bytes.putLong(136, 0L);
+		SkyFrameInputs clouds = this.cloudFrame;
+		if (clouds != null && clouds.hasClouds()) {
+			clouds.cloudOrigin().get(144, bytes);
+			bytes.putFloat(160, clouds.cloudSettings().x);
+			bytes.putFloat(164, clouds.cloudSettings().y);
+			bytes.putFloat(168, clouds.sunRain().w);
+			bytes.putFloat(172, 0.0F);
+		} else {
+			for (int i = 144; i < RESOLVE_CAMERA_BYTES; i++) bytes.put(i, (byte)0);
 		}
 	}
 
@@ -974,6 +988,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			return;
 		}
 		this.closed = true;
+		if (this.localLighting != null) this.localLighting.close();
 		this.device.setDeferredResolve(null);
 		this.device.setWorldUniformCapture(null);
 		if (!this.declined.isEmpty()) {

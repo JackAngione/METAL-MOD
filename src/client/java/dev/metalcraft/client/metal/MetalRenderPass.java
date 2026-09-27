@@ -341,7 +341,7 @@ public final class MetalRenderPass implements AutoCloseable {
 	}
 
 	/** Preserve draw order without forcing an early JNI batch submission. */
-	synchronized void recordPipeline(final MetalCommandStream commands, final MetalRenderPipeline pipeline) {
+	public synchronized void recordPipeline(final MetalCommandStream commands, final MetalRenderPipeline pipeline) {
 		this.requireOpenHandle();
 		this.requirePipeline();
 		this.validatePipeline(pipeline);

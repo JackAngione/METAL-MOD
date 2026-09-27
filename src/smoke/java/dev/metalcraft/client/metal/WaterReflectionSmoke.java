@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 /** GPU fixtures for Standard's bounded, single-frame water screen-space reflections. */
 final class WaterReflectionSmoke {
-	private static final int RESULT_COUNT = 7;
+	private static final int RESULT_COUNT = 11;
 	private static final int FLOAT4_BYTES = 4 * Float.BYTES;
 	private static final float EPSILON = 2.0e-5F;
 
@@ -94,6 +94,20 @@ final class WaterReflectionSmoke {
 			    float3 caveWithoutSun = mc_water_reflection_with_ssr(base, normal, float3(0,0,1),
 			        0.3, 0, float4(0), environment, hit);
 			    out[6] = float4(caveWithSun - caveWithoutSun, length(caveWithSun - baseline));
+			    // Fixed raster coordinates away from the center line: terrain flips clip Y,
+			    // then Metal's viewport maps +Y to the top. A round trip alone would allow
+			    // projection and reconstruction to share the same incorrect extra flip.
+			    float2 extent = float2(color.get_width(), color.get_height());
+			    float2 pixel;
+			    float depth;
+			    bool projected = mc_water_ssr_project(float3(0,1,-2), projection, extent, pixel, depth);
+			    out[7] = float4(pixel / extent - float2(0.5,0.75), depth - 0.5, projected ? 0 : 1);
+			    projected = mc_water_ssr_project(float3(0,-1,-2), projection, extent, pixel, depth);
+			    out[8] = float4(pixel / extent - float2(0.5,0.25), depth - 0.5, projected ? 0 : 1);
+			    out[9] = float4(mc_water_ssr_view_from_device_depth(extent * float2(0.5,0.75),
+			        0.5, extent, inverseProjection) - float3(0,1,-2), 0);
+			    out[10] = float4(mc_water_ssr_view_from_device_depth(extent * float2(0.5,0.25),
+			        0.5, extent, inverseProjection) - float3(0,-1,-2), 0);
 			}
 			""";
 		try (MetalComputePipeline pipeline = device.createComputePipeline(
@@ -122,6 +136,10 @@ final class WaterReflectionSmoke {
 				}
 				assertZero(bytes, 5, "quality " + quality + " miss composition");
 				assertZeroRgb(bytes, 6, "quality " + quality + " cave sun gating");
+				for (int result = 7; result <= 10; result++) {
+					assertZeroRgb(bytes, result, "off-center raster coordinates " + result);
+					if (get(bytes, result, 3) != 0) throw new AssertionError("Off-center projection rejected");
+				}
 				float caveSsrDelta = get(bytes, 6, 3);
 				if (quality > 1 && (!Float.isFinite(caveSsrDelta) || caveSsrDelta <= EPSILON)) {
 					throw new AssertionError("quality " + quality + " did not compose a nonzero cave SSR hit");

@@ -1,11 +1,12 @@
 package dev.metalcraft.client.metal;
 
 import dev.metalcraft.client.shader.ShaderPackRuntime;
+import dev.metalcraft.client.shader.ShaderFrameExecutor;
 import dev.metalcraft.client.shader.FrameBindings;
 import dev.metalcraft.client.shader.WorldComposition;
 import java.util.List;
 
-/** Owns the stored world-depth snapshot and the grade-to-main copy at the world seam. */
+/** Owns the optional world-depth snapshot and the grade-to-main copy at the world seam. */
 final class MetalWorldGrade implements AutoCloseable {
 	private MetalTexture depth;
 	private MetalTextureView depthView;
@@ -34,10 +35,14 @@ final class MetalWorldGrade implements AutoCloseable {
 					&& output.attachment().descriptor().format() != MetalTexture.Format.BGRA8_UNORM))) {
 			throw new IllegalArgumentException("Linear HDR grade requires a distinct encoded UNORM output");
 		}
-		this.prepare(device.metal(), width, height, output.attachment().descriptor().format());
 		runtime.resizeToScene(width, height);
-		commands.copyTexture(worldDepth.attachment(), this.depth, 0, 0, 0, 0, 0, width, height);
-		if (!runtime.executor().orElseThrow().encode(commands, WorldComposition.world(
+		ShaderFrameExecutor executor = runtime.executor().orElseThrow();
+		boolean readsDepth = executor.requiresWorldDepth();
+		this.prepare(device.metal(), width, height, output.attachment().descriptor().format(), readsDepth);
+		if (readsDepth) {
+			commands.copyTexture(worldDepth.attachment(), this.depth, 0, 0, 0, 0, 0, width, height);
+		}
+		if (!executor.encode(commands, WorldComposition.world(
 			scene.attachment(), scene.metal(), width, height, this.depth, this.depthView, null, encoding).withUnderwater(underwater))) {
 			throw new IllegalStateException("World grade inputs are unavailable");
 		}
@@ -52,10 +57,12 @@ final class MetalWorldGrade implements AutoCloseable {
 		}
 	}
 
-	private void prepare(final MetalDevice device, final int width, final int height, final MetalTexture.Format nextFormat) {
-		if (this.depth == null || this.depth.descriptor().width() != width || this.depth.descriptor().height() != height) {
-			if (this.depthView != null) this.depthView.close();
-			if (this.depth != null) this.depth.close();
+	private void prepare(final MetalDevice device, final int width, final int height,
+		final MetalTexture.Format nextFormat, final boolean readsDepth) {
+		if (!readsDepth) {
+			this.releaseDepth();
+		} else if (this.depth == null || this.depth.descriptor().width() != width || this.depth.descriptor().height() != height) {
+			this.releaseDepth();
 			this.depth = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.DEPTH32_FLOAT, width, height, 1));
 			this.depthView = this.depth.createView();
 		}
@@ -79,10 +86,17 @@ final class MetalWorldGrade implements AutoCloseable {
 		}
 	}
 
+	private void releaseDepth() {
+		if (this.depthView != null) this.depthView.close();
+		if (this.depth != null) this.depth.close();
+		this.depthView = null;
+		this.depth = null;
+	}
+
 	@Override
 	public void close() {
 		if (this.copy != null) this.copy.close();
-		if (this.depthView != null) this.depthView.close();
-		if (this.depth != null) this.depth.close();
+		this.copy = null;
+		this.releaseDepth();
 	}
 }

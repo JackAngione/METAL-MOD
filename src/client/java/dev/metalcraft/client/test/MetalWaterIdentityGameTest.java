@@ -107,6 +107,53 @@ final class MetalWaterIdentityGameTest {
 					throw new AssertionError("Ordinary transparency expected before the Fabulous check");
 				}
 			});
+			if (Boolean.getBoolean("metalcraft.waterOceanScreenshot")) {
+				// This seed's generated ocean was verified by the natural-water fixture.
+				// Keep the camera just above it and capture only the current shader result.
+				int[] sea = new int[1];
+				world.getServer().runOnServer(server -> {
+					var level = server.overworld();
+					sea[0] = level.getSeaLevel();
+					var water = new net.minecraft.core.BlockPos(-224, sea[0] - 1, -32);
+					if (!level.getFluidState(water).is(net.minecraft.tags.FluidTags.WATER)
+						|| !level.getFluidState(water.below(3)).is(net.minecraft.tags.FluidTags.WATER)) {
+						throw new AssertionError("Expected naturally generated deep ocean at " + water);
+					}
+				});
+				world.getServer().runCommand("tp @a -224 " + (sea[0] + 0.15) + " -32 180 35");
+				this.context.getInput().lookAt(180, 35);
+				this.context.waitTicks(50);
+				world.getServer().runCommand("tick freeze");
+				this.context.runOnClient(client -> client.level.setTimeFromServer(340L));
+				this.setWaterOption("water_detail", 3);
+				this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-ocean-water-shaders-close", false);
+				this.context.getInput().lookAt(180, 8);
+				this.capture(WaterRoutingDebug.Mode.OFF, "metalcraft-ocean-water-shaders-grazing", false);
+				return;
+			}
+			if (Boolean.getBoolean("metalcraft.waterTextureProbe")) {
+				// Look across the real fluid mesh at a grazing angle so animated normals
+				// and reflection remain visible without relying on the atlas pattern.
+				world.getServer().runCommand("tp @a -8 183.4 2 180 25");
+				this.context.getInput().lookAt(180, 25);
+				this.context.waitTicks(20);
+				world.getServer().runCommand("tick freeze");
+				this.context.runOnClient(client -> client.level.setTimeFromServer(340L));
+				this.capture(WaterRoutingDebug.Mode.BASELINE, "metalcraft-water-texture-oblique-vanilla", false);
+				this.setWaterOption("water_detail", 0);
+				Path noDetail = this.capture(WaterRoutingDebug.Mode.OFF,
+					"metalcraft-water-texture-oblique-flat", false);
+				this.setWaterOption("water_detail", 3);
+				Path detailed = this.capture(WaterRoutingDebug.Mode.OFF,
+					"metalcraft-water-texture-oblique-shaders", false);
+				this.capture(WaterRoutingDebug.Mode.NORMALS, "metalcraft-water-texture-oblique-normals", false);
+				int changed = differentSamples(noDetail, detailed, 0.05, 0.95, 0.15, 0.95, 4);
+				if (changed < 1000) {
+					throw new AssertionError("Close water shader detail is not visible: " + changed);
+				}
+				System.out.println("Close water detail changed pixels: " + changed);
+				return;
+			}
 			if (Boolean.getBoolean("metalcraft.underwaterProbe")) {
 				this.context.getInput().resizeWindow(RESIZED_WIDTH, RESIZED_HEIGHT);
 				this.context.waitFor(client -> client.getWindow().getWidth() == RESIZED_WIDTH

@@ -1,0 +1,10 @@
+Baseline: 49d4eda
+Normal baseline: ./gradlew build --offline — BUILD SUCCESSFUL in 37s
+Final: MTL_DEBUG_LAYER=1 ./gradlew build --offline — BUILD SUCCESSFUL in 34s
+Cloud shape GPU: 32768 float comparisons, including filter boundaries and terrain density; max error=0.0
+Cloud performance GPU: exact RGBA16 equality for 10693824 pixels across 198 views/modes/weather/wind cases (below/inside/above clouds, horizon, night, and two extents)
+Metal API validation enabled for the complete final build.
+The 160-byte LOD fixture camera allocation was corrected to the production 176-byte ABI.
+Benchmark: ./gradlew cloudPerformanceBenchmark --offline — BUILD SUCCESSFUL in 12s
+Final production and frozen-reference SHA-256 values match measurements.json.
+No live game run or whole-game FPS claim.

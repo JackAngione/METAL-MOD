@@ -33,6 +33,8 @@ public final class WorldShadowModuleSmoke {
 		for (int count = 1; count <= 4; count++) check(device, contract, count);
 		checkWalkingReconstruction(device, contract);
 		ShadowFilteringSmoke.run(device, contract);
+		ShadowReceiverPlaneSmoke.run(device, contract);
+		ShadowCascadeTransitionSmoke.run(device, contract);
 		TerrainShadowRendererSmoke.run(device, contract);
 		System.out.println("Shadow resources: 1–4 cascades, named bindings, reconstruction and immutable uploads passed");
 	}

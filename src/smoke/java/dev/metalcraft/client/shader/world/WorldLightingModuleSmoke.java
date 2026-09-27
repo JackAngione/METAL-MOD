@@ -19,6 +19,7 @@ public final class WorldLightingModuleSmoke {
 
 	public static void run(final MetalDevice device) {
 		assertHostTransfer();
+		assertMappedFrameLayout();
 		String shadows;
 		String lighting;
 		try {
@@ -68,6 +69,28 @@ public final class WorldLightingModuleSmoke {
 		System.out.println("Lighting frame: McFog layout and identity fog upload passed");
 		runColorTransfer(device);
 		HdrCompositionSmoke.run(device);
+	}
+
+	private static void assertMappedFrameLayout() {
+		ByteBuffer arena = ByteBuffer.allocateDirect(80).order(ByteOrder.nativeOrder());
+		for (int index = 0; index < arena.capacity(); index++) arena.put(index, (byte)0x5a);
+		ByteBuffer frame = arena.slice(16, WorldLightingModule.FRAME_BYTES).order(ByteOrder.nativeOrder());
+		WorldLightingModule.write(frame, new org.joml.Vector4f(0.125F, 0.25F, 0.5F, 1.0F),
+			12.0F, 34.0F, 56.0F, 78.0F, 90.0F, 123.0F);
+		float[] expected = {0.125F, 0.25F, 0.5F, 1.0F, 12.0F, 34.0F, 56.0F, 78.0F, 90.0F, 123.0F};
+		for (int index = 0; index < expected.length; index++) {
+			if (frame.getFloat(index * Float.BYTES) != expected[index]) {
+				throw new AssertionError("Mapped lighting frame field differs at " + index);
+			}
+		}
+		for (int index = 0; index < arena.capacity(); index++) {
+			if ((index < 16 || index >= 64) && arena.get(index) != (byte)0x5a) {
+				throw new AssertionError("Mapped lighting frame overwrote an adjacent arena slice");
+			}
+			if (index >= 56 && index < 64 && arena.get(index) != 0) {
+				throw new AssertionError("Mapped lighting frame retained stale ABI padding");
+			}
+		}
 	}
 
 	private static void assertHostTransfer() {

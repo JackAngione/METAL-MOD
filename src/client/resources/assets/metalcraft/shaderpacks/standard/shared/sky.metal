@@ -133,7 +133,9 @@ static inline float4 mc_sky_cirrus(float3 ray, constant McSkyFrame& f) {
 // provides self-shading without a second shadow march or temporal history.
 static inline float4 mc_sky_cumulus(float3 ray, constant McSkyFrame& f) {
     float pixelAngle = max(length(dfdx(ray)), length(dfdy(ray)));
-    if (abs(ray.y) < 0.008) return float4(0.0);
+    // The existing final horizon fade is exactly zero through |ray.y| == 0.02.
+    // Reject before marching, keeping derivatives above this per-pixel branch.
+    if (abs(ray.y) <= 0.02) return float4(0.0);
     float base = f.cloudOrigin.w + 12.0;
     float bottom = (base - f.cloudOrigin.y) / ray.y;
     float top = (base + 96.0 - f.cloudOrigin.y) / ray.y;
@@ -170,6 +172,9 @@ static inline float4 mc_sky_cumulus(float3 ray, constant McSkyFrame& f) {
         float shape = mc_cumulus_shape(volume, footprint);
         float density = mc_cumulus_density(shape, coverage, h);
         float alpha = (1.0 - exp(-density * stepLength * 0.055));
+        // Transparent samples leave premultiplied accumulation unchanged. All
+        // screen derivatives were evaluated before entering the march.
+        if (alpha == 0.0) continue;
         float relief = saturate(0.58 + (shape - mc_sky_noise3(volume + f.sunRain.xyz * 0.3)) * 1.7);
         float lighting = saturate(relief * 0.65 + h * 0.55 - density * 0.18);
         float3 color = mix(ambient, direct, lighting);

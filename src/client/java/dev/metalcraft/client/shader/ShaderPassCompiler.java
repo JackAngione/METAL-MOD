@@ -46,6 +46,10 @@ final class ShaderPassCompiler {
 		}
 		preamble.append("#define MC_BUFFER_RESOLVE_CAMERA ").append(bufferSlot).append('\n');
 		preamble.append("#define MC_BUFFER_LIGHTING_FRAME ").append(bufferSlot + 1).append('\n');
+		for (int i = 0; i < 5; i++) {
+			preamble.append("#define MC_BUFFER_LOCAL_").append(List.of("FRAME", "SCENE", "LIGHTS", "CLUSTERS", "MOVING").get(i))
+				.append(' ').append(bufferSlot + 2 + i).append('\n');
+		}
 		if (pass.kind() != ShaderPack.PassKind.COMPUTE) {
 			int colorIndex = 0;
 			for (String write : pass.writes()) {

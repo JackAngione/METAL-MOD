@@ -139,6 +139,11 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			return;
 		}
 
+		if (Boolean.getBoolean("metalcraft.localLightingTest")) {
+			MetalLocalLightingGameTest.run(context);
+			return;
+		}
+
 		if (Boolean.getBoolean("metalcraft.shadowVisibilityTest")) {
 			new MetalShadowVisibilityGameTest(context).run();
 			return;

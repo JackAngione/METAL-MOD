@@ -29,8 +29,8 @@ the earlier composition seam before any reduced-resolution work.
 
 No LOD pack capability has been established. Treat no-pack and Standard as separate
 validation cases, with multiresolution shading unavailable for both until P6 passes.
-Do not infer compatibility merely because a pack loads. Water implementation and
-water-specific validation remain governed by WATER_EFFECTS_PLAN.md.
+Do not infer compatibility merely because a pack loads. Water-specific validation
+requires its own rendering checks.
 
 ## Baseline procedure and remaining measurement gaps
 
@@ -42,7 +42,7 @@ site by roughness, checks loaded coverage and visible sections, and captures thr
 interleaved stationary/pan/traversal repeats. It disables VSync and the frame cap.
 Explicitly supply 16/16 because its existing render-distance default is 32.
 
-Initial invocation is the 3840x2160 command in LOD_FEATURE_PLAN.md. Startup confirmed
+The initial 3840x2160 invocation confirmed
 Default selected Apple M4 Max Metal, an IMMEDIATE 3840x2160 surface, and Standard
 loaded. Startup confirmation is not a successful populated-world baseline.
 
@@ -318,8 +318,7 @@ checks include Standard/None, movement/zoom, disabled capture, edits, resource r
 teleport, half resolution, odd resize, fullscreen, Nether/Overworld and saved-world reopen.
 See `evidence/lod/live-route/` and `evidence/lod/live-lifecycle/`.
 
-P5's full water matrix passes both merged and split paths; final updated evidence is
-tracked in `LOD_FEATURE_PLAN.md` and the water W8 tracker. Whole-terrain counters now
+P5's full water matrix passes both merged and split paths. Whole-terrain counters now
 separate ordinary/distant/replaced/shadow draws. Benchmark reports retain counter
 endpoints and per-frame median/p95/p99 LOD selection, retirement and upload time.
 The earlier few-percent replacement-only reductions must not be presented as whole-
