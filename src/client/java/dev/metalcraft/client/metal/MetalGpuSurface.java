@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 /** CAMetalLayer-backed implementation of Minecraft's presentation interface. */
 final class MetalGpuSurface implements GpuSurfaceBackend {
 	private static final Logger LOGGER = LogUtils.getLogger();
+	private static final boolean LATE_DRAWABLE = Boolean.parseBoolean(System.getProperty("metalcraft.lateDrawable", "true"));
 
 	private final MetalGpuDevice device;
 	private final long windowHandle;
@@ -23,6 +24,8 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 	private MetalDrawable drawable;
 	private boolean configured;
 	private boolean displaySyncEnabled;
+	private boolean framePending;
+	private @org.jspecify.annotations.Nullable SurfaceException acquisitionFailure;
 
 	MetalGpuSurface(final MetalGpuDevice device, final long windowHandle) {
 		this.device = device;
@@ -55,6 +58,7 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 				runtime.resize(config.width(), config.height());
 			}
 			this.configured = true;
+			this.acquisitionFailure = null;
 		} catch (RuntimeException error) {
 			throw new SurfaceException("Metal could not configure the window surface: " + error.getMessage());
 		}
@@ -67,7 +71,7 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 
 	@Override
 	public boolean isSuboptimal() {
-		return false;
+		return this.acquisitionFailure != null;
 	}
 
 	@Override
@@ -75,13 +79,24 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		if (!this.configured || this.metal == null) {
 			throw new SurfaceException("Metal surface is not configured");
 		}
-		// Timed because a blocked acquire is invisible to any CPU-side frame measurement.
-		long acquireStartedNs = MetalStallProbe.begin();
-		this.drawable = this.metal.acquireDrawable().orElseThrow(() -> new SurfaceException("Metal did not provide a drawable"));
-		MetalStallProbe.end(MetalStallProbe.Source.ACQUIRE, acquireStartedNs);
+		if (this.framePending) throw new SurfaceException("Metal surface already has a pending frame");
+		if (this.acquisitionFailure != null) throw this.acquisitionFailure;
+		if (!LATE_DRAWABLE) this.acquireDrawable();
+		this.framePending = true;
+		// This hook owns shader/LOD frame state and must still run before extraction/rendering.
+		// Only CAMetalLayer acquisition moves; offscreen rendering needs no drawable.
 		WorldGeometryAdapter adapter = WorldGeometryAdapter.active();
 		if (adapter != null) {
 			adapter.beginFrame();
+		}
+	}
+
+	private void acquireDrawable() throws SurfaceException {
+		long startedNs = MetalStallProbe.begin();
+		try {
+			this.drawable = this.metal.acquireDrawable().orElseThrow(() -> new SurfaceException("Metal did not provide a drawable"));
+		} finally {
+			MetalStallProbe.end(MetalStallProbe.Source.ACQUIRE, startedNs);
 		}
 	}
 
@@ -93,8 +108,17 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 		if (!(textureView instanceof MetalGpuTextureView metalView)) {
 			throw new IllegalArgumentException("Presented texture does not belong to the direct Metal backend");
 		}
+		if (!this.framePending) throw new IllegalStateException("Metal surface has no pending frame");
 		if (this.drawable == null) {
-			throw new IllegalStateException("Metal surface has no acquired drawable");
+			try {
+				this.acquireDrawable();
+			} catch (SurfaceException | RuntimeException error) {
+				// Blaze3D's blit API cannot throw SurfaceException. Drop only presentation,
+				// submit the offscreen work normally, and request surface recovery next frame.
+				this.acquisitionFailure = new SurfaceException("Late Metal drawable acquisition failed: " + error.getMessage());
+				LOGGER.warn("{}", this.acquisitionFailure.getMessage());
+				return;
+			}
 		}
 		MetalTexture scene = metalView.texture().metal();
 		metalEncoder.blitToDrawable(scene, this.drawable);
@@ -102,15 +126,14 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 
 	@Override
 	public void present() {
-		if (this.drawable == null) {
-			throw new IllegalStateException("Metal surface has no acquired drawable");
-		}
+		if (!this.framePending) throw new IllegalStateException("Metal surface has no pending frame");
 		// Also outside Minecraft's frame timer, and the counterpart to ACQUIRE: if presentation is
 		// pacing the frame, the cost lands in one of the two.
 		long startedNs = MetalStallProbe.begin();
-		this.drawable.close();
+		if (this.drawable != null) this.drawable.close();
 		MetalStallProbe.end(MetalStallProbe.Source.PRESENT, startedNs);
 		this.drawable = null;
+		this.framePending = false;
 	}
 
 	@Override
@@ -124,6 +147,8 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 			this.metal = null;
 		}
 		this.configured = false;
+		this.framePending = false;
+		this.acquisitionFailure = null;
 	}
 
 	@Override
