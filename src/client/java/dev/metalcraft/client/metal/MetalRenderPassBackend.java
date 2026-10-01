@@ -264,9 +264,18 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 	@Override
 	public void drawIndexed(final int indexCount, final int instanceCount, final int firstIndex, final int vertexOffset, final int firstInstance) {
 		if (this.discardDraws) return;
-		this.bindResources();
-		this.requireIndexBuffer();
-		this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instanceCount, vertexOffset, firstInstance);
+		// Flush before returning so callers may close resources immediately after a draw.
+		// A terrain multi-draw already owns a larger batch and keeps its original ordering.
+		boolean ownBatch = BATCHING && this.recording == null;
+		MetalCommandStream batch = ownBatch ? this.beginRecording() : null;
+		try {
+			this.bindResources();
+			this.requireIndexBuffer();
+			this.encodeDrawIndexed(this.primitive(), this.indexBuffer.metal(), indexOffset(firstIndex), this.indexType, indexCount, instanceCount, vertexOffset, firstInstance);
+			if (ownBatch) this.submitBatch(batch);
+		} finally {
+			if (ownBatch) this.recording = null;
+		}
 	}
 
 	@Override

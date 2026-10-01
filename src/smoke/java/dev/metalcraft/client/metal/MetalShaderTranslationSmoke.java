@@ -642,6 +642,13 @@ public final class MetalShaderTranslationSmoke {
 					if (batch.commandCount() != 4) {
 						throw new AssertionError("Metal command batch recorded " + batch.commandCount() + " commands rather than four");
 					}
+					// Nonadjacent duplicates span scratch growth and registry-lock strides. The
+					// following small pipeline-switch batches reuse the same queue's large scratch.
+					for (int repeat = 0; repeat < 1100; repeat++) {
+						batch.setUniformBuffer(0, tint, 0L, MetalRenderPass.STAGE_FRAGMENT);
+						batch.setTexture(1, sourceView, MetalRenderPass.STAGE_FRAGMENT);
+						batch.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, indices, 0L, MetalRenderPass.IndexType.UINT16, 3, 1, 0, 0);
+					}
 					try (MetalCommandBuffer commands = queue.createCommandBuffer();
 						 MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
 							 MetalRenderPass.ColorAttachment.clear(color, 0.0, 0.0, 1.0, 1.0)))) {

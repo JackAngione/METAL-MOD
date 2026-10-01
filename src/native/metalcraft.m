@@ -110,6 +110,61 @@ enum {
  */
 #define MC_COMMAND_RESOLVE_STRIDE 256
 
+/** Queue-owned CPU scratch, reused only during synchronous command decoding.
+ * Resources are retained once per distinct handle until the command buffer pins them.
+ * Different queues do not contend; a queue's lock also permits concurrent callers safely.
+ */
+@interface MCCommandScratch : NSObject {
+@public
+    NSLock *lock;
+    id __strong *objects;
+    jlong *handles;
+    NSUInteger *types;
+    uint32_t *operands;
+    uint32_t *buckets;
+    NSUInteger capacity, bucketCount, used;
+}
+- (BOOL)prepare:(NSUInteger)count;
+- (void)clear;
+@end
+@implementation MCCommandScratch
+- (instancetype)init {
+    self = [super init];
+    if (self) lock = [[NSLock alloc] init];
+    return self;
+}
+- (BOOL)prepare:(NSUInteger)count {
+    if (count > capacity) {
+        NSUInteger next = MAX((NSUInteger)1024, capacity);
+        while (next < count) next *= 2;
+        id __strong *newObjects = (id __strong *)calloc(next, sizeof(id));
+        jlong *newHandles = calloc(next, sizeof(jlong));
+        NSUInteger *newTypes = calloc(next, sizeof(NSUInteger));
+        uint32_t *newOperands = calloc(next, sizeof(uint32_t));
+        uint32_t *newBuckets = calloc(next * 2, sizeof(uint32_t));
+        if (!newObjects || !newHandles || !newTypes || !newOperands || !newBuckets) {
+            free(newObjects); free(newHandles); free(newTypes); free(newOperands); free(newBuckets);
+            return NO;
+        }
+        free(objects); free(handles); free(types); free(operands); free(buckets);
+        objects = newObjects; handles = newHandles; types = newTypes;
+        operands = newOperands; buckets = newBuckets;
+        capacity = next; bucketCount = next * 2;
+    }
+    memset(buckets, 0, bucketCount * sizeof(uint32_t));
+    return YES;
+}
+- (void)clear {
+    for (NSUInteger i = 0; i < used; i++) objects[i] = nil;
+    used = 0;
+}
+- (void)dealloc {
+    [self clear];
+    free(objects); free(handles); free(types); free(operands); free(buckets);
+}
+@end
+static char MCCommandScratchKey;
+
 typedef NS_ENUM(NSUInteger, MCObjectType) {
 	MCObjectTypeDevice = 1,
 	MCObjectTypeCommandQueue = 2,
@@ -1714,6 +1769,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateCommandQueue(JNIEnv *env, jc
 			return 0;
 		}
 		commandQueue.label = @"MetalCraft primary command queue";
+		objc_setAssociatedObject(commandQueue, &MCCommandScratchKey, [[MCCommandScratch alloc] init], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		return mc_register_object(commandQueue, MCObjectTypeCommandQueue, deviceHandle);
 	}
 }
@@ -4073,72 +4129,52 @@ static BOOL mc_check_command_range(JNIEnv *env, const MCCommand *command, id __u
 	return NO;
 }
 
-/**
- * Turns every handle in a batch into the object it names, and the render pass with it.
- *
- * <p>The objects are retained for the batch's duration rather than left as bare slot pointers,
- * because the stride below drops the registry lock between strides and a release taken in that gap
- * would otherwise leave the encode pass reading freed Metal objects. That is the same retain the
- * per-command path already performs on each of its lookups; what the batch removes is the crossing
- * and the lock around it, not the retain.
- *
- * <p>A handle repeated by consecutive commands - a batch's shared index buffer, a uniform rebound at
- * a new offset - skips the lookup entirely.
+/** Resolve each distinct handle once, retaining it across registry-lock strides.
+ * The scratch owns references until pinAll transfers GPU lifetime to the submission.
+ * The handle includes its generation; differently typed aliases are always rejected.
  */
 static BOOL mc_resolve_command_operands(
-	JNIEnv *env,
-	jlong renderPassHandle,
-	const MCCommand *commands,
-	int32_t count,
-	id __strong *objects,
-	MCMetalRenderPass * __strong *renderPass
+    JNIEnv *env, const MCCommand *commands,
+    int32_t count, MCCommandScratch *scratch, jlong rootDevice
 ) {
-	os_unfair_lock_lock(&mc_registry_lock);
-	MCSlot *passEntry = mc_slot_locked(renderPassHandle);
-	if (passEntry == NULL || passEntry->type != MCObjectTypeRenderPass) {
-		os_unfair_lock_unlock(&mc_registry_lock);
-		mc_throw_state(env, @"Cannot submit Metal commands to an unknown, released, or incorrectly typed render pass");
-		return NO;
-	}
-	jlong rootDevice = passEntry->rootDeviceHandle;
-	*renderPass = (__bridge id)passEntry->object;
-	os_unfair_lock_unlock(&mc_registry_lock);
-
-	jlong resolvedHandle = 0;
-	MCObjectType resolvedType = (MCObjectType)0;
-	for (int32_t index = 0; index < count;) {
-		int32_t stride = index + MC_COMMAND_RESOLVE_STRIDE;
-		if (stride > count) {
-			stride = count;
-		}
-		os_unfair_lock_lock(&mc_registry_lock);
-		for (; index < stride; index++) {
-			jlong handle = commands[index].handle;
-			MCObjectType expectedType = mc_command_operand_type(commands[index].opcode);
-			// The type has to match as well as the handle. A handle names one object and so has one
-			// type, so this can only differ when the recorder has gone wrong - but that is exactly
-			// the case the check exists for, and skipping it here would let it through.
-			if (handle == resolvedHandle && expectedType == resolvedType) {
-				objects[index] = objects[index - 1];
-				continue;
-			}
-			MCSlot *entry = mc_slot_locked(handle);
-			if (entry == NULL || entry->type != expectedType
-				|| entry->rootDeviceHandle != rootDevice) {
-				os_unfair_lock_unlock(&mc_registry_lock);
-				mc_throw_state(
-					env,
-					[NSString stringWithFormat:@"Metal command %d in this batch names an unknown, released, incorrectly typed, or foreign resource", index]
-				);
-				return NO;
-			}
-			objects[index] = (__bridge id)entry->object;
-			resolvedHandle = handle;
-			resolvedType = expectedType;
-		}
-		os_unfair_lock_unlock(&mc_registry_lock);
-	}
-	return YES;
+    for (int32_t index = 0; index < count;) {
+        int32_t end = (int32_t)MIN((int64_t)index + MC_COMMAND_RESOLVE_STRIDE, (int64_t)count);
+        os_unfair_lock_lock(&mc_registry_lock);
+        for (; index < end; index++) {
+            jlong handle = commands[index].handle;
+            MCObjectType expectedType = mc_command_operand_type(commands[index].opcode);
+            uint64_t hash = (uint64_t)handle;
+            hash ^= hash >> 33; hash *= UINT64_C(0xff51afd7ed558ccd); hash ^= hash >> 33;
+            NSUInteger bucket = hash & (scratch->bucketCount - 1);
+            while (scratch->buckets[bucket] != 0
+                && scratch->handles[scratch->buckets[bucket] - 1] != handle)
+                bucket = (bucket + 1) & (scratch->bucketCount - 1);
+            uint32_t operand = scratch->buckets[bucket];
+            if (operand != 0) {
+                if (scratch->types[operand - 1] != expectedType) {
+                    os_unfair_lock_unlock(&mc_registry_lock);
+                    mc_throw_state(env, @"Metal batch reuses a resource with an incorrect type");
+                    return NO;
+                }
+                scratch->operands[index] = operand - 1;
+                continue;
+            }
+            MCSlot *entry = mc_slot_locked(handle);
+            if (entry == NULL || entry->type != expectedType || entry->rootDeviceHandle != rootDevice) {
+                os_unfair_lock_unlock(&mc_registry_lock);
+                mc_throw_state(env, @"Metal batch names an unknown, released, incorrectly typed, or foreign resource");
+                return NO;
+            }
+            operand = (uint32_t)scratch->used++;
+            scratch->objects[operand] = (__bridge id)entry->object;
+            scratch->handles[operand] = handle;
+            scratch->types[operand] = expectedType;
+            scratch->buckets[bucket] = operand + 1;
+            scratch->operands[index] = operand;
+        }
+        os_unfair_lock_unlock(&mc_registry_lock);
+    }
+    return YES;
 }
 
 /**
@@ -4153,13 +4189,13 @@ static void mc_encode_commands(
 	MCMetalRenderPass *renderPass,
 	const MCCommand *commands,
 	int32_t count,
-	id __strong const *objects,
+	MCCommandScratch *scratch,
 	BOOL checked
 ) {
 	id<MTLRenderCommandEncoder> encoder = renderPass.encoder;
 	for (int32_t index = 0; index < count; index++) {
 		const MCCommand *command = &commands[index];
-		id __unsafe_unretained object = objects[index];
+		id __unsafe_unretained object = scratch->objects[scratch->operands[index]];
 		if (checked && !mc_check_command_range(env, command, object, index)) {
 			return;
 		}
@@ -4266,21 +4302,29 @@ Java_dev_metalcraft_client_metal_MetalNative_nSubmitCommandStream(
 			}
 		}
 
-		// Zeroed because ARC releases what a __strong slot held before overwriting it.
-		id __strong *objects = (id __strong *)calloc((size_t)count, sizeof(id));
-		if (objects == NULL) {
-			mc_throw_state(env, @"Could not allocate a Metal command batch's resolved resources");
-			return;
-		}
-		MCMetalRenderPass *renderPass = nil;
-		if (mc_resolve_command_operands(env, renderPassHandle, commands, count, objects, &renderPass)) {
-			[renderPass.commandBuffer pinAll:(id __unsafe_unretained const *)(void *)objects count:(NSUInteger)count];
-			mc_encode_commands(env, renderPass, commands, count, objects, checked);
-		}
-		for (int32_t index = 0; index < count; index++) {
-			objects[index] = nil;
-		}
-		free(objects);
+        MCMetalRenderPass *renderPass = (MCMetalRenderPass *)mc_get_object(env, renderPassHandle, MCObjectTypeRenderPass);
+        if (renderPass == nil) return;
+        os_unfair_lock_lock(&mc_registry_lock);
+        MCSlot *passSlot = mc_slot_locked(renderPassHandle);
+        jlong rootDevice = passSlot == NULL ? 0 : passSlot->rootDeviceHandle;
+        os_unfair_lock_unlock(&mc_registry_lock);
+        if (rootDevice == 0) { mc_throw_state(env, @"Metal batch pass was released"); return; }
+        MCCommandScratch *scratch = objc_getAssociatedObject(renderPass.commandBuffer.commandBuffer.commandQueue, &MCCommandScratchKey);
+        if (scratch == nil) { mc_throw_state(env, @"Metal command queue has no scratch owner"); return; }
+        [scratch->lock lock];
+        @try {
+            if (![scratch prepare:(NSUInteger)count]) {
+                mc_throw_state(env, @"Could not grow Metal command scratch storage");
+                return;
+            }
+            if (mc_resolve_command_operands(env, commands, count, scratch, rootDevice)) {
+                [renderPass.commandBuffer pinAll:(id __unsafe_unretained const *)(void *)scratch->objects count:scratch->used];
+                mc_encode_commands(env, renderPass, commands, count, scratch, checked);
+            }
+        } @finally {
+            [scratch clear];
+            [scratch->lock unlock];
+        }
 	}
 }
 
