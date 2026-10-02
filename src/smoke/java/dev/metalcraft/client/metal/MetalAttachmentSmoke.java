@@ -34,6 +34,7 @@ final class MetalAttachmentSmoke {
             var depths = ((MetalGpuTexture)depth).metal().readback(queue, 0).order(ByteOrder.nativeOrder());
             if (depths.getFloat(0) != .25f) throw new AssertionError("Depth overwrite changed clear value");
 
+            encoder.clearColorAndDepthTextures(color, new Vector4f(0, 0, 1, 1), depth, .9);
             encoder.clearColorAndDepthTextures(color, new Vector4f(0, 1, 0, 1), depth, .5);
             // A partial clear must preserve everything outside its rectangle.
             encoder.clearColorAndDepthTextures(color, new Vector4f(1, 0, 0, 1), depth, .1, 0, 0, 4, 4);

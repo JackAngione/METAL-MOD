@@ -970,6 +970,11 @@ static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
 @property(nonatomic, readonly) NSUInteger colorMask;
 @property(nonatomic, readonly) BOOL hasDepth;
 @property(nonatomic, readonly) BOOL hasStencil;
+@property(nonatomic, readonly) NSUInteger mutableStoreMask;
+@property(nonatomic, readonly) BOOL mutableDepthStore;
+@property(nonatomic, readonly) BOOL mutableStencilStore;
+@property(nonatomic) NSUInteger discardedColors;
+@property(nonatomic) BOOL discardedDepth;
 
 - (instancetype)initWithEncoder:(id<MTLRenderCommandEncoder>)encoder
 	commandBuffer:(MCMetalCommandBuffer *)commandBuffer
@@ -995,7 +1000,13 @@ static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
 		_width = width;
 		_height = height;
 		_ended = NO;
-		for (NSUInteger i = 0; i < 8; i++) if (descriptor.colorAttachments[i].texture != nil) _colorMask |= 1u << i;
+		for (NSUInteger i = 0; i < 8; i++) {
+            if (descriptor.colorAttachments[i].texture != nil) _colorMask |= 1u << i;
+            if (descriptor.colorAttachments[i].texture != nil && descriptor.colorAttachments[i].storeAction == MTLStoreActionUnknown)
+                _mutableStoreMask |= 1u << i;
+        }
+        _mutableDepthStore = descriptor.depthAttachment.texture != nil && descriptor.depthAttachment.storeAction == MTLStoreActionUnknown;
+        _mutableStencilStore = descriptor.stencilAttachment.texture != nil && descriptor.stencilAttachment.storeAction == MTLStoreActionUnknown;
 		_hasDepth = descriptor.depthAttachment.texture != nil;
 		_hasStencil = descriptor.stencilAttachment.texture != nil;
 	}
@@ -1004,6 +1015,12 @@ static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
 
 - (void)end {
 	if (!self.ended) {
+        // Metal only allows late store decisions on attachments begun with Unknown.
+        // Every exit path resolves them, including direct native passes and shutdown.
+        for (NSUInteger i = 0; i < 8; i++) if (self.mutableStoreMask & (1u << i))
+            [self.encoder setColorStoreAction:(self.discardedColors & (1u << i)) ? MTLStoreActionDontCare : MTLStoreActionStore atIndex:i];
+        if (self.mutableDepthStore) [self.encoder setDepthStoreAction:self.discardedDepth ? MTLStoreActionDontCare : MTLStoreActionStore];
+        if (self.mutableStencilStore) [self.encoder setStencilStoreAction:self.discardedDepth ? MTLStoreActionDontCare : MTLStoreActionStore];
 		[self.encoder endEncoding];
 		_ended = YES;
 	}
@@ -3529,7 +3546,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			descriptor.colorAttachments[colorIndex].level = (NSUInteger)fields[MC_COLOR_FIELD_MIP_LEVEL];
 			descriptor.colorAttachments[colorIndex].slice = (NSUInteger)fields[MC_COLOR_FIELD_ARRAY_SLICE];
 			descriptor.colorAttachments[colorIndex].loadAction = loadAction;
-			descriptor.colorAttachments[colorIndex].storeAction = storeAction;
+			descriptor.colorAttachments[colorIndex].storeAction = storeAction == MTLStoreActionStore ? MTLStoreActionUnknown : storeAction;
 			descriptor.colorAttachments[colorIndex].clearColor = MTLClearColorMake(clear[0], clear[1], clear[2], clear[3]);
 		}
 		if (attachedColorCount == 0) {
@@ -3549,14 +3566,14 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			descriptor.depthAttachment.level = (NSUInteger)depthMipLevel;
 			descriptor.depthAttachment.slice = (NSUInteger)depthArraySlice;
 			descriptor.depthAttachment.loadAction = nativeDepthLoadAction;
-			descriptor.depthAttachment.storeAction = nativeDepthStoreAction;
+			descriptor.depthAttachment.storeAction = nativeDepthStoreAction == MTLStoreActionStore ? MTLStoreActionUnknown : nativeDepthStoreAction;
 			descriptor.depthAttachment.clearDepth = clearDepth;
 			if (mc_pixel_format_has_stencil(depthTexture.pixelFormat)) {
 				descriptor.stencilAttachment.texture = depthTexture;
 				descriptor.stencilAttachment.level = (NSUInteger)depthMipLevel;
 				descriptor.stencilAttachment.slice = (NSUInteger)depthArraySlice;
 				descriptor.stencilAttachment.loadAction = nativeDepthLoadAction;
-				descriptor.stencilAttachment.storeAction = nativeDepthStoreAction;
+				descriptor.stencilAttachment.storeAction = nativeDepthStoreAction == MTLStoreActionStore ? MTLStoreActionUnknown : nativeDepthStoreAction;
 				descriptor.stencilAttachment.clearStencil = 0;
 			}
 		}
@@ -3607,15 +3624,11 @@ Java_dev_metalcraft_client_metal_MetalNative_nDiscardRenderAttachments(JNIEnv *e
     @autoreleasepool {
         MCMetalRenderPass *pass = (MCMetalRenderPass *)mc_get_object(env, handle, MCObjectTypeRenderPass);
         if (pass == nil) return;
-        if (pass.ended || colorMask < 0 || ((NSUInteger)colorMask & ~pass.colorMask) != 0 || (depth && !pass.hasDepth)) {
+        if (pass.ended || colorMask < 0 || ((NSUInteger)colorMask & ~pass.mutableStoreMask) != 0 || (depth && !pass.mutableDepthStore)) {
             mc_throw_state(env, @"Cannot discard an absent or ended Metal attachment"); return;
         }
-        for (NSUInteger i = 0; i < 8; i++) if (colorMask & (1u << i))
-            [pass.encoder setColorStoreAction:MTLStoreActionDontCare atIndex:i];
-        if (depth) {
-            [pass.encoder setDepthStoreAction:MTLStoreActionDontCare];
-            if (pass.hasStencil) [pass.encoder setStencilStoreAction:MTLStoreActionDontCare];
-        }
+        pass.discardedColors |= (NSUInteger)colorMask;
+        pass.discardedDepth |= depth;
     }
 }
 
