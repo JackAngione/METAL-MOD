@@ -32,6 +32,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	 * comparable back to back in one session - the only comparison this renderer's run-to-run
 	 * spread admits.
 	 */
+	private static final boolean ATTACHMENT_LIVENESS = Boolean.parseBoolean(System.getProperty("metalcraft.attachmentLiveness", "true"));
 	private static final boolean PASS_MERGING = Boolean.parseBoolean(System.getProperty("metalcraft.passMerging", "true"));
 
 	private final MetalGpuDevice device;
@@ -165,6 +166,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		} else {
 			// commands() ends any deferred pass first, which is what keeps a non-mergeable pass
 			// ordered after the one before it.
+			this.endDeferredRenderPass(next);
 			this.renderPass = this.commands().beginRenderPass(next, passKind(descriptor));
 		}
 		this.renderPassDescriptor = next;
@@ -211,7 +213,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (open == null || next == null) {
 			return false;
 		}
-		if (open.colorAttachments().size() != next.colorAttachments().size()) {
+		if (open.renderTargetArrayLength() != next.renderTargetArrayLength() || open.colorAttachments().size() != next.colorAttachments().size()) {
 			return false;
 		}
 		for (int index = 0; index < open.colorAttachments().size(); index++) {
@@ -229,7 +231,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 				? MetalRenderPass.LoadAction.DONT_CARE : MetalRenderPass.LoadAction.LOAD;
 			MetalRenderPass.StoreAction continuingStore = memoryless
 				? MetalRenderPass.StoreAction.DONT_CARE : MetalRenderPass.StoreAction.STORE;
-			if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel()
+			if (openColor.target() != nextColor.target() || openColor.mipLevel() != nextColor.mipLevel() || openColor.arraySlice() != nextColor.arraySlice()
 				|| nextColor.loadAction() != continuingLoad
 				|| openColor.storeAction() != continuingStore) {
 				return false;
@@ -242,6 +244,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		}
 		return openDepth.texture() == nextDepth.texture()
 			&& openDepth.mipLevel() == nextDepth.mipLevel()
+			&& openDepth.arraySlice() == nextDepth.arraySlice()
 			&& nextDepth.loadAction() == MetalRenderPass.LoadAction.LOAD
 			&& openDepth.storeAction() == MetalRenderPass.StoreAction.STORE;
 	}
@@ -261,13 +264,54 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 
 	/** Ends the pass left open by {@link #submitRenderPass}, resolving its attachments. */
 	private void endDeferredRenderPass() {
+		this.endDeferredRenderPass(null);
+	}
+
+	private void endDeferredRenderPass(final MetalRenderPass.@Nullable Descriptor next) {
 		MetalRenderPass deferred = this.deferredRenderPass;
 		if (deferred != null) {
 			this.flushDeferredResolve();
+			if (ATTACHMENT_LIVENESS && next != null) this.discardOverwrittenAttachments(deferred, next);
 			this.deferredRenderPass = null;
 			this.deferredDescriptor = null;
 			deferred.close();
 		}
+	}
+
+	/** One-operation lookahead: a full CLEAR kills only the matching mip/slice's old contents.
+	 * Copies, samples, compute and partial clears go through commands() first and preserve stores.
+	 * Resolve hooks run before this decision so shader-pack tile reads still see their inputs.
+	 */
+	private void discardOverwrittenAttachments(final MetalRenderPass pass, final MetalRenderPass.Descriptor next) {
+		MetalRenderPass.Descriptor previous = this.deferredDescriptor;
+		if (previous == null || previous.renderTargetArrayLength() != next.renderTargetArrayLength()) return;
+		int colors = 0;
+		for (int i = 0; i < previous.colorAttachments().size(); i++) {
+			var before = previous.colorAttachments().get(i);
+			if (before == null || before.storeAction() != MetalRenderPass.StoreAction.STORE) continue;
+			for (var after : next.colorAttachments()) {
+				if (after != null && after.loadAction() == MetalRenderPass.LoadAction.CLEAR
+					&& before.target() == after.target() && before.mipLevel() == after.mipLevel()
+					&& before.arraySlice() == after.arraySlice()) colors |= 1 << i;
+			}
+		}
+		var beforeDepth = previous.depthAttachment();
+		var afterDepth = next.depthAttachment();
+		boolean depth = beforeDepth != null && afterDepth != null
+			&& beforeDepth.storeAction() == MetalRenderPass.StoreAction.STORE
+			&& afterDepth.loadAction() == MetalRenderPass.LoadAction.CLEAR
+			&& beforeDepth.texture() == afterDepth.texture() && beforeDepth.mipLevel() == afterDepth.mipLevel()
+			&& beforeDepth.arraySlice() == afterDepth.arraySlice();
+		if (colors != 0 || depth) pass.discardAttachments(colors, depth);
+	}
+
+	/** Begin the clear now to pin its resources, then let a compatible drawing pass reuse it. */
+	private void beginClear(final MetalRenderPass.Descriptor descriptor, final int kind) {
+		if (this.renderPass != null) throw new IllegalStateException("Cannot clear inside an active render pass");
+		this.endDeferredRenderPass(descriptor);
+		this.deferredRenderPass = this.commands().beginRenderPass(descriptor, kind);
+		this.deferredDescriptor = descriptor;
+		if (!PASS_MERGING) this.endDeferredRenderPass();
 	}
 
 	@Override
@@ -330,14 +374,9 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	@Override
 	public void clearDepthTexture(final GpuTexture depthTexture, final double clearDepth) {
 		MetalGpuTexture depth = requireTexture(this.routedTexture(depthTexture));
-		// A depth-only pass. This previously created a full-size BGRA scratch render target for every
-		// clear purely to satisfy the descriptor, which at 3840x2160 allocated and released 33 MB of
-		// texture per call on the render path.
-		try (MetalRenderPass pass = this.commands().beginRenderPass(MetalRenderPass.Descriptor.depthOnly(
+		this.beginClear(MetalRenderPass.Descriptor.depthOnly(
 			new MetalRenderPass.DepthAttachment(depth.metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth)
-		), MetalPassCensus.kindFor("(depth clear)"))) {
-			// Beginning and ending the pass performs the clear.
-		}
+		), MetalPassCensus.kindFor("(depth clear)"));
 	}
 
 	@Override
@@ -542,11 +581,9 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		MetalRenderPass.DepthAttachment depthAttachment = depthTexture == null ? null : new MetalRenderPass.DepthAttachment(
 			requireTexture(this.routedTexture(depthTexture)).metal(), MetalRenderPass.LoadAction.CLEAR, MetalRenderPass.StoreAction.STORE, clearDepth
 		);
-		try (MetalRenderPass pass = this.commands().beginRenderPass(new MetalRenderPass.Descriptor(
+		this.beginClear(new MetalRenderPass.Descriptor(
 			MetalRenderPass.ColorAttachment.clear(color.metal(), decoded.x(), decoded.y(), decoded.z(), decoded.w()), depthAttachment
-		))) {
-			// Beginning and ending the pass performs the clear.
-		}
+		), MetalPassCensus.kindFor("(attachment clear)"));
 	}
 
 	/** Encoded fog/clear RGB becomes linear when the routed attachment is the HDR world target. */

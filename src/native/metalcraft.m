@@ -838,9 +838,13 @@ static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
 @property(nonatomic, readonly) NSUInteger width;
 @property(nonatomic, readonly) NSUInteger height;
 @property(nonatomic, readonly) BOOL ended;
+@property(nonatomic, readonly) NSUInteger colorMask;
+@property(nonatomic, readonly) BOOL hasDepth;
+@property(nonatomic, readonly) BOOL hasStencil;
 
 - (instancetype)initWithEncoder:(id<MTLRenderCommandEncoder>)encoder
 	commandBuffer:(MCMetalCommandBuffer *)commandBuffer
+	descriptor:(MTLRenderPassDescriptor *)descriptor
 	width:(NSUInteger)width
 	height:(NSUInteger)height;
 - (void)end;
@@ -852,6 +856,7 @@ static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
 
 - (instancetype)initWithEncoder:(id<MTLRenderCommandEncoder>)encoder
 	commandBuffer:(MCMetalCommandBuffer *)commandBuffer
+	descriptor:(MTLRenderPassDescriptor *)descriptor
 	width:(NSUInteger)width
 	height:(NSUInteger)height {
 	self = [super init];
@@ -861,6 +866,9 @@ static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
 		_width = width;
 		_height = height;
 		_ended = NO;
+		for (NSUInteger i = 0; i < 8; i++) if (descriptor.colorAttachments[i].texture != nil) _colorMask |= 1u << i;
+		_hasDepth = descriptor.depthAttachment.texture != nil;
+		_hasStencil = descriptor.stencilAttachment.texture != nil;
 	}
 	return self;
 }
@@ -3427,11 +3435,29 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 		MCMetalRenderPass *renderPass = [[MCMetalRenderPass alloc]
 			initWithEncoder:encoder
 			commandBuffer:commandBuffer
+			descriptor:descriptor
 			width:targetWidth
 			height:targetHeight
 		];
 		return mc_register_object(renderPass, MCObjectTypeRenderPass, commandBufferHandle);
 	}
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nDiscardRenderAttachments(JNIEnv *env, jclass type, jlong handle, jint colorMask, jboolean depth) {
+    @autoreleasepool {
+        MCMetalRenderPass *pass = (MCMetalRenderPass *)mc_get_object(env, handle, MCObjectTypeRenderPass);
+        if (pass == nil) return;
+        if (pass.ended || colorMask < 0 || ((NSUInteger)colorMask & ~pass.colorMask) != 0 || (depth && !pass.hasDepth)) {
+            mc_throw_state(env, @"Cannot discard an absent or ended Metal attachment"); return;
+        }
+        for (NSUInteger i = 0; i < 8; i++) if (colorMask & (1u << i))
+            [pass.encoder setColorStoreAction:MTLStoreActionDontCare atIndex:i];
+        if (depth) {
+            [pass.encoder setDepthStoreAction:MTLStoreActionDontCare];
+            if (pass.hasStencil) [pass.encoder setStencilStoreAction:MTLStoreActionDontCare];
+        }
+    }
 }
 
 MC_EXPORT JNIEXPORT void JNICALL

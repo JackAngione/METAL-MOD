@@ -348,6 +348,11 @@ public final class MetalRenderPass implements AutoCloseable {
 		commands.setPipeline(pipeline);
 	}
 
+	/** Only the owner may discard attachments after proving the following operation overwrites them. */
+	synchronized void discardAttachments(final int colorMask, final boolean depth) {
+		MetalNative.nDiscardRenderAttachments(this.requireOpenHandle(), colorMask, depth);
+	}
+
 	private void validatePipeline(final MetalRenderPipeline pipeline) {
 		if (pipeline == null) {
 			throw new NullPointerException("pipeline");

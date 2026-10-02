@@ -7,7 +7,7 @@ Existing unrelated working-tree changes are excluded from these commits.
 - [x] Acquire drawables immediately before presentation, preserving frame hooks and surface recovery.
 - [x] Copy legal texture layouts directly without per-row temporary buffers.
 - [x] Deliver readback callbacks after GPU completion without blocking ordinary submissions.
-- [ ] Fold compatible clears into render passes and discard attachments only when their contents are proven dead.
+- [x] Fold compatible clears into render passes and discard attachments only when their contents are proven dead.
 - [ ] Cache content-addressed translations, native libraries/functions, and persistent pipeline binary archives.
 - [ ] Review all changes; run native/core, shader, and LOD checks plus brief standard-world integration tests.
 
@@ -35,3 +35,9 @@ are not claimed from correctness tests; live timing must distinguish CPU work, G
    copy: ordinary submit returns before the event is released, callbacks wait for the pixels and
    run once on the encoder owner. Completion tickets outlive arena retirement; explicit flush,
    reload and shutdown drain them. A throwing callback does not skip later callbacks or leak its ticket.
+
+5. Attachments: full Metal/shader smoke suite passed. Clear passes now remain open for
+   compatible following draws. One-operation liveness lookahead discards only mip/slice contents
+   fully overwritten by the next clear, after pending tile resolves. Pixel checks cover preserved
+   color across depth clears and partial clears; existing memoryless/MRT/HDR/water tests passed.
+   Unknown lifetimes still store. No assumptions are made about a shader pack's future reads.

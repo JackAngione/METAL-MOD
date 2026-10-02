@@ -112,6 +112,7 @@ public final class MetalNative {
 	static native void nCommitCommandBuffer(long handle);
 
 	static native void nWaitForCommandBuffer(long handle);
+	static native void nDiscardRenderAttachments(long handle, int colorMask, boolean depth);
 	static native long nCreateCommandCompletion(long handle, long deviceHandle);
 	static native boolean nPollCommandCompletion(long handle, boolean wait);
 	static native void nReleaseCommandCompletion(long handle);
