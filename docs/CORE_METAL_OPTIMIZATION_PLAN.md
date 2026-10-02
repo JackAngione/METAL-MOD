@@ -8,7 +8,7 @@ Existing unrelated working-tree changes are excluded from these commits.
 - [x] Copy legal texture layouts directly without per-row temporary buffers.
 - [x] Deliver readback callbacks after GPU completion without blocking ordinary submissions.
 - [x] Fold compatible clears into render passes and discard attachments only when their contents are proven dead.
-- [ ] Cache content-addressed translations, native libraries/functions, and persistent pipeline binary archives.
+- [x] Cache content-addressed translations, native libraries/functions, and persistent pipeline binary archives.
 - [ ] Review all changes; run native/core, shader, and LOD checks plus brief standard-world integration tests.
 
 Each modification receives its own commit with validation recorded below. Performance improvements
@@ -41,3 +41,10 @@ are not claimed from correctness tests; live timing must distinguish CPU work, G
    fully overwritten by the next clear, after pending tile resolves. Pixel checks cover preserved
    color across depth clears and partial clears; existing memoryless/MRT/HDR/water tests passed.
    Unknown lifetimes still store. No assumptions are made about a shader pack's future reads.
+
+6. Compilation: full smoke suite passed. Expanded GLSL translations use a 256-entry/16 MiB
+   content/stage/name cache; native source/function entries are bounded and shared across variants.
+   Metal render and compute binaries are archived by GPU and OS build, atomically saved at last
+   device close (64 MiB disk limit). Changed-source pixels, a real archive hit after device reopen,
+   corrupt archive fallback, and shader reload/failure isolation all passed. Override the disk
+   directory with `metalcraft.pipelineCacheDir`; the default is `~/Library/Caches/MetalCraft/pipelines-v1`.

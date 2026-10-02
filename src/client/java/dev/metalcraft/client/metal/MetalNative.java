@@ -59,11 +59,14 @@ public final class MetalNative {
 		if (!load()) {
 			return Optional.empty();
 		}
-		long handle = nCreateDefaultDevice();
+		Path cache = Path.of(System.getProperty("metalcraft.pipelineCacheDir",
+			Path.of(System.getProperty("user.home"), "Library", "Caches", "MetalCraft", "pipelines-v1").toString()));
+		long handle = nCreateDefaultDevice(cache.toAbsolutePath().toString());
 		return handle == 0L ? Optional.empty() : Optional.of(new MetalDevice(handle));
 	}
 
 	static native String nDeviceName(long handle);
+	static native long[] nPipelineCacheStats(long handle);
 
 	static native long nRecommendedWorkingSet(long handle);
 	static native long nCurrentAllocatedSize(long handle);
@@ -412,5 +415,5 @@ public final class MetalNative {
 
 	private static native boolean nIsSupported();
 
-	private static native long nCreateDefaultDevice();
+	private static native long nCreateDefaultDevice(String cacheDirectory);
 }

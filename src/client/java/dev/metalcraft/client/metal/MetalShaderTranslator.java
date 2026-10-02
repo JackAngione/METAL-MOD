@@ -208,7 +208,41 @@ public final class MetalShaderTranslator {
 	private record InterstageSources(String vertex, String fragment) {
 	}
 
+	private record TranslationKey(String source, Stage stage, String sourceName) { }
+	private static final long TRANSLATION_CACHE_BYTES = 16L * 1024 * 1024;
+	private static final LinkedHashMap<TranslationKey, Translation> TRANSLATIONS = new LinkedHashMap<>(64, .75F, true);
+	private static long translationBytes;
+	private static long translationHits;
+
+	static long translationCacheHits() {
+		synchronized (TRANSLATIONS) { return translationHits; }
+	}
+
+	/** Exact expanded content and stage/name key: reloads cannot reuse a different program. */
 	public static Translation translate(final String source, final Stage stage, final String sourceName) {
+		TranslationKey key = new TranslationKey(source, stage, sourceName);
+		synchronized (TRANSLATIONS) {
+			Translation cached = TRANSLATIONS.get(key);
+			if (cached != null) { translationHits++; return cached; }
+		}
+		Translation translated = translateUncached(source, stage, sourceName);
+		long bytes = translationSize(key, translated);
+		if (bytes <= TRANSLATION_CACHE_BYTES) synchronized (TRANSLATIONS) {
+			Translation previous = TRANSLATIONS.put(key, translated);
+			if (previous == null) translationBytes += bytes;
+			while (TRANSLATIONS.size() > 256 || translationBytes > TRANSLATION_CACHE_BYTES) {
+				var oldest = TRANSLATIONS.pollFirstEntry();
+				translationBytes -= translationSize(oldest.getKey(), oldest.getValue());
+			}
+		}
+		return translated;
+	}
+
+	private static long translationSize(TranslationKey key, Translation value) {
+		return 2L * (key.source().length() + key.sourceName().length() + value.metalSource().length()) + value.spirv.length;
+	}
+
+	private static Translation translateUncached(final String source, final Stage stage, final String sourceName) {
 		Objects.requireNonNull(source, "source");
 		Objects.requireNonNull(stage, "stage");
 		Objects.requireNonNull(sourceName, "sourceName");

@@ -39,6 +39,135 @@ static uint64_t mc_sample_allocation(id<MTLDevice> device) {
     return bytes;
 }
 
+// Cache expanded programs by exact source. Entry limits also bound retained native libraries.
+@interface MCLibraryEntry : NSObject
+@property(nonatomic, strong) id<MTLLibrary> library;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, id<MTLFunction>> *functions;
+@end
+@implementation MCLibraryEntry
+@end
+
+@interface MCPipelineCache : NSObject {
+@public
+    NSCache<NSString *, MCLibraryEntry *> *libraries;
+    id<MTLBinaryArchive> archive;
+    NSURL *archiveURL;
+    NSUInteger owners, libraryHits, libraryMisses, archiveHits, archiveAdds;
+    BOOL archiveLoaded, dirty;
+}
+- (instancetype)initWithDevice:(id<MTLDevice>)device directory:(NSString *)directory;
+- (void)save;
+@end
+static char MCPipelineCacheKey;
+static const unsigned long long MCPipelineArchiveLimit = 64ULL * 1024 * 1024;
+
+@implementation MCPipelineCache
+- (instancetype)initWithDevice:(id<MTLDevice>)device directory:(NSString *)directory {
+    self = [super init];
+    if (self) {
+        libraries = [[NSCache alloc] init];
+        libraries.countLimit = 256;
+        libraries.totalCostLimit = 16 * 1024 * 1024;
+        if (directory.length > 0) {
+            NSFileManager *files = NSFileManager.defaultManager;
+            NSURL *root = [NSURL fileURLWithPath:directory isDirectory:YES];
+            if ([files createDirectoryAtURL:root withIntermediateDirectories:YES attributes:nil error:nil]) {
+                NSString *name = [NSString stringWithFormat:@"%@-%llx.metalarc", NSProcessInfo.processInfo.operatingSystemVersionString,
+                    (unsigned long long)device.registryID];
+                archiveURL = [root URLByAppendingPathComponent:name];
+                MTLBinaryArchiveDescriptor *descriptor = [[MTLBinaryArchiveDescriptor alloc] init];
+                NSDictionary *attributes = [files attributesOfItemAtPath:archiveURL.path error:nil];
+                if (attributes != nil && [attributes fileSize] <= MCPipelineArchiveLimit) descriptor.url = archiveURL;
+                archive = [device newBinaryArchiveWithDescriptor:descriptor error:nil];
+                archiveLoaded = archive != nil && descriptor.url != nil;
+                if (archive == nil) {
+                    descriptor.url = nil; // Stale or corrupt archives never prevent device startup.
+                    archive = [device newBinaryArchiveWithDescriptor:descriptor error:nil];
+                }
+            }
+        }
+    }
+    return self;
+}
+- (void)save {
+    if (!dirty || archive == nil || archiveURL == nil) return;
+    // Only device shutdown writes to disk. Atomic replacement tolerates concurrent processes.
+    NSURL *temporary = [archiveURL URLByAppendingPathExtension:NSUUID.UUID.UUIDString];
+    if ([archive serializeToURL:temporary error:nil]) {
+        NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:temporary.path error:nil];
+        if (attributes != nil && [attributes fileSize] <= MCPipelineArchiveLimit)
+            rename(temporary.fileSystemRepresentation, archiveURL.fileSystemRepresentation);
+    }
+    [NSFileManager.defaultManager removeItemAtURL:temporary error:nil];
+    dirty = NO;
+}
+@end
+
+static MCLibraryEntry *mc_cached_library(id<MTLDevice> device, NSString *source, NSError **error) {
+    MCPipelineCache *cache = objc_getAssociatedObject(device, &MCPipelineCacheKey);
+    @synchronized(cache) {
+        MCLibraryEntry *entry = [cache->libraries objectForKey:source];
+        if (entry != nil) { cache->libraryHits++; return entry; }
+        id<MTLLibrary> library = [device newLibraryWithSource:source options:nil error:error];
+        if (library == nil) return nil;
+        entry = [[MCLibraryEntry alloc] init];
+        entry.library = library;
+        entry.functions = [[NSMutableDictionary alloc] init];
+        cache->libraryMisses++;
+        [cache->libraries setObject:entry forKey:source cost:source.length * sizeof(unichar)];
+        return entry;
+    }
+}
+
+static id<MTLFunction> mc_cached_function(MCLibraryEntry *entry, NSString *name) {
+    @synchronized(entry) {
+        id<MTLFunction> function = entry.functions[name];
+        if (function == nil) {
+            function = [entry.library newFunctionWithName:name];
+            if (function != nil) entry.functions[name] = function;
+        }
+        return function;
+    }
+}
+
+static id<MTLRenderPipelineState> mc_cached_render_pipeline(id<MTLDevice> device, MTLRenderPipelineDescriptor *descriptor, NSError **error) {
+    MCPipelineCache *cache = objc_getAssociatedObject(device, &MCPipelineCacheKey);
+    @synchronized(cache) {
+        if (cache->archive != nil) {
+            descriptor.binaryArchives = @[cache->archive];
+            id<MTLRenderPipelineState> cached = [device newRenderPipelineStateWithDescriptor:descriptor
+                options:MTLPipelineOptionFailOnBinaryArchiveMiss reflection:nil error:nil];
+            if (cached != nil) { cache->archiveHits++; return cached; }
+        }
+        id<MTLRenderPipelineState> pipeline = [device newRenderPipelineStateWithDescriptor:descriptor error:error];
+        if (pipeline != nil && cache->archive != nil && cache->archiveAdds < 4096
+            && [cache->archive addRenderPipelineFunctionsWithDescriptor:descriptor error:nil]) {
+            cache->archiveAdds++; cache->dirty = YES;
+        }
+        return pipeline;
+    }
+}
+
+static id<MTLComputePipelineState> mc_cached_compute_pipeline(id<MTLDevice> device, id<MTLFunction> function, NSError **error) {
+    MCPipelineCache *cache = objc_getAssociatedObject(device, &MCPipelineCacheKey);
+    @synchronized(cache) {
+        MTLComputePipelineDescriptor *descriptor = [[MTLComputePipelineDescriptor alloc] init];
+        descriptor.computeFunction = function;
+        if (cache->archive != nil) {
+            descriptor.binaryArchives = @[cache->archive];
+            id<MTLComputePipelineState> cached = [device newComputePipelineStateWithDescriptor:descriptor
+                options:MTLPipelineOptionFailOnBinaryArchiveMiss reflection:nil error:nil];
+            if (cached != nil) { cache->archiveHits++; return cached; }
+        }
+        id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithDescriptor:descriptor options:0 reflection:nil error:error];
+        if (pipeline != nil && cache->archive != nil && cache->archiveAdds < 4096
+            && [cache->archive addComputePipelineFunctionsWithDescriptor:descriptor error:nil]) {
+            cache->archiveAdds++; cache->dirty = YES;
+        }
+        return pipeline;
+    }
+}
+
 /**
  * Shader stages a resource binding applies to, matching MetalRenderPass.STAGE_*.
  *
@@ -1042,6 +1171,8 @@ static NSString *mc_type_name(MCObjectType type) {
 			return @"Metal compute pipeline";
 		case MCObjectTypeComputePass:
 			return @"Metal compute pass";
+		case MCObjectTypeCommandCompletion:
+			return @"Metal command completion";
 	}
 	return @"Metal object";
 }
@@ -1695,11 +1826,41 @@ Java_dev_metalcraft_client_metal_MetalNative_nIsSupported(JNIEnv *env, jclass ty
 }
 
 MC_EXPORT JNIEXPORT jlong JNICALL
-Java_dev_metalcraft_client_metal_MetalNative_nCreateDefaultDevice(JNIEnv *env, jclass type) {
+Java_dev_metalcraft_client_metal_MetalNative_nCreateDefaultDevice(JNIEnv *env, jclass type, jstring cacheDirectory) {
 	@autoreleasepool {
 		id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-		return device == nil ? 0 : mc_register_object(device, MCObjectTypeDevice, 0);
+        if (device == nil) return 0;
+        const char *characters = cacheDirectory == NULL ? NULL : (*env)->GetStringUTFChars(env, cacheDirectory, NULL);
+        if (cacheDirectory != NULL && characters == NULL) return 0;
+        NSString *directory = characters == NULL ? @"" : [NSString stringWithUTF8String:characters];
+        if (characters != NULL) (*env)->ReleaseStringUTFChars(env, cacheDirectory, characters);
+        @synchronized(device) {
+            MCPipelineCache *cache = objc_getAssociatedObject(device, &MCPipelineCacheKey);
+            if (cache == nil) {
+                cache = [[MCPipelineCache alloc] initWithDevice:device directory:directory];
+                objc_setAssociatedObject(device, &MCPipelineCacheKey, cache, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+            cache->owners++;
+        }
+        return mc_register_object(device, MCObjectTypeDevice, 0);
 	}
+}
+
+MC_EXPORT JNIEXPORT jlongArray JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nPipelineCacheStats(JNIEnv *env, jclass type, jlong handle) {
+    @autoreleasepool {
+        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+        if (device == nil) return NULL;
+        MCPipelineCache *cache = objc_getAssociatedObject(device, &MCPipelineCacheKey);
+        jlong values[5];
+        @synchronized(cache) {
+            values[0] = cache->libraryHits; values[1] = cache->libraryMisses;
+            values[2] = cache->archiveHits; values[3] = cache->archiveAdds; values[4] = cache->archiveLoaded;
+        }
+        jlongArray result = (*env)->NewLongArray(env, 5);
+        if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, 5, values);
+        return result;
+    }
 }
 
 MC_EXPORT JNIEXPORT jstring JNICALL
@@ -2465,18 +2626,19 @@ static id<MTLRenderPipelineState> mc_presentation_pipeline(JNIEnv *env, id<MTLDe
 		"  return source.sample(presentSampler, in.uv);\n"
 		"}\n";
 	NSError *libraryError = nil;
-	id<MTLLibrary> library = [device newLibraryWithSource:source options:nil error:&libraryError];
+	MCLibraryEntry *entry = mc_cached_library(device, source, &libraryError);
+	id<MTLLibrary> library = entry.library;
 	if (library == nil) {
 		[lock unlock];
 		mc_throw_state(env, [NSString stringWithFormat:@"Metal presentation shader compilation failed: %@", libraryError.localizedDescription]);
 		return nil;
 	}
 	MTLRenderPipelineDescriptor *descriptor = [[MTLRenderPipelineDescriptor alloc] init];
-	descriptor.vertexFunction = [library newFunctionWithName:@"metalcraft_present_vertex"];
-	descriptor.fragmentFunction = [library newFunctionWithName:@"metalcraft_present_fragment"];
+	descriptor.vertexFunction = mc_cached_function(entry, @"metalcraft_present_vertex");
+	descriptor.fragmentFunction = mc_cached_function(entry, @"metalcraft_present_fragment");
 	descriptor.colorAttachments[0].pixelFormat = destinationFormat;
 	NSError *pipelineError = nil;
-	id<MTLRenderPipelineState> pipeline = [device newRenderPipelineStateWithDescriptor:descriptor error:&pipelineError];
+	id<MTLRenderPipelineState> pipeline = mc_cached_render_pipeline(device, descriptor, &pipelineError);
 	if (pipeline == nil) {
 		[lock unlock];
 		mc_throw_state(env, [NSString stringWithFormat:@"Metal presentation pipeline creation failed: %@", pipelineError.localizedDescription]);
@@ -3056,24 +3218,21 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 		(*env)->ReleaseStringUTFChars(env, fragmentFunctionValue, fragmentFunctionCharacters);
 
 		NSError *vertexLibraryError = nil;
-		id<MTLLibrary> vertexLibrary = [device newLibraryWithSource:vertexSource options:nil error:&vertexLibraryError];
+		MCLibraryEntry *vertexEntry = mc_cached_library(device, vertexSource, &vertexLibraryError);
+		id<MTLLibrary> vertexLibrary = vertexEntry.library;
 		if (vertexLibrary == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal vertex-shader compilation failed: %@", vertexLibraryError.localizedDescription]);
 			return 0;
 		}
 		NSError *fragmentLibraryError = nil;
-		// Native packs put both entry points in one source. Reuse this pipeline's library
-		// instead of compiling the identical program twice; distinct translated stages
-		// still compile separately. No cache survives resource reload or device teardown.
-		id<MTLLibrary> fragmentLibrary = [vertexSource isEqualToString:fragmentSource]
-			? vertexLibrary
-			: [device newLibraryWithSource:fragmentSource options:nil error:&fragmentLibraryError];
+        MCLibraryEntry *fragmentEntry = mc_cached_library(device, fragmentSource, &fragmentLibraryError);
+        id<MTLLibrary> fragmentLibrary = fragmentEntry.library;
 		if (fragmentLibrary == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal fragment-shader compilation failed: %@", fragmentLibraryError.localizedDescription]);
 			return 0;
 		}
-		id<MTLFunction> vertexFunction = [vertexLibrary newFunctionWithName:vertexFunctionName];
-		id<MTLFunction> fragmentFunction = [fragmentLibrary newFunctionWithName:fragmentFunctionName];
+		id<MTLFunction> vertexFunction = mc_cached_function(vertexEntry, vertexFunctionName);
+		id<MTLFunction> fragmentFunction = mc_cached_function(fragmentEntry, fragmentFunctionName);
 		if (vertexFunction == nil || fragmentFunction == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:
 				@"Metal shader libraries do not contain the requested functions %@/%@; available vertex functions %@; available fragment functions %@",
@@ -3153,7 +3312,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 			descriptor.vertexDescriptor = vertexDescriptor;
 		}
 		NSError *pipelineError = nil;
-		id<MTLRenderPipelineState> pipelineState = [device newRenderPipelineStateWithDescriptor:descriptor error:&pipelineError];
+		id<MTLRenderPipelineState> pipelineState = mc_cached_render_pipeline(device, descriptor, &pipelineError);
 		if (pipelineState == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal render-pipeline creation failed: %@", pipelineError.localizedDescription]);
 			return 0;
@@ -4436,12 +4595,13 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateComputePipeline(
 		(*env)->ReleaseStringUTFChars(env, functionValue, functionCharacters);
 
 		NSError *libraryError = nil;
-		id<MTLLibrary> library = [device newLibraryWithSource:source options:nil error:&libraryError];
+		MCLibraryEntry *entry = mc_cached_library(device, source, &libraryError);
+	id<MTLLibrary> library = entry.library;
 		if (library == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal compute-shader compilation failed: %@", libraryError.localizedDescription]);
 			return 0;
 		}
-		id<MTLFunction> function = [library newFunctionWithName:functionName];
+		id<MTLFunction> function = mc_cached_function(entry, functionName);
 		if (function == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:
 				@"Metal shader library does not contain the requested compute function %@; available functions %@",
@@ -4451,7 +4611,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateComputePipeline(
 			return 0;
 		}
 		NSError *pipelineError = nil;
-		id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithFunction:function error:&pipelineError];
+		id<MTLComputePipelineState> pipeline = mc_cached_compute_pipeline(device, function, &pipelineError);
 		if (pipeline == nil) {
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal compute-pipeline creation failed: %@", pipelineError.localizedDescription]);
 			return 0;
@@ -4631,8 +4791,19 @@ Java_dev_metalcraft_client_metal_MetalNative_nEndComputePass(JNIEnv *env, jclass
 MC_EXPORT JNIEXPORT void JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nReleaseDevice(JNIEnv *env, jclass type, jlong handle) {
 	@autoreleasepool {
-		mc_release_object(env, handle, MCObjectTypeDevice);
-		mc_gpu_pass_reset();
+        id<MTLDevice> device = (id<MTLDevice>)mc_get_object(env, handle, MCObjectTypeDevice);
+        if (device == nil) return;
+        mc_release_object(env, handle, MCObjectTypeDevice);
+        if ((*env)->ExceptionCheck(env)) return;
+        @synchronized(device) {
+            MCPipelineCache *cache = objc_getAssociatedObject(device, &MCPipelineCacheKey);
+            if (cache != nil && --cache->owners == 0) {
+                @synchronized(cache) { [cache save]; }
+                // Break library/archive -> device ownership cycles at the last wrapper close.
+                objc_setAssociatedObject(device, &MCPipelineCacheKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }
+        mc_gpu_pass_reset();
 	}
 }
 

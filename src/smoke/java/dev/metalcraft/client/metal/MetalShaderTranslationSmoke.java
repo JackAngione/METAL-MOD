@@ -250,6 +250,7 @@ public final class MetalShaderTranslationSmoke {
 		MetalTransferSmoke.run();
 		MetalReadbackSmoke.run();
 		MetalAttachmentSmoke.run();
+		MetalPipelineCacheSmoke.run();
 		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
 			VERTEX_GLSL,
 			"smoke/fullscreen.vert",
