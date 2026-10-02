@@ -2131,6 +2131,19 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyBuffer(
 	}
 }
 
+// Apple GPU blits require pixel-aligned offsets/pitches, not a 256-byte row.
+// Only the last row's actual pixels must fit; a subregion can end within a larger row.
+static BOOL mc_valid_texture_transfer(jlong offset, jlong row, NSUInteger width,
+    NSUInteger height, NSUInteger pixelBytes, NSUInteger bufferLength) {
+    if (offset < 0 || row <= 0 || pixelBytes == 0 || height == 0
+        || (NSUInteger)offset % pixelBytes != 0 || (NSUInteger)row % pixelBytes != 0
+        || width > NSUIntegerMax / pixelBytes || (NSUInteger)row < width * pixelBytes
+        || (NSUInteger)offset > bufferLength) return NO;
+    NSUInteger available = bufferLength - (NSUInteger)offset;
+    NSUInteger lastRow = width * pixelBytes;
+    return lastRow <= available && height - 1 <= (available - lastRow) / (NSUInteger)row;
+}
+
 MC_EXPORT JNIEXPORT void JNICALL
 Java_dev_metalcraft_client_metal_MetalNative_nCopyBufferToTexture(
 	JNIEnv *env,
@@ -2159,8 +2172,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyBufferToTexture(
 		NSUInteger width = MAX((NSUInteger)1, texture.width >> mipLevel);
 		NSUInteger height = MAX((NSUInteger)1, texture.height >> mipLevel);
 		NSUInteger bytesPerPixel = mc_bytes_per_pixel(texture.pixelFormat);
-		if (sourceOffset < 0 || bytesPerRow < (jlong)(width * bytesPerPixel) || bytesPerRow % 256 != 0
-			|| (NSUInteger)sourceOffset > source.length || (NSUInteger)(bytesPerRow * (jlong)height) > source.length - (NSUInteger)sourceOffset) {
+		if (!mc_valid_texture_transfer(sourceOffset, bytesPerRow, width, height, bytesPerPixel, source.length)) {
 			mc_throw_state(env, @"Metal texture upload staging range or row pitch is invalid");
 			return;
 		}
@@ -2170,7 +2182,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyBufferToTexture(
 		[blit copyFromBuffer:source
 			sourceOffset:(NSUInteger)sourceOffset
 			sourceBytesPerRow:(NSUInteger)bytesPerRow
-			sourceBytesPerImage:(NSUInteger)bytesPerRow * height
+			sourceBytesPerImage:0
 			sourceSize:MTLSizeMake(width, height, 1)
 			toTexture:texture
 			destinationSlice:0
@@ -2207,8 +2219,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyTextureToBuffer(
 		NSUInteger width = MAX((NSUInteger)1, texture.width >> mipLevel);
 		NSUInteger height = MAX((NSUInteger)1, texture.height >> mipLevel);
 		NSUInteger bytesPerPixel = mc_bytes_per_pixel(texture.pixelFormat);
-		if (destinationOffset < 0 || bytesPerRow < (jlong)(width * bytesPerPixel) || bytesPerRow % 256 != 0
-			|| (NSUInteger)destinationOffset > destination.length || (NSUInteger)(bytesPerRow * (jlong)height) > destination.length - (NSUInteger)destinationOffset) {
+		if (!mc_valid_texture_transfer(destinationOffset, bytesPerRow, width, height, bytesPerPixel, destination.length)) {
 			mc_throw_state(env, @"Metal texture readback staging range or row pitch is invalid");
 			return;
 		}
@@ -2223,7 +2234,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyTextureToBuffer(
 			toBuffer:destination
 			destinationOffset:(NSUInteger)destinationOffset
 			destinationBytesPerRow:(NSUInteger)bytesPerRow
-			destinationBytesPerImage:(NSUInteger)bytesPerRow * height];
+			destinationBytesPerImage:0];
 	}
 }
 
@@ -2263,8 +2274,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyBufferToTextureRegion(
 		NSUInteger bytesPerPixel = mc_bytes_per_pixel(texture.pixelFormat);
 		if ((NSUInteger)destinationX > mipWidth || (NSUInteger)width > mipWidth - (NSUInteger)destinationX
 			|| (NSUInteger)destinationY > mipHeight || (NSUInteger)height > mipHeight - (NSUInteger)destinationY
-			|| sourceOffset < 0 || bytesPerRow < (jlong)((NSUInteger)width * bytesPerPixel) || bytesPerRow % 256 != 0
-			|| (NSUInteger)sourceOffset > source.length || (NSUInteger)(bytesPerRow * (jlong)height) > source.length - (NSUInteger)sourceOffset) {
+			|| !mc_valid_texture_transfer(sourceOffset, bytesPerRow, width, height, bytesPerPixel, source.length)) {
 			mc_throw_state(env, @"Metal texture upload staging range or row pitch is invalid");
 			return;
 		}
@@ -2274,7 +2284,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyBufferToTextureRegion(
 		[blit copyFromBuffer:source
 			sourceOffset:(NSUInteger)sourceOffset
 			sourceBytesPerRow:(NSUInteger)bytesPerRow
-			sourceBytesPerImage:(NSUInteger)bytesPerRow * (NSUInteger)height
+			sourceBytesPerImage:0
 			sourceSize:MTLSizeMake((NSUInteger)width, (NSUInteger)height, 1)
 			toTexture:texture
 			destinationSlice:(NSUInteger)arrayLayer
@@ -2315,8 +2325,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyTextureToBufferRegion(
 		NSUInteger bytesPerPixel = mc_bytes_per_pixel(texture.pixelFormat);
 		if ((NSUInteger)sourceX > mipWidth || (NSUInteger)width > mipWidth - (NSUInteger)sourceX
 			|| (NSUInteger)sourceY > mipHeight || (NSUInteger)height > mipHeight - (NSUInteger)sourceY
-			|| destinationOffset < 0 || bytesPerRow < (jlong)((NSUInteger)width * bytesPerPixel) || bytesPerRow % 256 != 0
-			|| (NSUInteger)destinationOffset > destination.length || (NSUInteger)(bytesPerRow * (jlong)height) > destination.length - (NSUInteger)destinationOffset) {
+			|| !mc_valid_texture_transfer(destinationOffset, bytesPerRow, width, height, bytesPerPixel, destination.length)) {
 			mc_throw_state(env, @"Metal texture readback staging range or row pitch is invalid");
 			return;
 		}
@@ -2331,7 +2340,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCopyTextureToBufferRegion(
 			toBuffer:destination
 			destinationOffset:(NSUInteger)destinationOffset
 			destinationBytesPerRow:(NSUInteger)bytesPerRow
-			destinationBytesPerImage:(NSUInteger)bytesPerRow * (NSUInteger)height];
+			destinationBytesPerImage:0];
 	}
 }
 

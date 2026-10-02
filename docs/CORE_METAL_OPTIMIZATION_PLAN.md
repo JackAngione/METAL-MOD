@@ -5,7 +5,7 @@ Existing unrelated working-tree changes are excluded from these commits.
 
 - [x] Reuse native command scratch storage and resolve/pin unique resources; batch ordinary indexed draw bindings.
 - [x] Acquire drawables immediately before presentation, preserving frame hooks and surface recovery.
-- [ ] Copy legal texture layouts directly without per-row temporary buffers.
+- [x] Copy legal texture layouts directly without per-row temporary buffers.
 - [ ] Deliver readback callbacks after GPU completion without blocking ordinary submissions.
 - [ ] Fold compatible clears into render passes and discard attachments only when their contents are proven dead.
 - [ ] Cache content-addressed translations, native libraries/functions, and persistent pipeline binary archives.
@@ -25,3 +25,8 @@ are not claimed from correctness tests; live timing must distinguish CPU work, G
    only drawable ownership moves. A late timeout drops presentation and requests reconfiguration
    instead of throwing through Blaze3D's non-throwing blit API. `metalcraft.lateDrawable=false`
    retains the early-acquire comparison path. Window/reload integration is checked in the final run.
+
+3. Transfers: `shaderTranslationSmoke --offline` passed. Real R8/RGBA readback covers
+   narrow rows, private input buffers, cropped subregions ending at the last pixel, and unaligned
+   source/destination fallbacks. Fallback storage uses submission-owned arenas. Native range
+   validation uses division to avoid overflow and includes only the final row's actual pixels.

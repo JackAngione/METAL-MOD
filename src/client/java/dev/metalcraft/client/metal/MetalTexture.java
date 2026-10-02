@@ -363,10 +363,10 @@ public final class MetalTexture implements MetalRenderPass.ColorTarget, AutoClos
 		int width = this.widthAtMip(mipLevel);
 		int height = this.heightAtMip(mipLevel);
 		long minimumBytesPerRow = Math.multiplyExact((long)width, this.bytesPerPixel());
-		if (bytesPerRow < minimumBytesPerRow || bytesPerRow % 256L != 0L) {
-			throw new IllegalArgumentException("Metal texture transfer row pitch must cover one row and be 256-byte aligned");
+		if (bytesPerRow < minimumBytesPerRow || bytesPerRow % this.bytesPerPixel() != 0L || bufferOffset % this.bytesPerPixel() != 0L) {
+			throw new IllegalArgumentException("Metal texture transfer pitch and offset must be pixel aligned and cover one row");
 		}
-		long transferSize = Math.multiplyExact(bytesPerRow, height);
+		long transferSize = Math.addExact(Math.multiplyExact(bytesPerRow, height - 1L), minimumBytesPerRow);
 		MetalBuffer.checkRange(bufferSize, bufferOffset, transferSize, "texture transfer");
 	}
 

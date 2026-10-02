@@ -247,6 +247,7 @@ public final class MetalShaderTranslationSmoke {
 		assertExtensionIsolation();
 		assertWorldGeometryRules();
 		assertTransientArenaSuballocation();
+		MetalTransferSmoke.run();
 		MetalShaderTranslator.PipelineTranslation translated = MetalShaderTranslator.translatePipeline(
 			VERTEX_GLSL,
 			"smoke/fullscreen.vert",

@@ -379,7 +379,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	) {
 		MetalGpuTexture texture = requireTexture(destination);
 		int tightRow = Math.multiplyExact(width, destination.getFormat().blockSize());
-		int paddedRow = alignedRow(tightRow);
+		int paddedRow = tightRow;
 		long stagingSize = Math.multiplyExact((long)paddedRow, height);
 		long startedNs = MetalStallProbe.begin();
 		try (GpuBufferSlice.MappedView mapping = this.transientMemory.allocateStaging(
@@ -414,15 +414,25 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		MetalGpuTexture texture = requireTexture(destination);
 		int bytesPerPixel = destination.getFormat().blockSize();
 		int tightRow = Math.multiplyExact(sourceWidth, bytesPerPixel);
-		int paddedRow = alignedRow(Math.multiplyExact(copyWidth, bytesPerPixel));
 		long startingOffset = source.offset() + Math.multiplyExact((long)sourceY * sourceWidth + sourceX, bytesPerPixel);
-		MetalBuffer staging = this.device.metal().createBuffer(Math.multiplyExact((long)paddedRow, copyHeight), MetalBuffer.StorageMode.PRIVATE);
-		this.temporaryResources.add(staging);
-		for (int row = 0; row < copyHeight; row++) {
-			this.commands().copyBuffer(input.metal(), startingOffset + (long)row * tightRow, staging, (long)row * paddedRow, (long)copyWidth * bytesPerPixel);
+		MetalBuffer transfer = input.metal();
+		long transferOffset = startingOffset;
+		int transferRow = tightRow;
+		if (startingOffset % bytesPerPixel != 0) {
+			// A transient slice may have been allocated with byte alignment. Repack only
+			// this exceptional layout, using the submission-owned arena instead of new buffers.
+			transferRow = Math.multiplyExact(copyWidth, bytesPerPixel);
+			GpuBufferSlice staging = this.transientMemory.allocateGpu(
+				Math.multiplyExact((long)transferRow, copyHeight), 256L, GpuBuffer.USAGE_COPY_SRC | GpuBuffer.USAGE_COPY_DST);
+			transfer = requireBuffer(staging.buffer()).metal();
+			transferOffset = staging.offset();
+			for (int row = 0; row < copyHeight; row++) {
+				this.commands().copyBuffer(input.metal(), startingOffset + (long)row * tightRow,
+					transfer, transferOffset + (long)row * transferRow, transferRow);
+			}
 		}
 		this.commands().copyBufferToTextureRegion(
-			staging, 0L, paddedRow, texture.metal(), mipLevel, arrayLayer,
+			transfer, transferOffset, transferRow, texture.metal(), mipLevel, arrayLayer,
 			destinationX, destinationY, copyWidth, copyHeight
 		);
 	}
@@ -447,16 +457,14 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		MetalGpuTexture texture = requireTexture(source);
 		MetalGpuBuffer output = requireBuffer(destination);
 		int tightRow = Math.multiplyExact(width, source.getFormat().blockSize());
-		int paddedRow = alignedRow(tightRow);
-		if (tightRow == paddedRow) {
-			this.commands().copyTextureToBufferRegion(texture.metal(), mipLevel, x, y, width, height, output.metal(), offset, paddedRow);
+		if (offset % source.getFormat().blockSize() == 0) {
+			this.commands().copyTextureToBufferRegion(texture.metal(), mipLevel, x, y, width, height, output.metal(), offset, tightRow);
 		} else {
-			MetalBuffer staging = this.device.metal().createBuffer(Math.multiplyExact((long)paddedRow, height), MetalBuffer.StorageMode.PRIVATE);
-			this.temporaryResources.add(staging);
-			this.commands().copyTextureToBufferRegion(texture.metal(), mipLevel, x, y, width, height, staging, 0L, paddedRow);
-			for (int row = 0; row < height; row++) {
-				this.commands().copyBuffer(staging, (long)row * paddedRow, output.metal(), offset + (long)row * tightRow, tightRow);
-			}
+			GpuBufferSlice staging = this.transientMemory.allocateGpu(
+				Math.multiplyExact((long)tightRow, height), 256L, GpuBuffer.USAGE_COPY_SRC | GpuBuffer.USAGE_COPY_DST);
+			MetalBuffer transfer = requireBuffer(staging.buffer()).metal();
+			this.commands().copyTextureToBufferRegion(texture.metal(), mipLevel, x, y, width, height, transfer, staging.offset(), tightRow);
+			this.commands().copyBuffer(transfer, staging.offset(), output.metal(), offset, Math.multiplyExact((long)tightRow, height));
 		}
 		this.completionCallbacks.add(callback);
 	}
@@ -613,14 +621,14 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		}
 	}
 
-	private static int alignedRow(final int row) {
-		return Math.addExact(row, 255) & -256;
-	}
 
 	private static void copyRows(final ByteBuffer source, final ByteBuffer destination, final int tightRow, final int paddedRow, final int height) {
+		if (tightRow == paddedRow) {
+			destination.put(source.slice(source.position(), Math.multiplyExact(tightRow, height)));
+			return;
+		}
 		for (int row = 0; row < height; row++) {
-			ByteBuffer bytes = source.slice(source.position() + row * tightRow, tightRow);
-			destination.position(row * paddedRow).put(bytes);
+			destination.position(row * paddedRow).put(source.slice(source.position() + row * tightRow, tightRow));
 		}
 	}
 
