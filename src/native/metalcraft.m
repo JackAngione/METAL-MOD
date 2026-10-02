@@ -93,7 +93,8 @@ static const unsigned long long MCPipelineArchiveLimit = 64ULL * 1024 * 1024;
     if (!dirty || archive == nil || archiveURL == nil) return;
     // Only device shutdown writes to disk. Atomic replacement tolerates concurrent processes.
     NSURL *temporary = [archiveURL URLByAppendingPathExtension:NSUUID.UUID.UUIDString];
-    if ([archive serializeToURL:temporary error:nil]) {
+    NSError *serializationError = nil;
+    if ([archive serializeToURL:temporary error:&serializationError]) {
         NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:temporary.path error:nil];
         if (attributes != nil && [attributes fileSize] <= MCPipelineArchiveLimit)
             rename(temporary.fileSystemRepresentation, archiveURL.fileSystemRepresentation);
@@ -139,6 +140,8 @@ static id<MTLRenderPipelineState> mc_cached_render_pipeline(id<MTLDevice> device
                 options:MTLPipelineOptionFailOnBinaryArchiveMiss reflection:nil error:nil];
             if (cached != nil) { cache->archiveHits++; return cached; }
         }
+        // Harvest from source IR, never from a descriptor referring back to its archive.
+        descriptor.binaryArchives = nil;
         id<MTLRenderPipelineState> pipeline = [device newRenderPipelineStateWithDescriptor:descriptor error:error];
         if (pipeline != nil && cache->archive != nil && cache->archiveAdds < 4096
             && [cache->archive addRenderPipelineFunctionsWithDescriptor:descriptor error:nil]) {
@@ -159,6 +162,7 @@ static id<MTLComputePipelineState> mc_cached_compute_pipeline(id<MTLDevice> devi
                 options:MTLPipelineOptionFailOnBinaryArchiveMiss reflection:nil error:nil];
             if (cached != nil) { cache->archiveHits++; return cached; }
         }
+        descriptor.binaryArchives = nil;
         id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithDescriptor:descriptor options:0 reflection:nil error:error];
         if (pipeline != nil && cache->archive != nil && cache->archiveAdds < 4096
             && [cache->archive addComputePipelineFunctionsWithDescriptor:descriptor error:nil]) {

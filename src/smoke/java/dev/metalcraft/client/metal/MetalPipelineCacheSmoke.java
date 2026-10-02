@@ -40,6 +40,18 @@ final class MetalPipelineCacheSmoke {
                 draw(device, SOURCE, false, false);
                 long[] stats = MetalNative.nPipelineCacheStats(device.requireOpenHandle());
                 if (stats[4] != 1 || stats[2] == 0) throw new AssertionError("Saved pipeline archive did not produce a real cache hit");
+                // Grow an archive loaded from disk, including the compute path used by packs.
+                try (var compute = device.createComputePipeline(new MetalComputePipeline.Descriptor("""
+                    #include <metal_stdlib>
+                    using namespace metal;
+                    kernel void cache_compute(device uint *out [[buffer(0)]], uint i [[thread_position_in_grid]]) { out[i] = i + 7; }
+                    """, "cache_compute"))) { }
+                draw(device, SOURCE.replace("return float4(p * 2 - 1, 0, 1)", "return float4(p * 2 - 1, 0.25, 1)"), false, false);
+            }
+            try (var device = MetalNative.openDefaultDevice().orElseThrow()) {
+                draw(device, SOURCE.replace("return float4(p * 2 - 1, 0, 1)", "return float4(p * 2 - 1, 0.25, 1)"), false, false);
+                if (MetalNative.nPipelineCacheStats(device.requireOpenHandle())[2] == 0)
+                    throw new AssertionError("An updated disk archive did not retain the added pipeline");
             }
             try (var files = Files.list(directory)) {
                 var archive = files.filter(path -> path.toString().endsWith(".metalarc")).findFirst().orElseThrow();
