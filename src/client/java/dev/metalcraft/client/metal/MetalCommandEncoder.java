@@ -14,6 +14,7 @@ import dev.metalcraft.client.shader.SceneColor;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -36,7 +37,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	private final MetalGpuDevice device;
 	private final MetalCommandQueue commandQueue;
 	private final MetalTransientMemory transientMemory;
-	private final List<AutoCloseable> temporaryResources = new ArrayList<>();
+	private final ArrayDeque<PendingReadback> pendingReadbacks = new ArrayDeque<>();
 	private final List<Runnable> completionCallbacks = new ArrayList<>();
 	private MetalCommandBuffer commands;
 	private @Nullable MetalFence resourceCompletion;
@@ -510,13 +511,15 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 	}
 
 	void finishPendingWork() {
-		this.finishSubmission(true);
+		do {
+			this.finishSubmission(true);
+		} while (this.commands != null || !this.pendingReadbacks.isEmpty());
 	}
 
 	@Override
 	public void close() {
 		if (!this.closed) {
-			this.finishSubmission(true);
+			this.finishPendingWork();
 			this.transientMemory.close();
 			if (this.resourceCompletion != null) this.resourceCompletion.close();
 			this.closed = true;
@@ -593,9 +596,13 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 			this.commands.signal(this.resourceCompletion, this.resourceSubmission);
 		}
 		MetalCommandBuffer submitted = this.commands;
-		boolean completed = wait || !this.completionCallbacks.isEmpty();
+		boolean completed = wait;
 		if (submitted != null) {
 			submitted.commit();
+			if (!this.completionCallbacks.isEmpty()) {
+				this.pendingReadbacks.addLast(new PendingReadback(submitted.completion(), List.copyOf(this.completionCallbacks)));
+				this.completionCallbacks.clear();
+			}
 			if (completed) {
 				long startedNs = MetalStallProbe.begin();
 				submitted.waitUntilCompleted();
@@ -606,20 +613,40 @@ final class MetalCommandEncoder implements CommandEncoderBackend, AutoCloseable 
 		if (submitted != null && !retainedByTransientMemory) submitted.close();
 		this.commands = null;
 		this.resourceSubmission = 0;
-		for (Runnable callback : this.completionCallbacks) callback.run();
-		this.completionCallbacks.clear();
-		for (AutoCloseable resource : this.temporaryResources) close(resource);
-		this.temporaryResources.clear();
 		if (wait) this.transientMemory.waitForAllFrames();
+		this.drainReadbacks(wait);
 	}
 
-	private static void close(final AutoCloseable resource) {
-		try {
-			resource.close();
-		} catch (Exception error) {
-			throw new IllegalStateException("Failed to close a temporary Metal resource", error);
+	/** Runs only on the encoder's owner, after submission state is reset for callback reentrancy. */
+	private void drainReadbacks(final boolean wait) {
+		Throwable failure = null;
+		while (!this.pendingReadbacks.isEmpty()) {
+			PendingReadback pending = this.pendingReadbacks.getFirst();
+			boolean ready;
+			try {
+				ready = pending.completion().completed(wait);
+			} catch (RuntimeException | Error error) {
+				this.pendingReadbacks.removeFirst();
+				pending.completion().close();
+				if (failure == null) failure = error; else failure.addSuppressed(error);
+				continue;
+			}
+			if (!ready) break;
+			this.pendingReadbacks.removeFirst();
+			try {
+				for (Runnable callback : pending.callbacks()) {
+					try { callback.run(); }
+					catch (RuntimeException | Error error) {
+						if (failure == null) failure = error; else failure.addSuppressed(error);
+					}
+				}
+			} finally { pending.completion().close(); }
 		}
+		if (failure instanceof RuntimeException error) throw error;
+		if (failure instanceof Error error) throw error;
 	}
+
+	private record PendingReadback(MetalCommandCompletion completion, List<Runnable> callbacks) { }
 
 
 	private static void copyRows(final ByteBuffer source, final ByteBuffer destination, final int tightRow, final int paddedRow, final int height) {

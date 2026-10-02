@@ -112,6 +112,9 @@ public final class MetalNative {
 	static native void nCommitCommandBuffer(long handle);
 
 	static native void nWaitForCommandBuffer(long handle);
+	static native long nCreateCommandCompletion(long handle, long deviceHandle);
+	static native boolean nPollCommandCompletion(long handle, boolean wait);
+	static native void nReleaseCommandCompletion(long handle);
 
 	static native long nCreateBuffer(long deviceHandle, long size, int storageMode);
 

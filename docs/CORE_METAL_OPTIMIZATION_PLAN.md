@@ -6,7 +6,7 @@ Existing unrelated working-tree changes are excluded from these commits.
 - [x] Reuse native command scratch storage and resolve/pin unique resources; batch ordinary indexed draw bindings.
 - [x] Acquire drawables immediately before presentation, preserving frame hooks and surface recovery.
 - [x] Copy legal texture layouts directly without per-row temporary buffers.
-- [ ] Deliver readback callbacks after GPU completion without blocking ordinary submissions.
+- [x] Deliver readback callbacks after GPU completion without blocking ordinary submissions.
 - [ ] Fold compatible clears into render passes and discard attachments only when their contents are proven dead.
 - [ ] Cache content-addressed translations, native libraries/functions, and persistent pipeline binary archives.
 - [ ] Review all changes; run native/core, shader, and LOD checks plus brief standard-world integration tests.
@@ -30,3 +30,8 @@ are not claimed from correctness tests; live timing must distinguish CPU work, G
    narrow rows, private input buffers, cropped subregions ending at the last pixel, and unaligned
    source/destination fallbacks. Fallback storage uses submission-owned arenas. Native range
    validation uses division to avoid overflow and includes only the final row's actual pixels.
+
+4. Readbacks: full Metal/shader smoke suite passed. A real GPU event intentionally blocks the
+   copy: ordinary submit returns before the event is released, callbacks wait for the pixels and
+   run once on the encoder owner. Completion tickets outlive arena retirement; explicit flush,
+   reload and shutdown drain them. A throwing callback does not skip later callbacks or leak its ticket.

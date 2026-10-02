@@ -284,6 +284,13 @@ public final class MetalCommandBuffer implements AutoCloseable {
 		this.waitUntilCompleted();
 	}
 
+	/** The ticket remains valid if transient arena retirement closes this wrapper. */
+	synchronized MetalCommandCompletion completion() {
+		if (!this.committed) throw new IllegalStateException("Command buffer has not been submitted");
+		return new MetalCommandCompletion(MetalNative.nCreateCommandCompletion(
+			this.requireOpenHandle(), this.commandQueue.device().requireOpenHandle()));
+	}
+
 	public synchronized boolean isCommitted() {
 		return this.committed;
 	}

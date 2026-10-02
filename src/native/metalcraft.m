@@ -180,7 +180,8 @@ typedef NS_ENUM(NSUInteger, MCObjectType) {
 	MCObjectTypeRenderPass = 13,
 	MCObjectTypeTimestampQueryPool = 14,
 	MCObjectTypeComputePipeline = 15,
-	MCObjectTypeComputePass = 16
+	MCObjectTypeComputePass = 16,
+	MCObjectTypeCommandCompletion = 17
 };
 
 /**
@@ -2035,6 +2036,37 @@ Java_dev_metalcraft_client_metal_MetalNative_nWaitForCommandBuffer(JNIEnv *env, 
 			mc_throw_state(env, [NSString stringWithFormat:@"Metal command buffer failed: %@", commandBuffer.commandBuffer.error.localizedDescription]);
 		}
 	}
+}
+
+MC_EXPORT JNIEXPORT jlong JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nCreateCommandCompletion(JNIEnv *env, jclass type, jlong handle, jlong deviceHandle) {
+    @autoreleasepool {
+        jlong handles[] = {handle, deviceHandle};
+        MCObjectType types[] = {MCObjectTypeCommandBuffer, MCObjectTypeDevice};
+        id objects[2];
+        if (!mc_get_objects_same_device(env, handles, types, objects, 2)) return 0;
+        MCMetalCommandBuffer *commands = objects[0];
+        return mc_register_object(commands.commandBuffer, MCObjectTypeCommandCompletion, deviceHandle);
+    }
+}
+
+MC_EXPORT JNIEXPORT jboolean JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nPollCommandCompletion(JNIEnv *env, jclass type, jlong handle, jboolean wait) {
+    @autoreleasepool {
+        id<MTLCommandBuffer> commands = (id<MTLCommandBuffer>)mc_get_object(env, handle, MCObjectTypeCommandCompletion);
+        if (commands == nil) return JNI_FALSE;
+        if (wait) [commands waitUntilCompleted];
+        if (commands.status == MTLCommandBufferStatusError) {
+            mc_throw_state(env, [NSString stringWithFormat:@"Metal readback failed: %@", commands.error.localizedDescription]);
+            return JNI_FALSE;
+        }
+        return commands.status == MTLCommandBufferStatusCompleted ? JNI_TRUE : JNI_FALSE;
+    }
+}
+
+MC_EXPORT JNIEXPORT void JNICALL
+Java_dev_metalcraft_client_metal_MetalNative_nReleaseCommandCompletion(JNIEnv *env, jclass type, jlong handle) {
+    @autoreleasepool { mc_release_object(env, handle, MCObjectTypeCommandCompletion); }
 }
 
 MC_EXPORT JNIEXPORT jlong JNICALL
