@@ -255,6 +255,7 @@ enum {
     NSUInteger *types;
     uint32_t *operands;
     uint32_t *buckets;
+    uint32_t *occupied;
     NSUInteger capacity, bucketCount, used;
 }
 - (BOOL)prepare:(NSUInteger)count;
@@ -275,25 +276,25 @@ enum {
         NSUInteger *newTypes = calloc(next, sizeof(NSUInteger));
         uint32_t *newOperands = calloc(next, sizeof(uint32_t));
         uint32_t *newBuckets = calloc(next * 2, sizeof(uint32_t));
-        if (!newObjects || !newHandles || !newTypes || !newOperands || !newBuckets) {
-            free(newObjects); free(newHandles); free(newTypes); free(newOperands); free(newBuckets);
+        uint32_t *newOccupied = calloc(next, sizeof(uint32_t));
+        if (!newObjects || !newHandles || !newTypes || !newOperands || !newBuckets || !newOccupied) {
+            free(newObjects); free(newHandles); free(newTypes); free(newOperands); free(newBuckets); free(newOccupied);
             return NO;
         }
-        free(objects); free(handles); free(types); free(operands); free(buckets);
+        free(objects); free(handles); free(types); free(operands); free(buckets); free(occupied);
         objects = newObjects; handles = newHandles; types = newTypes;
-        operands = newOperands; buckets = newBuckets;
+        operands = newOperands; buckets = newBuckets; occupied = newOccupied;
         capacity = next; bucketCount = next * 2;
     }
-    memset(buckets, 0, bucketCount * sizeof(uint32_t));
     return YES;
 }
 - (void)clear {
-    for (NSUInteger i = 0; i < used; i++) objects[i] = nil;
+    for (NSUInteger i = 0; i < used; i++) { objects[i] = nil; buckets[occupied[i]] = 0; }
     used = 0;
 }
 - (void)dealloc {
     [self clear];
-    free(objects); free(handles); free(types); free(operands); free(buckets);
+    free(objects); free(handles); free(types); free(operands); free(buckets); free(occupied);
 }
 @end
 static char MCCommandScratchKey;
@@ -4413,6 +4414,7 @@ static BOOL mc_resolve_command_operands(
             scratch->handles[operand] = handle;
             scratch->types[operand] = expectedType;
             scratch->buckets[bucket] = operand + 1;
+            scratch->occupied[operand] = (uint32_t)bucket;
             scratch->operands[index] = operand;
         }
         os_unfair_lock_unlock(&mc_registry_lock);
