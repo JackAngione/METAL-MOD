@@ -22,7 +22,7 @@ public final class MetalStallProbe {
 	public enum Source {
 		/** Waiting for the display to hand back a drawable. */
 		ACQUIRE,
-		/** Blocking on the GPU at submission because a readback callback is pending. */
+		/** Blocking on the GPU during an explicit flush, reload, or shutdown. */
 		SUBMIT_WAIT,
 		/** Blocking on the GPU because the transient arena being reused is still in flight. */
 		ARENA_WAIT,
@@ -61,8 +61,8 @@ public final class MetalStallProbe {
 		/**
 		 * Committing the frame's Metal work, at the end of the render loop.
 		 *
-		 * <p>Overlaps {@code SUBMIT_WAIT}, which is raised from inside it when a pending readback
-		 * callback turns the submission into a blocking wait.
+		 * <p>Ordinary submissions poll readbacks without waiting. Explicit flushes report
+		 * their waits separately as {@code SUBMIT_WAIT}.
 		 */
 		SUBMIT,
 		/** Presenting the drawable, after Minecraft has already stopped its own frame timer. */

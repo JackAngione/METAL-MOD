@@ -71,6 +71,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	}
 
 	private void runConfiguredTest(final ClientGameTestContext context) {
+		if (Boolean.getBoolean("metalcraft.coreIntegrationTest")) {
+			MetalCoreIntegrationGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.lodTest")) {
 			MetalLodGameTest.run(context);
 			return;

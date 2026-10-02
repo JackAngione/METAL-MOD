@@ -9,7 +9,7 @@ Existing unrelated working-tree changes are excluded from these commits.
 - [x] Deliver readback callbacks after GPU completion without blocking ordinary submissions.
 - [x] Fold compatible clears into render passes and discard attachments only when their contents are proven dead.
 - [x] Cache content-addressed translations, native libraries/functions, and persistent pipeline binary archives.
-- [ ] Review all changes; run native/core, shader, and LOD checks plus brief standard-world integration tests.
+- [x] Review all changes; run native/core, shader, and LOD checks plus brief standard-world integration tests.
 
 Each modification receives its own commit with validation recorded below. Performance improvements
 are not claimed from correctness tests; live timing must distinguish CPU work, GPU work, and drawable waits.
@@ -48,3 +48,39 @@ are not claimed from correctness tests; live timing must distinguish CPU work, G
    device close (64 MiB disk limit). Changed-source pixels, a real archive hit after device reopen,
    corrupt archive fallback, and shader reload/failure isolation all passed. Override the disk
    directory with `metalcraft.pipelineCacheDir`; the default is `~/Library/Caches/MetalCraft/pipelines-v1`.
+
+## Final review
+
+- Metal API validation exposed a deferred-store contract violation. Color, depth and stencil
+  stores now begin as `Unknown` when eligible for a later decision, and every encoder exit
+  finalizes them to `Store` or `DontCare`. Consecutive color/depth clear readbacks cover this path.
+- The full build exposed an archive serialization crash in the local-lighting process. Archive
+  harvesting now uses source descriptors without a self-referencing archive list, and serialization
+  supplies an error destination. The regression test reopens, extends, saves and reopens an archive
+  containing both render and compute pipelines; stale and corrupt cache recovery remains covered.
+- Reused command scratch clears only occupied hash buckets. Small HUD draws no longer clear the
+  full capacity left by a large terrain batch. Ownership and invalid-handle checks remain enabled.
+- The first live core capture was mostly sky. The integration route now waits for 64 visible solid
+  sections, uses a downward core camera, and rejects captures without terrain detail. The corrected
+  run passed with Metal API validation and its core, Standard and LOD captures were inspected.
+
+## Reproducible validation
+
+- `./gradlew build --offline`: core/native checks, section/light storage, native chunk distances,
+  distant-terrain mesh coverage, local lighting, GPU frame accounting and the full shader suite.
+- `MTL_DEBUG_LAYER=1 ./gradlew shaderTranslationSmoke --offline`: passed.
+- `MTL_DEBUG_LAYER=1 ./gradlew shaderTranslationSmoke -PmetalPassMerging=false --offline`: passed.
+- The following live route passed in 22 seconds, reusing `New World (4)` and checking its generator
+  is NORMAL. Core and Standard use 16 render / 16 simulation; LOD uses 128 render / 16 simulation.
+  It covers resize/fullscreen, resource reload, asynchronous screenshots, Standard with/without
+  LOD, feature disable and world shutdown. Gradle restores player configuration after the test.
+
+```sh
+MTL_DEBUG_LAYER=1 ./gradlew runClient -PmetalLifecycleTest \
+  '-PmetalJvmArgs=-Xmx8G -Dmetalcraft.coreIntegrationTest=true' \
+  --args='--graphicsBackend default' --offline
+```
+
+Set `-Dmetalcraft.coreTestWorld=...` in the JVM arguments to choose another existing standard save.
+Captures remain local under ignored `run/screenshots/`. These checks establish correctness on the
+available Apple Silicon Mac; they do not establish a percentage FPS improvement or qualify every Mac.
