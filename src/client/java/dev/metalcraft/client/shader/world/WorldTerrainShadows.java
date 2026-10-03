@@ -93,10 +93,15 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		List<TerrainShadowRenderer.Draw> draws = new ArrayList<>();
 		List<Caster> casters = new ArrayList<>();
 		var sequential = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
+		// Lazy storage snapshots under its monitor. A visibility worker can hold that monitor
+		// while creating a RenderSection, which takes the dispatcher lock in reset(). Acquire
+		// the snapshot first so shadows never take those locks in the opposite order.
+		var sectionIterator = sections.iterator();
 		// Keep the uber-buffer slices stable through encoding, as vanilla does while preparing draws.
 		dispatcher.lock();
 		try {
-			for (var section : sections) {
+			while (sectionIterator.hasNext()) {
+				var section = sectionIterator.next();
 				var mesh = section.getSectionMesh();
 				// Most loaded sections are air or only translucent. They have no shadow draws,
 				// so reject them before testing four six-plane light volumes.

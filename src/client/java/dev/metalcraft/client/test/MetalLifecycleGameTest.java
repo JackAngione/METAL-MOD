@@ -79,6 +79,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			MetalCoreIntegrationGameTest.run(context);
 			return;
 		}
+		if ("resize".equals(System.getProperty("metalcraft.lodTest"))) {
+			MetalLodGameTest.resize(context);
+			return;
+		}
 		if ("visual".equals(System.getProperty("metalcraft.lodTest"))) {
 			MetalLodGameTest.visual(context);
 			return;

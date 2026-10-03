@@ -31,6 +31,62 @@ final class MetalLodGameTest {
 
     private MetalLodGameTest() { }
 
+    /** Regress the shadow/storage lock inversion during native distance changes and LOD handoff. */
+    static void resize(ClientGameTestContext context) {
+        int savedRender = context.computeOnClient(c -> c.options.renderDistance().get());
+        int savedSimulation = context.computeOnClient(c -> c.options.simulationDistance().get());
+        boolean savedLod = MetalCraftConfig.lodEnabled();
+        int savedNative = MetalCraftConfig.lodNativeDistance(), savedDetail = MetalCraftConfig.lodDetail();
+        String savedPack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
+        try {
+            context.runOnClient(c -> {
+                check("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()), "Metal backend");
+                c.options.renderDistance().set(RENDER);
+                c.options.simulationDistance().set(16);
+                MetalCraftConfig.setLodEnabled(true);
+                MetalCraftConfig.setLodNativeDistance(16);
+                MetalCraftConfig.setLodDetail(7);
+                ShaderPackRuntime.active().selectPack(ShaderPackRuntime.BUILTIN_ID);
+            });
+            context.getInput().resizeWindow(1280, 720);
+            try (World world = World.open(context)) {
+                check(!world.computeOnServer(server -> server.overworld().isFlat()), "standard world");
+                context.waitFor(c -> LodSystem.active() && LodSystem.stats().drawnNodes > 0, 1200);
+                context.waitFor(c -> ShaderPackRuntime.active().worldShadows() != null
+                    && ShaderPackRuntime.active().worldShadows().lastDrawCount() > 0, 400);
+                for (int distance : new int[]{200, 86, 71}) {
+                    System.out.println("Distance resize: LOD -> " + distance);
+                    context.runOnClient(c -> c.options.renderDistance().set(distance));
+                    context.waitTicks(10);
+                }
+                System.out.println("Distance resize: disable LOD at 71");
+                context.runOnClient(c -> MetalCraftConfig.setLodEnabled(false));
+                context.waitFor(c -> c.levelRenderer.viewArea().getViewDistance() == 71, 400);
+                context.waitTicks(20);
+                for (int distance : new int[]{200, 16, 128, 32, 71, 16}) {
+                    System.out.println("Distance resize: native -> " + distance);
+                    context.runOnClient(c -> { c.options.renderDistance().set(distance); c.options.broadcastOptions(); });
+                    context.waitFor(c -> c.levelRenderer.viewArea().getViewDistance() == distance, 400);
+                    context.waitTicks(10);
+                }
+                check(world.computeOnServer(server -> server.getPlayerList().getViewDistance()) == 16, "server distance shrinks");
+                context.waitFor(c -> !c.levelRenderer.visibleSections().isEmpty(), 400);
+                context.waitFor(c -> ShaderPackRuntime.active().worldShadows() != null
+                    && ShaderPackRuntime.active().worldShadows().lastDrawCount() > 0, 400);
+                System.out.println("Distance resize passed: standard world, Metal Standard shadows, LOD shrink, disable at 71, native 200 -> 16 and repeated resizing");
+            }
+        } finally {
+            context.runOnClient(c -> {
+                c.options.renderDistance().set(savedRender);
+                c.options.simulationDistance().set(savedSimulation);
+                MetalCraftConfig.setLodEnabled(savedLod);
+                MetalCraftConfig.setLodNativeDistance(savedNative);
+                MetalCraftConfig.setLodDetail(savedDetail);
+                ShaderPackRuntime.active().selectPack(savedPack);
+            });
+        }
+    }
+
     static void run(ClientGameTestContext context) {
         int savedRender = context.computeOnClient(c -> c.options.renderDistance().get());
         int savedSimulation = context.computeOnClient(c -> c.options.simulationDistance().get());

@@ -69,6 +69,12 @@ Native distance validation without distant terrain is recorded in [the native ch
 
 The dedicated test uses a standard generated world at **36 render / 16 simulation** (an explicit task-specific override of the usual 16/16 test policy). It checks a column 35 chunks away through native delivery, GPU upload and visible-section selection, then tests shrinking and restoring distance. It also checks option and wire behavior through 256 and native priority-queue boundaries without allocating a 256-distance world. The headless distance smoke verifies all represented cells against exact multi-source distances through 256, plus movement, removal, teleportation and resizing.
 
+The short distance-resize regression reuses an existing standard save and runs Metal Standard shadows while shrinking LOD distance, disabling LOD at 71 chunks, and changing native distance from 200 to 16. It checks that shadows still render after repeated changes and restores settings on exit. These high distances specifically exercise the shadow/section-storage deadlock; simulation stays at 16.
+
+```bash
+./gradlew runClient -PmetalLifecycleTest -PmetalLodTest=resize '-PmetalLodTestWorld=MetalCraft LOD Cleanup Test' --args='--graphicsBackend default'
+```
+
 ## Install
 
 1. Install Minecraft Java Edition 26.2 and Fabric Loader 0.19.3 or newer.
