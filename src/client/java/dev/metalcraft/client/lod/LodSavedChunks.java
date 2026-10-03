@@ -35,6 +35,7 @@ final class LodSavedChunks {
     private final PalettedContainerFactory containers;
     private final Executor workers;
     private final LodBlockColors colors;
+    private final LodBiomes biomes;
     private final int minY;
     private final int minSection;
     private final int sections;
@@ -50,11 +51,12 @@ final class LodSavedChunks {
 
     record Read(long key, @Nullable LodChunk chunk) { }
 
-    LodSavedChunks(ServerLevel level, LodBlockColors colors, Executor workers, boolean floating) {
+    LodSavedChunks(ServerLevel level, LodBlockColors colors, LodBiomes biomes, Executor workers, boolean floating) {
         this.storage = level.getChunkSource().chunkMap;
         this.containers = level.palettedContainerFactory();
         this.workers = workers;
         this.colors = colors;
+        this.biomes = biomes;
         this.minY = level.getMinY();
         this.minSection = level.getMinSectionY();
         this.sections = level.getSectionsCount();
@@ -142,7 +144,7 @@ final class LodSavedChunks {
                 }
                 return biomes[index].get(x >> 2, (y & 15) >> 2, z >> 2);
             }
-        }, baseX, baseZ, this.minY, this.floating, this.colors);
+        }, baseX, baseZ, this.minY, this.floating, this.colors, this.biomes);
     }
 
     private @Nullable SimpleBitStorage heightmap(CompoundTag heightmaps, String name) {

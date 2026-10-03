@@ -89,12 +89,13 @@ public final class LodTerrainSmoke {
 
     private static void meshing(LodGenerator generator) {
         Map<Long, LodChunk> real = new ConcurrentHashMap<>();
-        var sampler = new LodTile.Sampler(generator, real, OVERWORLD.getMinY());
+        LodBiomes biomes = new LodBiomes();
+        var sampler = new LodTile.Sampler(generator, real, biomes, OVERWORLD.getMinY());
         LodBlockColors colors = LodBlockColors.uniform(0xFF7FB238);
         LodMesher mesher = new LodMesher(new float[]{1, 0.5F, 0.8F, 0.8F, 0.6F, 0.6F}, LodAtlas.SIZE, LodAtlas.SIZE,
             LodAtlas.WHITE_UV, LodAtlas.WHITE_UV, OVERWORLD.getMinY());
         for (int level = 0; level <= 6; level += 2) {
-            LodTile tile = sampler.sample(level, 3, -5, colors, false);
+            LodTile tile = sampler.sample(level, 3, -5, colors, false, false);
             for (boolean split : new boolean[]{false, true}) {
                 if (split && level > LodSession.SPLIT_LEVEL) continue;
                 try (LodMesh mesh = mesher.mesh(tile, level, split, 32, 64)) {
@@ -105,6 +106,26 @@ public final class LodTerrainSmoke {
                 }
             }
         }
+        // Textured level-0 nodes: the same coverage, one top per cell, sprite UVs, per-chunk groups.
+        for (int[] node : new int[][]{{3, -5}, {-40, 22}, {17, 61}}) {
+            LodTile tile = sampler.sample(0, node[0], node[1], colors, false, true);
+            try (LodMesh mesh = mesher.meshTextured(tile, colors, biomes)) {
+                verify(mesh, tile, 0, true);
+                check(mesh.colors() == null, "textured mesh has no colour block");
+                int terrain = 0;
+                for (int j = 0; j < LodTile.CELLS; j++) for (int i = 0; i < LodTile.CELLS; i++) {
+                    if (LodCell.hasTerrain(tile.cell(i, j))) {
+                        terrain++;
+                        check(tile.surface(i, j) != 0, "textured cell has a surface at " + i + "," + j);
+                    }
+                }
+                texturedCells(mesh, terrain);
+                try (LodMesh flat = mesher.mesh(tile, 0, true, 32, 64)) {
+                    System.out.printf("Level 0 textured mesh %d,%d: %d solid quads (%.2f quads/cell) vs %d flat%n", node[0], node[1],
+                        mesh.solidQuads, mesh.solidQuads / (double)(LodTile.CELLS * LodTile.CELLS), flat.solidQuads);
+                }
+            }
+        }
         // A flat node merges to a single top: colour lives in the atlas, not in vertices.
         LodTile flat = new LodTile();
         java.util.Arrays.fill(flat.cells, LodCell.pack(70, -64, -64, 0x7FB238, 0));
@@ -112,6 +133,36 @@ public final class LodTerrainSmoke {
             check(mesh.solidQuads == 1 + 4 * 1, "flat node is one top plus one skirt run per edge, was " + mesh.solidQuads);
         }
         System.out.println("Mesh coverage and layout passed");
+    }
+
+    /** Textured tops are one quad per terrain cell; every solid UV lies inside a sprite (0..1 for uniform colours). */
+    private static void texturedCells(LodMesh mesh, int terrainCells) {
+        var buffer = mesh.vertices().duplicate().order(java.nio.ByteOrder.nativeOrder());
+        int tops = 0;
+        for (int quad = 0; quad < mesh.solidQuads; quad++) {
+            float[] y = new float[4];
+            float[][] p = new float[4][];
+            for (int vertex = 0; vertex < 4; vertex++) {
+                int base = (quad * 4 + vertex) * LodMesh.VERTEX_BYTES;
+                p[vertex] = new float[]{buffer.getFloat(base), buffer.getFloat(base + 4), buffer.getFloat(base + 8)};
+                y[vertex] = p[vertex][1];
+                float u = buffer.getFloat(base + 16), v = buffer.getFloat(base + 20);
+                check(u >= 0 && u <= 1 && v >= 0 && v <= 1, "textured UV inside the sprite");
+                check((buffer.get(base + 15) & 255) == 255, "opaque vertex colour");
+            }
+            if (y[0] == y[1] && y[1] == y[2] && y[2] == y[3] && upward(p)) {
+                float width = Math.abs(p[2][0] - p[0][0]), depth = Math.abs(p[2][2] - p[0][2]);
+                check(width == 1 && depth == 1, "textured top spans one cell");
+                tops++;
+            }
+        }
+        check(tops == terrainCells, "one textured top per terrain cell: " + tops + " vs " + terrainCells);
+    }
+
+    /** Counter-clockwise from above, as the upward faces of both meshers wind. */
+    private static boolean upward(float[][] p) {
+        float ax = p[1][0] - p[0][0], az = p[1][2] - p[0][2], bx = p[2][0] - p[0][0], bz = p[2][2] - p[0][2];
+        return az * bx - ax * bz > 0;
     }
 
     /** Tops cover each terrain cell exactly once; groups tile the quad list; vertices are well formed. */
@@ -133,9 +184,8 @@ public final class LodTerrainSmoke {
             }
             boolean horizontal = y[0] == y[1] && y[1] == y[2] && y[2] == y[3];
             if (!horizontal) continue;
-            // Upward faces wind (x0,z0),(x0,z1),(x1,z1),(x1,z0); downward faces reverse it.
-            boolean up = x[0] == x[1] && z[1] == z[2] && z[1] > z[0];
-            if (!up) continue;
+            // Upward faces wind (x0,z0),(x0,z1),(x1,z1),(x1,z0), possibly starting at another corner; downward faces reverse it.
+            if (!upward(new float[][]{{x[0], y[0], z[0]}, {x[1], y[1], z[1]}, {x[2], y[2], z[2]}})) continue;
             int i0 = Math.round(Math.min(x[0], x[2]) / cell), i1 = Math.round(Math.max(x[0], x[2]) / cell);
             int j0 = Math.round(Math.min(z[0], z[2]) / cell), j1 = Math.round(Math.max(z[0], z[2]) / cell);
             for (int j = j0; j < j1; j++) for (int i = i0; i < i1; i++) {
@@ -161,16 +211,17 @@ public final class LodTerrainSmoke {
 
     private static void throughput(LodGenerator generator) throws Exception {
         Map<Long, LodChunk> real = new ConcurrentHashMap<>();
-        var sampler = new LodTile.Sampler(generator, real, OVERWORLD.getMinY());
+        LodBiomes biomes = new LodBiomes();
+        var sampler = new LodTile.Sampler(generator, real, biomes, OVERWORLD.getMinY());
         LodBlockColors colors = LodBlockColors.uniform(0xFF7FB238);
         LodMesher mesher = new LodMesher(new float[]{1, 0.5F, 0.8F, 0.8F, 0.6F, 0.6F}, LodAtlas.SIZE, LodAtlas.SIZE,
             LodAtlas.WHITE_UV, LodAtlas.WHITE_UV, OVERWORLD.getMinY());
-        for (int warm = 0; warm < 20; warm++) sampler.sample(4, warm, 7, colors, false);
+        for (int warm = 0; warm < 20; warm++) sampler.sample(4, warm, 7, colors, false, false);
         for (int level : new int[]{0, 2, 4, 6}) {
             int tiles = 24;
             long started = System.nanoTime(), meshNanos = 0;
             for (int tile = 0; tile < tiles; tile++) {
-                LodTile sampled = sampler.sample(level, tile * 3 - 30, tile * 5 - 40, colors, false);
+                LodTile sampled = sampler.sample(level, tile * 3 - 30, tile * 5 - 40, colors, false, false);
                 long meshStart = System.nanoTime();
                 try (LodMesh ignored = mesher.mesh(sampled, level, level <= LodSession.SPLIT_LEVEL, 32, 32)) {
                     meshNanos += System.nanoTime() - meshStart;
@@ -179,6 +230,19 @@ public final class LodTerrainSmoke {
             double millis = (System.nanoTime() - started) / 1e6 / tiles;
             System.out.printf("Level %d: %.2f ms per node on one thread (%.1f µs per column, mesh %.2f ms)%n", level, millis,
                 millis * 1000 / (LodTile.STRIDE * LodTile.STRIDE), meshNanos / 1e6 / tiles);
+        }
+        {
+            int tiles = 24;
+            long started = System.nanoTime(), meshNanos = 0;
+            for (int tile = 0; tile < tiles; tile++) {
+                LodTile sampled = sampler.sample(0, tile * 3 - 30, tile * 5 - 40, colors, false, true);
+                long meshStart = System.nanoTime();
+                try (LodMesh ignored = mesher.meshTextured(sampled, colors, biomes)) {
+                    meshNanos += System.nanoTime() - meshStart;
+                }
+            }
+            System.out.printf("Level 0 textured: %.2f ms per node on one thread (mesh %.2f ms)%n",
+                (System.nanoTime() - started) / 1e6 / tiles, meshNanos / 1e6 / tiles);
         }
         int threads = Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 1, 8);
         ExecutorService pool = Executors.newFixedThreadPool(threads);
@@ -189,7 +253,7 @@ public final class LodTerrainSmoke {
             for (int tile = 0; tile < tiles; tile++) {
                 int index = tile;
                 futures.add(pool.submit(() -> {
-                    try (LodMesh ignored = mesher.mesh(sampler.sample(4, index % 12 - 60, index / 12 + 50, colors, false), 4, false, 32, 32)) { }
+                    try (LodMesh ignored = mesher.mesh(sampler.sample(4, index % 12 - 60, index / 12 + 50, colors, false, false), 4, false, 32, 32)) { }
                 }));
             }
             for (Future<?> future : futures) future.get();

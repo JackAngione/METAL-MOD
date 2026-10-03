@@ -121,6 +121,11 @@ def benchmarkProperties = [
 	metalBenchmarkMinimumOnePercentLow: 'metalcraft.benchmarkMinimumOnePercentLow',
 	metalBenchmarkMinimumVisibleSections: 'metalcraft.benchmarkMinimumVisibleSections',
 	metalBenchmarkRepeats: 'metalcraft.benchmarkRepeats',
+	// Distant-terrain visual captures (-PmetalLodTest=visual).
+	metalLodVisualNative: 'metalcraft.lodVisualNative',
+	metalLodVisualRender: 'metalcraft.lodVisualRender',
+	metalLodVisualDetails: 'metalcraft.lodVisualDetails',
+	metalLodVisualHeight: 'metalcraft.lodVisualHeight',
 	// The command-batching kill switch and its checked ABI, so a run can be compared against the
 	// per-command path back to back rather than across sessions.
 	metalCommandBatching: 'metalcraft.commandBatching',

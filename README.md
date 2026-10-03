@@ -46,11 +46,11 @@ The scenario defaults to the primary display's native resolution and 16-chunk re
 
 - **Distant terrain** (on by default). Singleplayer on Metal.
 - **Native distance** (2–256 chunks, default **12**): ordinary full-quality chunks — entities, block entities, caves and exact blocks. The integrated server loads and sends only this radius and the client meshes only it.
-- **Distant detail** (1–8, default **5**): how slowly detail falls off. A level-L cell is 2^L blocks wide; each step moves every level about 1.5× farther away. At 5 a cell stays near six pixels at 1080p.
+- **Distant detail** (1–8, default **5**): how slowly detail falls off. A level-L cell is 2^L blocks wide; each step moves every level about 1.5× farther away. At 5 a cell stays near six pixels at 1080p. Detail also sets how far block-sized distant cells keep **real block textures, biome tints and ambient occlusion**, so they look like ordinary chunks seen from afar: 256 blocks at 5, 320 at 6, 384 at 7 and 512 at 8. Farther cells use one averaged colour each, which is what a mipmapped block texture becomes there.
 
 The screen's status line says whether distant terrain is running and, if not, why: most often the Graphics API is not Default (Metal), or Render Distance is not larger than the native distance.
 
-Minecraft's **Render Distance** sets the total view. Between the native distance and it, terrain comes from a quadtree of compact heightfield models built on background threads, never by the server: chunks you have loaded keep their real blocks, chunks saved in the world's region files are read back, and never-generated terrain is sampled straight from the world generator's density function (95% of columns match vanilla's surface exactly), with biome surface blocks, snow lines, rock on steep slopes and approximate tree canopies. A 128-chunk view completes in under 3 seconds after joining, and flying 512 blocks rebuilds it in about 2. Models draw through Minecraft's ordinary terrain pipelines, so the Standard pack shades distant terrain and water too. Where native chunks are not ready yet (joining, teleports, reloads), the distant model stands in for them.
+Minecraft's **Render Distance** sets the total view. Between the native distance and it, terrain comes from a quadtree of compact heightfield models built on background threads, never by the server: chunks you have loaded keep their real blocks, chunks saved in the world's region files are read back, and never-generated terrain is sampled straight from the world generator's density function (95% of columns match vanilla's surface exactly), with biome surface blocks, snow lines, rock on steep slopes and approximate tree canopies. Textured cells show each column's top block, its side, and the soil and rock under it (grass over dirt over stone). A 128-chunk view completes in under 3 seconds after joining, and flying 512 blocks rebuilds it in about 2. Models draw through Minecraft's ordinary terrain pipelines, so the Standard pack shades distant terrain and water too. Where native chunks are not ready yet (joining, teleports, reloads), the distant model stands in for them.
 
 Measured back to back on an M4 Max at 1280×720 (indicative; conditions in the evidence): 1,850 FPS with only the 12-chunk native radius, **1,265 FPS with distant terrain to 128 chunks** and **1,021 FPS at 1024 chunks**; selecting and scheduling distant terrain takes about 0.03 ms per frame. Enable the `distant_terrain` entry in the F3 debug options screen to see nodes, draws, memory and pending builds. Distant terrain shows surfaces only, and dimensions with a ceiling (the Nether) keep the native radius without distant terrain. [Design, measurements and limits](docs/evidence/distant-terrain/README.md).
 
@@ -117,6 +117,17 @@ Select Standard in
 **Video Settings → MetalCraft Settings**; the ordinary **Clouds** setting controls
 Off/Fast/Fancy quality. Cloud shading uses a half-resolution Metal target.
 See [sky rendering and validation](docs/SKY_RENDERING.md).
+
+Standard also animates tree leaves, tall/short grass and ferns with a gentle wind.
+Grass bends from fixed roots, both halves of tall plants move together, and sun/moon
+shadows follow the same motion. **MetalCraft Settings → Shaders → Wind** controls
+the effect and its strength (enabled at 100% by default). Fences and other blocks
+stay still. Wind applies to native block meshes; distant LOD models remain static.
+Animation runs in Metal vertex shaders with immutable mesh metadata, without
+rebuilding terrain every frame. `./gradlew build` includes wind GPU checks; the
+short existing-standard-world check uses `-PmetalLifecycleTest` and
+`-PmetalJvmArgs='-Xmx8G -Dmetalcraft.windTest=true'` with `runClient` and the default
+graphics backend, at 16 render / 16 simulation distance.
 
 ## Shader add-on pathway
 

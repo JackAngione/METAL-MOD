@@ -124,11 +124,13 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final int lightingFrameSlot;
 	private final @Nullable WorldLocalLighting localLighting;
 	private Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
+	private Map<RenderPipeline, Optional<RenderPipeline>> windSubstitutions = new IdentityHashMap<>();
 	private Map<RenderPipeline, Optional<RenderPipeline>> waterSubstitutions = new IdentityHashMap<>();
 	private Map<RenderPipeline, RenderPipeline> linearColorPipelines = new IdentityHashMap<>();
 	private record CachedPrograms(
 		Map<RenderPipeline, Optional<Substitution>> substitutions,
 		Map<RenderPipeline, Optional<RenderPipeline>> water,
+		Map<RenderPipeline, Optional<RenderPipeline>> wind,
 		Map<RenderPipeline, RenderPipeline> colors,
 		@Nullable MetalRenderPipeline resolve, MetalTexture.@Nullable Format resolveFormat, boolean unavailable) { }
 	private final Map<FrameBindings.ColorEncoding, CachedPrograms> parkedPrograms = new java.util.EnumMap<>(FrameBindings.ColorEncoding.class);
@@ -411,11 +413,12 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			// The hand/HUD needs legacy semantics after each HDR world. Keep both sets
 			// of programs alive instead of compiling them again on every transition.
 			this.parkedPrograms.put(this.colorEncoding, new CachedPrograms(this.substitutions,
-				this.waterSubstitutions, this.linearColorPipelines, this.resolvePipeline,
+				this.waterSubstitutions, this.windSubstitutions, this.linearColorPipelines, this.resolvePipeline,
 				this.resolveSceneFormat, this.resolveUnavailable));
 			CachedPrograms cached = this.parkedPrograms.remove(encoding);
 			this.substitutions = cached == null ? new IdentityHashMap<>() : cached.substitutions();
 			this.waterSubstitutions = cached == null ? new IdentityHashMap<>() : cached.water();
+			this.windSubstitutions = cached == null ? new IdentityHashMap<>() : cached.wind();
 			this.linearColorPipelines = cached == null ? new IdentityHashMap<>() : cached.colors();
 			this.resolvePipeline = cached == null ? null : cached.resolve();
 			this.resolveSceneFormat = cached == null ? null : cached.resolveFormat();
@@ -614,6 +617,46 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			this.declined.add(String.valueOf(pipeline.getLocation()));
 		}
 		return built;
+	}
+
+	/** Only terrain with captured plant vertices uses this variant; all other draws keep their PSO. */
+	public Optional<RenderPipeline> windPipeline(final RenderPipeline pipeline) {
+		if (this.closed || this.colorEncoding != FrameBindings.ColorEncoding.LINEAR_SRGB
+			|| !ShaderPackRuntime.BUILTIN_ID.equals(this.packId)
+			|| !Boolean.TRUE.equals(this.optionValue.apply("wind_enabled"))
+			|| ((Number)this.optionValue.apply("wind_strength")).floatValue() == 0) return Optional.empty();
+		var cached = this.windSubstitutions.get(pipeline);
+		if (cached != null) return cached;
+		// The opaque pass has already substituted its vanilla pipeline. Recover the original's
+		// alpha-test defines: rebuilding from the stand-in would turn leaf/grass holes opaque.
+		RenderPipeline original = pipeline;
+		for (var entry : this.substitutions.entrySet()) {
+			if (entry.getValue().isPresent() && entry.getValue().get().pipeline() == pipeline) {
+				original = entry.getKey();
+				break;
+			}
+		}
+		if (programFor(original) != Program.TERRAIN || !hasVertexElements(original, Program.TERRAIN)
+			|| isBlended(original) || !Program.TERRAIN.implementedDefines().containsAll(declaredDefines(original))) return Optional.empty();
+		Map<String, Integer> slots = resourceSlots(original);
+		if (!slots.keySet().containsAll(List.of("Projection", "Fog", "Globals", "ChunkSection", "Sampler0", "Sampler2"))
+			|| slots.values().stream().anyMatch(slot -> slot >= 8)) return Optional.empty();
+		Material material = materialFor(original, Program.TERRAIN);
+		RenderPipeline stand = this.standIn(original, Program.TERRAIN, material);
+		try {
+			this.device.registerNativePipeline(stand, new MetalGpuDevice.NativeProgram(
+				"#define MC_TERRAIN_WIND 1\n" + this.programSource(original, Program.TERRAIN, material, slots, "ChunkSection"),
+				"gbuffer_terrain_vertex", "gbuffer_terrain_fragment", FrameBindings.ColorEncoding.LINEAR_SRGB));
+			if (!this.device.precompileLinearWorldPipeline(stand, null).isValid()) {
+				throw new IllegalStateException("Could not compile wind terrain");
+			}
+			var result = Optional.of(stand);
+			this.windSubstitutions.put(pipeline, result);
+			return result;
+		} catch (RuntimeException error) {
+			this.device.forgetNativePipeline(stand);
+			throw error;
+		}
 	}
 
 	/** Forward water shares vanilla terrain coverage, sorting and color semantics. */
@@ -952,6 +995,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		for (CachedPrograms cached : this.parkedPrograms.values()) {
 			cached.substitutions().values().forEach(value -> value.ifPresent(s -> this.device.forgetNativePipeline(s.pipeline())));
 			cached.water().values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
+			cached.wind().values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
 			if (cached.resolve() != null) cached.resolve().close();
 		}
 		this.parkedPrograms.clear();
@@ -967,6 +1011,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			water.ifPresent(this.device::forgetNativePipeline);
 		}
 		this.waterSubstitutions.clear();
+		this.windSubstitutions.values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
+		this.windSubstitutions.clear();
 		this.linearColorPipelines.clear();
 		this.forwardPassColorFormat = null;
 	}

@@ -1,7 +1,7 @@
 {
   "format": 2,
   "name": "MetalCraft Standard",
-  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/local_lights.metal", "shared/water.metal", "shared/underwater.metal", "shared/sky.metal"],
+  "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/local_lights.metal", "shared/water.metal", "shared/underwater.metal", "shared/sky.metal", "shared/wind.metal"],
   "targets": {
     "gbuffer_albedo": {
       "format": "rgba8_unorm",
@@ -230,6 +230,23 @@
         "ssr_high"
       ],
       "default": "baseline",
+      "apply": "recompile"
+    },
+    {
+      "id": "wind_enabled",
+      "category": "wind",
+      "type": "bool",
+      "default": true,
+      "apply": "recompile"
+    },
+    {
+      "id": "wind_strength",
+      "category": "wind",
+      "type": "float",
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.25,
+      "default": 1.0,
       "apply": "recompile"
     }
   ]

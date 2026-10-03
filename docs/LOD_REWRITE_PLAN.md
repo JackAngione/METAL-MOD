@@ -78,3 +78,25 @@ distance at minimal cost.
 
 ### Phase 4 — documentation
 - [x] README and evidence for the new system; mark prototype docs as superseded
+
+### Phase 5 — textured near detail (2026-09-27)
+High detail looked as coarse as the default: near the native boundary both used block-sized cells,
+drawn in one flat colour each.
+- [x] Per-column surface (top-face state, side state, biome) for captured, saved and generated terrain
+- [x] Block sprites, side sprites, tints, soil and rock below each state in the colour table
+- [x] Textured level-0 mesher: per-block tops and wall tiles, biome tints, vanilla-style occlusion
+- [x] Textured node variant in selection (flat stand-in while building), block-atlas draws, no atlas slot
+- [x] Detail sets the texture distance (256 / 320 / 384 / 512 blocks at 5–8); stand-ins inside native stay flat
+- [x] Texture distance shrinks while over the GPU budget
+- [x] Stand-ins ignore uncompiled native sections outside the view (distant trees showed under native canopies)
+- [x] Smoke/benchmark coverage, highest-detail phase and visual capture route in the game test
+- [x] Settings tooltip, README and evidence
+
+### Phase 6 — settings changes apply as a whole (2026-09-27)
+A detail change looked like it did nothing: the selection followed it, but old nodes lingered for
+ten seconds (holding memory, able to trip the texture budget reduction for the session) and nothing
+showed that terrain was rebuilding.
+- [x] Session detects detail, native distance and Render Distance changes; resets the texture budget reduction
+- [x] Previous view released as soon as the new one is complete; each update logged
+- [x] Settings screen status shows areas left while building
+- [x] Game test changes detail in the settings screen (game paused) and checks rebuild start, completion and release

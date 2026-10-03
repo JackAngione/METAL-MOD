@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -14,13 +15,14 @@ import net.minecraft.world.level.material.Fluids;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Full-resolution surface of one real (loaded or saved) chunk: 16×16 packed cells.
+ * Full-resolution surface of one real (loaded or saved) chunk: 16×16 packed cells and the
+ * {@link LodSurface} each textured cell draws.
  *
  * <p>Immutable once built, so worker threads may read it while the client thread replaces it.
  * {@code minSurface}/{@code maxSurface} bound the surface blocks, which is where native rendering
  * must be compiled before it can take over from the distant model.
  */
-record LodChunk(long[] cells, int @Nullable [] fluidColors, int minSurface, int maxSurface) {
+record LodChunk(long[] cells, long[] surfaces, int @Nullable [] fluidColors, int minSurface, int maxSurface) {
     /** Column access shared by live chunks and saved chunk data; {@code x}/{@code z} are chunk-local. */
     interface Source {
         /** Exclusive top of blocks that block motion or hold fluid. */
@@ -36,10 +38,12 @@ record LodChunk(long[] cells, int @Nullable [] fluidColors, int minSurface, int 
 
     long cell(int x, int z) { return this.cells[(x & 15) | (z & 15) << 4]; }
 
+    long surface(int x, int z) { return this.surfaces[(x & 15) | (z & 15) << 4]; }
+
     int fluidColor(int x, int z) { return this.fluidColors == null ? 0 : this.fluidColors[(x & 15) | (z & 15) << 4]; }
 
     /** Client thread: reads a loaded chunk through its client heightmaps. */
-    static LodChunk capture(LevelChunk chunk, LodBlockColors colors, boolean floating) {
+    static LodChunk capture(LevelChunk chunk, LodBlockColors colors, LodBiomes biomes, boolean floating) {
         var pos = new BlockPos.MutableBlockPos();
         int baseX = chunk.getPos().getMinBlockX(), baseZ = chunk.getPos().getMinBlockZ();
         return read(new Source() {
@@ -49,11 +53,12 @@ record LodChunk(long[] cells, int @Nullable [] fluidColors, int minSurface, int 
             @Override public Holder<Biome> biome(int x, int y, int z) {
                 return chunk.getNoiseBiome(QuartPos.fromBlock(baseX + x), QuartPos.fromBlock(y), QuartPos.fromBlock(baseZ + z));
             }
-        }, baseX, baseZ, chunk.getMinY(), floating, colors);
+        }, baseX, baseZ, chunk.getMinY(), floating, colors, biomes);
     }
 
-    static LodChunk read(Source source, int baseX, int baseZ, int minY, boolean floating, LodBlockColors colors) {
+    static LodChunk read(Source source, int baseX, int baseZ, int minY, boolean floating, LodBlockColors colors, LodBiomes biomes) {
         long[] cells = new long[256];
+        long[] surfaces = new long[256];
         int[] fluids = null;
         int minSurface = Integer.MAX_VALUE, maxSurface = Integer.MIN_VALUE;
         for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
@@ -84,13 +89,16 @@ record LodChunk(long[] cells, int @Nullable [] fluidColors, int minSurface, int 
             }
             int rgb = 0;
             int light = 0;
+            int index = x | z << 4;
             if (top > minY) {
                 Holder<Biome> biome = source.biome(x, top - 1, z);
                 rgb = colors.color(shown, biome.value(), baseX + x, baseZ + z) & 0xFFFFFF;
                 light = Math.max(colors.light(shown), colors.light(state));
+                // Textured cells draw a covering (snow layer, carpet) on top, but never a plant or torch.
+                BlockState face = shown != state && colors.topFace(shown) ? shown : state;
+                surfaces[index] = LodSurface.pack(Block.getId(face), Block.getId(state), biomes.id(biome.value()));
             }
             if (top <= minY && fluidTop == minY) continue;
-            int index = x | z << 4;
             cells[index] = LodCell.pack(Math.max(top, bottom), bottom, fluidTop, rgb, light);
             if (fluidTop > top) {
                 if (fluids == null) fluids = new int[256];
@@ -101,7 +109,7 @@ record LodChunk(long[] cells, int @Nullable [] fluidColors, int minSurface, int 
             maxSurface = Math.max(maxSurface, surface);
         }
         if (minSurface > maxSurface) minSurface = maxSurface = minY;
-        return new LodChunk(cells, fluids, minSurface, maxSurface);
+        return new LodChunk(cells, surfaces, fluids, minSurface, maxSurface);
     }
 
     private static boolean isWaterBody(BlockState state) {

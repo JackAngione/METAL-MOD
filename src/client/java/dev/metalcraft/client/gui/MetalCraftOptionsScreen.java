@@ -60,6 +60,7 @@ public final class MetalCraftOptionsScreen extends Screen {
 			case "tonemap" -> Component.translatable("metalcraft.options.shader_category.tonemap");
 			case "shadows" -> Component.translatable("metalcraft.options.shader_category.shadows");
 			case "water" -> Component.translatable("metalcraft.options.shader_category.water");
+			case "wind" -> Component.translatable("metalcraft.options.shader_category.wind");
 			case "debug" -> Component.translatable("metalcraft.options.shader_category.debug");
 			default -> {
 				yield Component.literal(humanize(category));
@@ -194,7 +195,9 @@ public final class MetalCraftOptionsScreen extends Screen {
 					runtime.setOption(option.id(), nextValue(runtime.optionValue(option.id()), option));
 					button.setMessage(optionMessage(runtime, option));
 				}).width(310).build();
-			optionWidget.setTooltip(Tooltip.create(isStandardWaterOption(runtime, option)
+			optionWidget.setTooltip(Tooltip.create(isStandardWindOption(runtime, option)
+				? Component.translatable("metalcraft.wind." + option.id() + ".tooltip")
+				: isStandardWaterOption(runtime, option)
 				? Component.translatable("metalcraft.water." + option.id() + ".tooltip")
 				: Component.translatable("metalcraft.options.shader_option.tooltip",
 					option.category(), option.apply().name().toLowerCase())));
@@ -240,7 +243,18 @@ public final class MetalCraftOptionsScreen extends Screen {
 		return Component.translatable("metalcraft.options.shader_pack", runtime.selectedPackName());
 	}
 
+	private static boolean isStandardWindOption(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		return ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId()) && option.category().equals("wind");
+	}
+
 	private static Component optionMessage(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		if (isStandardWindOption(runtime, option)) {
+			Object value = runtime.optionValue(option.id());
+			Component label = value instanceof Number number
+				? Component.literal(Math.round(number.doubleValue() * 100) + "%")
+				: Component.translatable("metalcraft.options.value." + value);
+			return Component.translatable("metalcraft.wind." + option.id(), label);
+		}
 		if (isStandardWaterOption(runtime, option)) {
 			Object value = runtime.optionValue(option.id());
 			Component label = option.id().equals("water_detail")

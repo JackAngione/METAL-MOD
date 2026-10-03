@@ -12,8 +12,9 @@ final class LodDebugEntry implements DebugScreenEntry {
     public void display(DebugScreenDisplayer displayer, @Nullable Level level, @Nullable LevelChunk clientChunk, @Nullable LevelChunk serverChunk) {
         if (!LodSystem.active()) return;
         LodStats stats = LodSystem.stats();
-        displayer.addLine(String.format("Distant terrain: %d nodes, %d draws, %d resident, %.0f MiB, %d pending, %d building, %d real chunks",
-            stats.drawnNodes, stats.draws, stats.residentNodes, stats.gpuBytes / 1048576.0, stats.pending, stats.inFlight, stats.capturedChunks));
+        displayer.addLine(String.format("Distant terrain: %d nodes (%d textured), %d draws, %d resident, %.0f MiB, %d pending, %d building, %d real chunks",
+            stats.drawnNodes, stats.texturedNodes, stats.draws, stats.residentNodes, stats.gpuBytes / 1048576.0, stats.pending, stats.inFlight,
+            stats.capturedChunks));
     }
 
     @Override

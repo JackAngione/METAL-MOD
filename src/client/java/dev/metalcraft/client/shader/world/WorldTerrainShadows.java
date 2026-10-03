@@ -31,15 +31,17 @@ public final class WorldTerrainShadows implements AutoCloseable {
 	private @Nullable WorldShadowModule.Frame frame;
 	private long renderedFrames;
 	private int lastDrawCount;
+	private final boolean windEnabled;
 	private static final boolean PROFILE = Boolean.getBoolean("metalcraft.localLightingBenchmark");
 	private record Caster(SectionRenderDispatcher.RenderSection section, int mask) { }
 
 	public WorldTerrainShadows(final MetalGpuDevice device, final ShadowCascades.Settings settings,
-		final String sharedSource, final String terrainSource) {
+		final String sharedSource, final String terrainSource, final String windSource) {
 		this.device = device;
+		this.windEnabled = !windSource.isEmpty();
 		this.resources = new WorldShadowModule(device.metal(), settings);
 		try {
-			this.renderer = new TerrainShadowRenderer(device.metal(), sharedSource, terrainSource);
+			this.renderer = new TerrainShadowRenderer(device.metal(), sharedSource, terrainSource, windSource);
 		} catch (RuntimeException error) {
 			this.resources.close();
 			throw error;
@@ -86,6 +88,8 @@ public final class WorldTerrainShadows implements AutoCloseable {
 			this.device.encodeNativePass(this.resources.depthPass(), "MetalCraft shader: shadow_terrain", pass -> {});
 			return;
 		}
+		var session = this.device.linearWorldSession();
+		var inputs = session == null ? null : session.waterFrameInputs();
 		List<TerrainShadowRenderer.Draw> draws = new ArrayList<>();
 		List<Caster> casters = new ArrayList<>();
 		var sequential = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
@@ -123,17 +127,21 @@ public final class WorldTerrainShadows implements AutoCloseable {
 					if (slice == null || draw.hasCustomIndexBuffer() && slice.indexBuffer() == null) continue;
 					var indices = draw.hasCustomIndexBuffer() ? slice.indexBuffer() : sharedIndices;
 					IndexType type = draw.hasCustomIndexBuffer() ? draw.indexType() : sequential.type();
+					var wind = this.windEnabled && inputs != null && mesh instanceof dev.metalcraft.client.shader.wind.WindMeshSource source
+						? source.metalcraft$windMesh(layer) : null;
 					draws.add(new TerrainShadowRenderer.Draw(layer, this.device.nativeBuffer(slice.vertexBuffer()),
 						slice.vertexBufferOffset(), this.device.nativeBuffer(indices),
 						draw.hasCustomIndexBuffer() ? slice.indexBufferOffset() : 0,
 						type == IndexType.SHORT ? MetalRenderPass.IndexType.UINT16 : MetalRenderPass.IndexType.UINT32,
 						draw.indexCount(), (float)(origin.getX() - camera.pos.x),
-						(float)(origin.getY() - camera.pos.y), (float)(origin.getZ() - camera.pos.z), caster.mask()));
+						(float)(origin.getY() - camera.pos.y), (float)(origin.getZ() - camera.pos.z), caster.mask(),
+						wind == null ? null : wind.upload(this.device.metal()), origin.getX(), origin.getY(), origin.getZ()));
 				}
 			}
 			var atlas = Minecraft.getInstance().getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
 			this.device.encodeNativePass(this.resources.depthPass(), "MetalCraft shader: shadow_terrain", pass ->
-				this.renderer.encode(pass, this.frame, draws, this.device.nativeTextureView(atlas), this.device.nativeSampler(sampler)));
+				this.renderer.encode(pass, this.frame, draws, this.device.nativeTextureView(atlas), this.device.nativeSampler(sampler),
+					inputs == null ? 0 : session.windAnimationSeconds()));
 			this.lastDrawCount = draws.size();
 			this.renderedFrames++;
 		} finally {

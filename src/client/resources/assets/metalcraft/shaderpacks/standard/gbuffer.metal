@@ -220,13 +220,24 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     constant McGlobals &globals [[buffer(MC_SLOT_GLOBALS)]],
     texture2d<float> lightMap [[texture(MC_SLOT_SAMPLER2)]],
     sampler lightSampler [[sampler(MC_SLOT_SAMPLER2)]]
+#ifdef MC_TERRAIN_WIND
+    , uint windVertexId [[vertex_id]]
+    , device const float *windMetadata [[buffer(14)]]
+    , constant WindDraw &windDraw [[buffer(15)]]
+#endif
 #ifdef MC_WATER_FORWARD
     , uint vertexId [[vertex_id]]
     , device const WaterVertexMetadata *waterMetadata [[buffer(14)]]
     , constant WaterDraw &waterDraw [[buffer(15)]]
 #endif
 ) {
-    float3 relative = in.Position + float3(section.ChunkPosition - globals.CameraBlockPos) + globals.CameraOffset;
+    float3 position = in.Position;
+#ifdef MC_TERRAIN_WIND
+    uint windVertex = windVertexId - windDraw.baseVertex;
+    float windHeight = windVertex < windDraw.vertexCount ? windMetadata[windVertex] : 0.0;
+    position += mc_wind_offset(mc_wind_world_position(section.ChunkPosition, position), windHeight, windDraw.seconds);
+#endif
+    float3 relative = position + float3(section.ChunkPosition - globals.CameraBlockPos) + globals.CameraOffset;
     float3 viewPos = (section.ModelViewMat * float4(relative, 1.0)).xyz;
     float2 uv2 = float2(in.UV2);
 
@@ -235,7 +246,7 @@ vertex GBufferVaryings gbuffer_terrain_vertex(
     out.worldPos = viewPos;
     // Terrain has no vertex normals. Carry its unrotated local position so the
     // fragment can preserve exact axis-aligned shadow planes in G-buffer metadata.
-    out.normal = in.Position;
+    out.normal = position;
     out.tint = in.Color;
 #ifdef MC_WATER_FORWARD
     uint localVertex = vertexId - waterDraw.baseVertex;

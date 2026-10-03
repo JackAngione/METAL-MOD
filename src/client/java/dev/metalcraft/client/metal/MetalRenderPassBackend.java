@@ -18,6 +18,8 @@ import dev.metalcraft.client.shader.WorldGeometryAdapter;
 import dev.metalcraft.client.shader.water.WaterDrawSource;
 import dev.metalcraft.client.shader.water.WaterMeshBinding;
 import dev.metalcraft.client.shader.water.WaterRoutingDebug;
+import dev.metalcraft.client.shader.wind.WindDrawSource;
+import dev.metalcraft.client.shader.wind.WindMeshBinding;
 import java.nio.IntBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
@@ -317,6 +319,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		if (this.discardDraws) return;
 		RenderPipeline baseline = this.originalPipeline;
 		WorldGeometryAdapter geometry = WorldGeometryAdapter.active();
+		var worldSession = this.device.linearWorldSession();
+		var worldInputs = worldSession == null ? null : worldSession.waterFrameInputs();
+		RenderPipeline windPipeline = null;
 		boolean waterEligible = geometry != null && this.device.opaqueWaterInputs().isPresent()
 			&& this.device.linearWorldSession().waterFrameInputs() != null
 			&& draws.stream().anyMatch(draw -> ((Object)draw) instanceof WaterDrawSource source && source.metalcraft$waterMesh() != null);
@@ -340,6 +345,24 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 				this.setIndexBuffer(draw.indexBuffer() == null ? defaultIndexBuffer : draw.indexBuffer(), draw.indexType() == null ? defaultIndexType : draw.indexType());
 				this.setVertexBuffer(draw.slot(), draw.vertexBuffer().slice());
 				WaterMeshBinding water = waterEligible && ((Object)draw) instanceof WaterDrawSource source ? source.metalcraft$waterMesh() : null;
+				WindMeshBinding wind = geometry != null && worldInputs != null && ((Object)draw) instanceof WindDrawSource source
+					? source.metalcraft$windMesh() : null;
+				if (wind != null) {
+					if (windPipeline == null) windPipeline = geometry.windPipeline(baseline).orElse(baseline);
+					MetalBuffer windBuffer = windPipeline == baseline ? null : wind.upload(this.device.metal());
+					if (windBuffer != null) {
+						if (windPipeline != this.originalPipeline) this.setPipeline(windPipeline);
+						try (var mapping = this.device.createCommandEncoder().transientMemory()
+							.allocateGpuMapped(16, 256, GpuBuffer.USAGE_UNIFORM, 16, 1)) {
+							mapping.data().putInt(draw.baseVertex()).putInt(wind.vertexCount())
+								.putFloat(worldSession.windAnimationSeconds()).putFloat(0);
+							this.encodeUniformBuffer(14, windBuffer, 0, MetalRenderPass.STAGE_VERTEX);
+							this.encodeUniformBuffer(15, this.device.nativeBuffer(mapping.slice().buffer()), mapping.slice().offset(), MetalRenderPass.STAGE_VERTEX);
+							this.drawIndexed(draw.indexCount(), 1, draw.firstIndex(), draw.baseVertex(), 0);
+						}
+						continue;
+					}
+				}
 				MetalBuffer metadata = water == null ? null : water.upload(this.device.metal());
 				RenderPipeline selected = metadata == null ? baseline : geometry.waterPipeline(baseline).orElse(baseline);
 				if (selected != this.originalPipeline) this.setPipeline(selected);

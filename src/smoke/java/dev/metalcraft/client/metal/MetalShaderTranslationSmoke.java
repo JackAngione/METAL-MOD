@@ -342,6 +342,7 @@ public final class MetalShaderTranslationSmoke {
 			WaterForwardPipelineSmoke.run();
 			WaterDepthDebugSmoke.run();
 			WaterSurfaceSmoke.run();
+			WindSmoke.run();
 			WaterFilteringSmoke.run();
 			WaterReflectionSmoke.run();
 			WaterOptionsPersistenceSmoke.run();

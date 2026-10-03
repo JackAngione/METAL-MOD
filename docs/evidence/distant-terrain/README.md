@@ -11,7 +11,9 @@ compiler, the disabled `lod/` prototype and Distant Pixel Resolution. Design and
   integrated server loads, simulates and sends only that radius, and the client meshes only it.
 - Beyond it, terrain comes from a quadtree of 32×32-cell nodes. A level-L cell is 2^L blocks and
   is used from `levelDistance(detail) × 2^L` blocks, so a cell stays near a fixed on-screen size.
-  **Detail** (1–8) sets `levelDistance` (32–384 blocks; 5 = 128 ≈ 6 px per cell at 1080p/70°).
+  **Detail** (1–8) sets `levelDistance` (32–384 blocks; 5 = 128 ≈ 6 px per cell at 1080p/70°) and
+  how far block-sized cells are **textured** (256 blocks at 5, 320 / 384 / 512 at 6 / 7 / 8; see
+  [Textured near detail](#textured-near-detail--september-27-2026)).
 - Cells are sampled on worker threads, never by the server:
   1. chunks the client has loaded (captured with their real blocks),
   2. chunks saved in region files (heightmaps and top blocks, through the server's I/O worker),
@@ -20,7 +22,8 @@ compiler, the disabled `lod/` prototype and Distant Pixel Resolution. Design and
      Biome palettes add surface blocks, snow lines, frozen water, steep-slope rock and tree canopies.
 - Meshes are merged heightfield boxes in Minecraft's block vertex format, drawn through the
   ordinary terrain pipelines (so shader packs keep working). Colour lives in one 2048² atlas bound
-  as `Sampler0` for distant draws, so tops merge by height alone. Nodes that can meet native
+  as `Sampler0` for distant draws, so tops merge by height alone. Textured nodes instead draw a quad
+  per block face with block-atlas sprites, like native sections. Nodes that can meet native
   terrain are grouped per chunk; each frame the renderer omits chunks whose native surface sections
   are compiled, and draws the distant model wherever native terrain is not ready yet.
 
@@ -80,13 +83,93 @@ locally (none are committed).
 - Distant water is a flat translucent surface; waterfalls and flowing water are not modelled.
 - Resource reloads rebuild all distant models (block colours come from the atlas).
 
+## Textured near detail — September 27, 2026
+
+Before this change the highest detail looked as coarse as the default near the native boundary:
+both already used block-sized cells there, and every cell was one flat averaged colour with no
+shading, so forests and hills read as uniform slabs. Level-0 nodes within the detail's texture
+distance are now meshed like native terrain seen from afar:
+
+- one top per block with the block's top sprite, turned by a position hash as vanilla turns grass
+  and sand; walls tiled one block per quad with the top block's side sprite, then the soil under it
+  (dirt under grass, podzol and paths) and, four blocks down, rock (stone under soil, sandstone under
+  sand); walls more than 16 blocks deep tile four blocks per quad;
+- biome tints resolved per column, face shade, and vanilla's smooth-lighting occlusion from
+  neighbouring columns, with each quad split along its darker diagonal;
+- drawn with the block atlas and its mipmaps (no colour-atlas slot); fluids and hidden skirts stay
+  merged. Real chunks record each column's top-face state, side state and biome
+  (`LodSurface`, 8 bytes per column) so captured and saved terrain is textured as it really is;
+  generated terrain uses the biome surface palette.
+- Nodes wholly inside the native radius (stand-ins only) stay flat. If distant terrain exceeds its
+  GPU budget, the texture distance drops by a quarter at a time (logged), since the budget cannot
+  evict nodes in view.
+
+Beyond the texture distance a block is at most about two pixels at 1080p, where its mipmapped
+texture is its average colour, so flat cells remain there.
+
+Fixed alongside: a native chunk whose surface section was outside the view (vanilla compiles only
+sections in view) counted as not ready, so the whole distant chunk was drawn over native terrain on
+screen and its tree columns (solid to the ground in the distant model) showed under real canopies.
+Uncompiled sections outside the view no longer trigger the stand-in (without caching that result).
+
+| Check (headless, `./gradlew lodTerrainBenchmark`) | Result |
+| --- | --- |
+| Textured level-0 node, generated terrain | 1.05–1.79 quads per cell (flat: 0.06–0.37) |
+| Textured node in real forest/hill terrain (in game) | ≈2.6 quads per cell, ≈300 KB per node |
+| Textured node build, one thread | 9.8 ms (flat 9.6 ms); meshing 0.41 ms of it |
+
+In game (`MetalLodGameTest`, same save and settings as above, run back to back against the
+previous commit with the same test): the window was paced at 120 FPS in both runs (it was not
+frontmost), so frame rate does not compare cost, and GPU pass spans varied with GPU clock state
+(the unchanged native-only pass measured 0.34–0.64 ms across runs). CPU time and settle times are
+unchanged; the cost is memory:
+
+| At 128 chunks | Before | After |
+| --- | ---: | ---: |
+| Detail 5: CPU p50 / GPU memory | 1.02 ms / 126 MiB | 0.88–0.97 ms / 142–171 MiB (36 textured nodes drawn) |
+| Detail 8: CPU p50 / GPU memory* | 1.62 ms / 458 MiB | 1.62–1.71 ms / 713–773 MiB (249 textured nodes drawn) |
+| Settle after joining / at detail 8 | 2.0 s / 6.4 s | 1.8–2.2 s / 6.4–6.6 s |
+
+\* Includes nodes still resident from the detail-5 phase just before.
+
+### Settings changes
+
+Selection reads detail, native distance and Render Distance every frame, so a change starts
+rebuilding at once, also behind the distant terrain screen while it pauses the game. A change now
+also resets the texture budget reduction and, once the new view is complete, releases every node
+only the old settings used (previously each lingered ten seconds, which could hold hundreds of MiB
+and trip the budget reduction for the rest of the session). The screen's status line reads
+"Building distant terrain: N areas left" until the view is complete, and the log records each
+update. `MetalLodGameTest` changes detail in that screen and checks that rebuilding starts within
+two ticks, completes and releases the finer view when detail is lowered again:
+
+| Change (render 128, native 12) | Time to complete | Previous view released |
+| --- | ---: | ---: |
+| Detail 5 → 8 | 6.6 s | 194 MiB |
+| Detail 8 → 5 | 1.5 s | 650 MiB |
+| Render Distance 128 → 1024 | 2.3 s | 64 MiB |
+
+Node meshes depend only on their level and form (flat or textured), not on detail, so a detail
+change rebuilds the areas whose level or form changes and reuses the rest. When the whole distant
+view is close (for example native 16 with Render Distance 28, a 256–448 block ring), the upper
+detail steps differ only at its outer edge, because all of it is already block-sized textured cells.
+
+Captured with `-PmetalLodTest=visual` (1920×1080, native 8, render 64, 24 blocks above ground;
+local only): distant forests, hills, mountains, water edges and mushrooms show their block
+textures and match native terrain at the boundary.
+
 ## Reproduce
 
 ```bash
 ./gradlew lodTerrainSmoke --offline
 ./gradlew lodTerrainBenchmark --offline
 ./gradlew runClient -PmetalLifecycleTest -PmetalLodTest=true '-PmetalJvmArgs=-Xmx8G' --args='--graphicsBackend default' --offline
+./gradlew runClient -PmetalLifecycleTest -PmetalLodTest=visual -PmetalLodVisualDetails=5,8 '-PmetalJvmArgs=-Xmx8G' --args='--graphicsBackend default' --offline
 ```
+
+The visual route only captures: the view across the native boundary at each listed detail, then
+the same view with the native radius alone (`-PmetalLodVisualNative`, `-PmetalLodVisualRender` and
+`-PmetalLodVisualHeight` adjust the native distance, the Render Distance and the height above ground).
 
 `-PmetalLodTestWorld=<save name>` picks the save to reuse; a save locked by another running game
 is skipped, and a NORMAL world is created only if none is available. Game-test runs restore

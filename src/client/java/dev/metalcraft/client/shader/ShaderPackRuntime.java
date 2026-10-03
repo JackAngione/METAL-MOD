@@ -409,7 +409,11 @@ public final class ShaderPackRuntime implements AutoCloseable {
 						((Number)this.optionValueUnchecked("shadow_resolution")).intValue(), 0.05F,
 						((Number)this.optionValueUnchecked("shadow_distance")).floatValue(), 0.6F,
 						((Number)this.optionValueUnchecked("shadow_caster_distance")).floatValue()),
-					this.pack.metalSources().get("shared/shadows.metal"), this.pack.metalSources().get("shadow.metal"));
+					this.pack.metalSources().get("shared/shadows.metal"), this.pack.metalSources().get("shadow.metal"),
+					Boolean.TRUE.equals(this.optionValueUnchecked("wind_enabled"))
+						&& ((Number)this.optionValueUnchecked("wind_strength")).floatValue() > 0
+						? "#define MC_OPTION_WIND_STRENGTH " + this.optionValueUnchecked("wind_strength") + "\n"
+							+ this.pack.metalSources().get("shared/wind.metal") : "");
 				this.worldGeometry.setShadowFrameSupplier(
 					() -> this.worldShadows == null ? null : this.worldShadows.currentFrame()
 				);

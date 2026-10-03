@@ -11,15 +11,25 @@ struct ShadowTerrainVaryings {
     float2 uv;
     uint layer [[render_target_array_index]];
 };
+struct ShadowSection { float4 offsetMask; float4 windOriginTime; };
 vertex ShadowTerrainVaryings shadow_terrain_vertex(
     ShadowTerrainVertex in [[stage_in]], uint instance [[instance_id]],
-    constant MCShadowFrame& frame [[buffer(0)]], constant float4* sections [[buffer(1)]]) {
+    constant MCShadowFrame& frame [[buffer(0)]], constant ShadowSection* sections [[buffer(1)]]
+#ifdef MC_TERRAIN_WIND
+    , uint vertexId [[vertex_id]], device const float* windMetadata [[buffer(14)]]
+#endif
+) {
     uint ordinal = instance % frame.cascadeCount;
     uint section = instance / frame.cascadeCount;
-    uint mask = as_type<uint>(sections[section].w);
+    uint mask = as_type<uint>(sections[section].offsetMask.w);
     for (uint i = 0u; i < ordinal; i++) mask &= mask - 1u;
     uint layer = ctz(mask);
-    float4 clip = frame.cameraRelativeToShadow[layer] * float4(in.position + sections[section].xyz, 1.0);
+    float3 position = in.position;
+#ifdef MC_TERRAIN_WIND
+    float4 wind = sections[section].windOriginTime;
+    position += mc_wind_offset(wind.xyz + position, windMetadata[vertexId], wind.w);
+#endif
+    float4 clip = frame.cameraRelativeToShadow[layer] * float4(position + sections[section].offsetMask.xyz, 1.0);
     return {float4(clip.x, -clip.y, clip.z, clip.w), in.uv, layer};
 }
 fragment void shadow_terrain_fragment(ShadowTerrainVaryings in [[stage_in]],

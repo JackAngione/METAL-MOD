@@ -10,7 +10,8 @@ import org.lwjgl.system.MemoryUtil;
  * <p>Vertices use Minecraft's block format (position, colour, UV0, UV2) so the ordinary terrain
  * pipelines, and shader packs that replace them, draw it unchanged. Quads are grouped: one group
  * per chunk for nodes that may meet native terrain, otherwise one group. Solid quads for every
- * group come first, then fluid quads. {@code colors} is the node's 32×32 RGBA texel block.
+ * group come first, then fluid quads. {@code colors} is the node's 32×32 RGBA texel block, absent
+ * for textured meshes, which sample the block atlas.
  */
 final class LodMesh implements AutoCloseable {
     static final int VERTEX_BYTES = 28;
@@ -27,7 +28,7 @@ final class LodMesh implements AutoCloseable {
     final int maxY;
 
     LodMesh(ByteBuffer vertices, int solidQuads, int fluidQuads, int[] solidRanges, int[] fluidRanges, int groupsPerSide,
-            ByteBuffer colors, int minY, int maxY) {
+            @Nullable ByteBuffer colors, int minY, int maxY) {
         this.vertices = vertices;
         this.solidQuads = solidQuads;
         this.fluidQuads = fluidQuads;
@@ -44,8 +45,9 @@ final class LodMesh implements AutoCloseable {
         return this.vertices;
     }
 
-    ByteBuffer colors() {
-        if (this.colors == null) throw new IllegalStateException("LOD mesh already released");
+    /** The node's colour texel block, or null for a textured mesh. */
+    @Nullable ByteBuffer colors() {
+        if (this.vertices == null) throw new IllegalStateException("LOD mesh already released");
         return this.colors;
     }
 

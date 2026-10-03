@@ -3,6 +3,7 @@ package dev.metalcraft.client.test;
 import com.google.gson.GsonBuilder;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
+import dev.metalcraft.client.gui.MetalCraftLodOptionsScreen;
 import dev.metalcraft.client.lod.LodStats;
 import dev.metalcraft.client.lod.LodSystem;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
@@ -12,17 +13,19 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
+import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 
 /**
  * Short distant-terrain route at 128 render / 16 simulation distance with a 12-chunk native
  * radius: activation and loading limits, time for the view to settle, cost against native-only
- * rendering, movement, a brief 1024-chunk view, the Standard pack, and turning the feature off. Reuses an existing
+ * rendering, the highest (textured) detail, movement, a brief 1024-chunk view, the Standard pack,
+ * and turning the feature off. Reuses an existing
  * standard save when present ({@code metalcraft.lodTestWorld}), otherwise creates one.
  */
 final class MetalLodGameTest {
-    private static final int RENDER = 128, NATIVE = 12, SIMULATION = 16, DETAIL = 5, EXTREME = 1024;
+    private static final int RENDER = 128, NATIVE = 12, SIMULATION = 16, DETAIL = 5, HIGHEST_DETAIL = 8, EXTREME = 1024;
     /** Preferred standard saves, in order; a save another running instance holds is skipped. */
     private static final String[] WORLDS = {System.getProperty("metalcraft.lodTestWorld", "New World (4)"), "New World", "New World (3)"};
 
@@ -75,6 +78,29 @@ final class MetalLodGameTest {
 
                 report.put("lod128", measure(context, "lod-128"));
                 report.put("lod128Stats", LodSystem.stats());
+                // Highest detail, set in the distant terrain screen as a player would: the view re-plans
+                // at once although the screen pauses the game, and once it is complete the nodes only
+                // the previous detail used are released.
+                LodStats balanced = LodSystem.stats();
+                context.setScreen(() -> new MetalCraftLodOptionsScreen(new PauseScreen(true)));
+                context.runOnClient(c -> MetalCraftConfig.setLodDetail(HIGHEST_DETAIL));
+                context.waitTicks(2);
+                LodStats replanning = LodSystem.stats();
+                check(replanning.updating && replanning.pending + replanning.inFlight > 0, "detail change starts rebuilding: " + json(replanning));
+                report.put("detail8SettleSeconds", settle(context, 2400));
+                LodStats highest = LodSystem.stats();
+                check(!highest.updating, "detail change completes: " + json(highest));
+                check(highest.texturedNodes > 0 && highest.drawnNodes > balanced.drawnNodes,
+                    "highest detail draws finer, textured distant terrain: " + json(highest));
+                context.setScreen(() -> null);
+                report.put("detail8Stats", highest);
+                report.put("detail8", measure(context, "lod-128-detail-8"));
+                context.takeScreenshot("lod-128-detail-8");
+                context.runOnClient(c -> MetalCraftConfig.setLodDetail(DETAIL));
+                settle(context, 1200);
+                LodStats back = LodSystem.stats();
+                check(back.gpuBytes < highest.gpuBytes, "returning to detail " + DETAIL + " releases the finer view: " + json(back));
+                report.put("detailRestoredStats", back);
                 // Same view without distant terrain: the ordinary native radius alone.
                 context.runOnClient(c -> c.options.renderDistance().set(NATIVE));
                 context.waitFor(c -> !LodSystem.active(), 200);
@@ -135,6 +161,68 @@ final class MetalLodGameTest {
         }
     }
 
+    /**
+     * Captures only ({@code -PmetalLodTest=visual}): a low view across the native boundary at the
+     * lowest, default and highest detail, for judging how distant terrain looks next to native.
+     */
+    static void visual(ClientGameTestContext context) {
+        int savedRender = context.computeOnClient(c -> c.options.renderDistance().get());
+        int savedSimulation = context.computeOnClient(c -> c.options.simulationDistance().get());
+        boolean savedLod = MetalCraftConfig.lodEnabled(), savedFog = MetalCraftConfig.clearDistanceFog();
+        int savedNative = MetalCraftConfig.lodNativeDistance(), savedDetail = MetalCraftConfig.lodDetail();
+        String savedPack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
+        int nativeDistance = Integer.getInteger("metalcraft.lodVisualNative", 8);
+        int[] details = java.util.Arrays.stream(System.getProperty("metalcraft.lodVisualDetails", "8").split(","))
+            .mapToInt(Integer::parseInt).toArray();
+        try {
+            context.runOnClient(c -> {
+                c.options.renderDistance().set(Integer.getInteger("metalcraft.lodVisualRender", 64));
+                c.options.simulationDistance().set(SIMULATION);
+                MetalCraftConfig.setLodEnabled(true);
+                MetalCraftConfig.setLodNativeDistance(nativeDistance);
+                MetalCraftConfig.setLodDetail(details[0]);
+                MetalCraftConfig.setClearDistanceFog(true);
+                ShaderPackRuntime.active().selectPack(ShaderPackRuntime.NONE_ID);
+            });
+            context.getInput().resizeWindow(1920, 1080);
+            try (World world = World.open(context)) {
+                world.command("gamemode spectator @a");
+                world.command("time set noon");
+                world.command("weather clear");
+                int[] start = context.computeOnClient(c -> new int[]{c.player.getBlockX(), c.player.getBlockZ()});
+                int ground = world.computeOnServer(server -> server.overworld()
+                    .getChunk(start[0] >> 4, start[1] >> 4).getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, start[0] & 15, start[1] & 15));
+                int eye = Math.max(ground, 63) + Integer.getInteger("metalcraft.lodVisualHeight", 24);
+                world.command("tp @a " + start[0] + " " + eye + " " + start[1] + " 135 8");
+                context.getInput().lookAt(135, 8);
+                context.waitFor(c -> LodSystem.active() && !c.levelRenderer.visibleSections().isEmpty(), 1200);
+                nativeSettle(context, nativeDistance);
+                for (int detail : details) {
+                    context.runOnClient(c -> MetalCraftConfig.setLodDetail(detail));
+                    settle(context, 2400);
+                    context.waitTicks(20);
+                    System.out.println("Distant terrain visual detail " + detail + ": " + json(LodSystem.stats()));
+                    context.takeScreenshot("lod-visual-detail-" + detail);
+                }
+                // The same view with only the native radius, for comparison.
+                context.runOnClient(c -> c.options.renderDistance().set(nativeDistance));
+                context.waitFor(c -> !LodSystem.active(), 200);
+                context.waitTicks(40);
+                context.takeScreenshot("lod-visual-native");
+            }
+        } finally {
+            context.runOnClient(c -> {
+                c.options.renderDistance().set(savedRender);
+                c.options.simulationDistance().set(savedSimulation);
+                MetalCraftConfig.setLodEnabled(savedLod);
+                MetalCraftConfig.setLodNativeDistance(savedNative);
+                MetalCraftConfig.setLodDetail(savedDetail);
+                MetalCraftConfig.setClearDistanceFog(savedFog);
+                ShaderPackRuntime.active().selectPack(savedPack);
+            });
+        }
+    }
+
     /** Seconds until every wanted node is built and uploaded. */
     private static double settle(ClientGameTestContext context, int timeoutTicks) {
         long started = System.nanoTime();
@@ -147,12 +235,14 @@ final class MetalLodGameTest {
     }
 
     /** Seconds until the native radius around the camera is loaded and every queued section is compiled. */
-    private static double nativeSettle(ClientGameTestContext context) {
+    private static double nativeSettle(ClientGameTestContext context) { return nativeSettle(context, NATIVE); }
+
+    private static double nativeSettle(ClientGameTestContext context, int nativeDistance) {
         long started = System.nanoTime();
         context.waitFor(c -> {
             var camera = c.gameRenderer.mainCamera().position();
             int centerX = net.minecraft.core.SectionPos.blockToSectionCoord(camera.x), centerZ = net.minecraft.core.SectionPos.blockToSectionCoord(camera.z);
-            int radius = NATIVE - 1;
+            int radius = nativeDistance - 1;
             for (int x = -radius; x <= radius; x++) for (int z = -radius; z <= radius; z++) {
                 if (x * x + z * z <= radius * radius && !c.level.getChunkSource().hasChunk(centerX + x, centerZ + z)) return false;
             }
@@ -166,8 +256,11 @@ final class MetalLodGameTest {
         context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(30));
         context.waitTicks(100);
         MetalFrameMetrics.Phase phase = context.computeOnClient(ignored -> MetalFrameMetrics.endCapture(name));
-        System.out.printf("%s: %.1f FPS average, %.1f 1%% low, CPU p50 %.2f ms p95 %.2f ms%n", name, phase.averageFps(),
-            phase.onePercentLowFps(), phase.p50CpuMs(), phase.p95CpuMs());
+        // GPU time shows the cost of distant geometry even when the window's frame rate is paced.
+        Double gpuP50 = phase.gpuFrame().p50Ms(), gpuP95 = phase.gpuFrame().p95Ms();
+        System.out.printf("%s: %.1f FPS average, %.1f 1%% low, CPU p50 %.2f ms p95 %.2f ms, GPU p50 %s ms p95 %s ms%n", name, phase.averageFps(),
+            phase.onePercentLowFps(), phase.p50CpuMs(), phase.p95CpuMs(), gpuP50 == null ? "-" : String.format("%.2f", gpuP50),
+            gpuP95 == null ? "-" : String.format("%.2f", gpuP95));
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("frames", phase.frames());
         summary.put("averageFps", phase.averageFps());
@@ -175,6 +268,13 @@ final class MetalLodGameTest {
         summary.put("p50CpuMs", phase.p50CpuMs());
         summary.put("p95CpuMs", phase.p95CpuMs());
         summary.put("p99CpuMs", phase.p99CpuMs());
+        summary.put("p50GpuMs", gpuP50);
+        summary.put("p95GpuMs", gpuP95);
+        // Average GPU span per pass: occupancy for ranking, not additive (see MetalPassCensus).
+        Map<String, Double> passes = new LinkedHashMap<>();
+        for (var pass : phase.passKinds()) passes.put(pass.name(), pass.count() == 0 ? 0 : pass.totalMs() / pass.count());
+        summary.put("gpuPassMs", passes);
+        passes.forEach((pass, millis) -> { if (pass.startsWith("Section layers")) System.out.printf("  %s: %.3f ms%n", pass, millis); });
         summary.put("lodPrepareP50Ms", phase.lod().p50PrepareMs());
         summary.put("lodPrepareP95Ms", phase.lod().p95PrepareMs());
         return summary;

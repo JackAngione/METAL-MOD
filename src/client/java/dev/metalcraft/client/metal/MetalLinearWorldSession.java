@@ -2,6 +2,7 @@ package dev.metalcraft.client.metal;
 
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import dev.metalcraft.client.shader.water.WaterFrameInputs;
+import dev.metalcraft.client.shader.wind.WindAnimation;
 import com.mojang.blaze3d.shaders.ShaderSource;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
@@ -56,6 +57,7 @@ public final class MetalLinearWorldSession implements AutoCloseable {
 	private boolean poisoned;
 	private @Nullable WaterFrameInputs waterFrameInputs;
 	private @Nullable MetalBuffer waterFrameBuffer;
+	private float windAnimationSeconds;
 	private int waterDraws;
 	void recordWaterDraw() { this.waterDraws++; }
 	int waterDraws() { return this.waterDraws; }
@@ -74,6 +76,15 @@ public final class MetalLinearWorldSession implements AutoCloseable {
 		this.requireOpen();
 		if (this.waterFrameBuffer != null) throw new IllegalStateException("Water frame inputs are already bound");
 		this.waterFrameInputs = inputs;
+	}
+
+	public void windAnimationTime(final long gameTicks, final float partialTick) {
+		this.requireOpen();
+		this.windAnimationSeconds = WindAnimation.seconds(gameTicks, partialTick);
+	}
+
+	public float windAnimationSeconds() {
+		return this.windAnimationSeconds;
 	}
 
 	@Nullable MetalBuffer waterFrameBuffer() {

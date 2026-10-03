@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jspecify.annotations.Nullable;
@@ -12,6 +13,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Cell samples for one quadtree node: 32×32 cells plus a one-cell border taken from the
  * neighbouring nodes at the same level, so walls along node edges face real neighbours.
+ * Textured samples also carry each cell's {@link LodSurface}.
  */
 final class LodTile {
     static final int CELLS = 32;
@@ -20,8 +22,14 @@ final class LodTile {
     private static final BlockState ICE = Blocks.ICE.defaultBlockState();
     private static final BlockState STONE = Blocks.STONE.defaultBlockState();
     private static final BlockState WATER = Blocks.WATER.defaultBlockState();
+    private static final BlockState SNOWY_GRASS = Blocks.GRASS_BLOCK.defaultBlockState()
+        .setValue(net.minecraft.world.level.block.SnowyBlock.SNOWY, true);
 
     final long[] cells = new long[STRIDE * STRIDE];
+    /** Present for textured samples only. */
+    long @Nullable [] surfaces;
+    /** World block position of cell (0, 0)'s corner. */
+    int originX, originZ;
     int @Nullable [] fluidColors;
     /** Chunks this tile generated rather than read; empty unless requested by the sampler call. */
     long[] generatedChunks = new long[0];
@@ -34,26 +42,36 @@ final class LodTile {
 
     int fluidColor(int i, int j) { return this.fluidColors == null ? 0 : this.fluidColors[index(i, j)]; }
 
+    long surface(int i, int j) { return this.surfaces == null ? 0 : this.surfaces[index(i, j)]; }
+
     /** Samples node cells: captured real chunks where available, generated terrain elsewhere. */
     static final class Sampler {
         private final LodGenerator generator;
         private final Map<Long, LodChunk> real;
+        private final LodBiomes biomes;
         private final int worldMinY;
 
-        Sampler(LodGenerator generator, Map<Long, LodChunk> real, int worldMinY) {
+        Sampler(LodGenerator generator, Map<Long, LodChunk> real, LodBiomes biomes, int worldMinY) {
             this.generator = generator;
             this.real = real;
+            this.biomes = biomes;
             this.worldMinY = worldMinY;
         }
 
-        /** @param trackGenerated record which chunks had no real data, so saved copies can be looked up */
-        LodTile sample(int level, int nodeX, int nodeZ, LodBlockColors colors, boolean trackGenerated) {
+        /**
+         * @param trackGenerated record which chunks had no real data, so saved copies can be looked up
+         * @param textured also record what each cell's textured faces show
+         */
+        LodTile sample(int level, int nodeX, int nodeZ, LodBlockColors colors, boolean trackGenerated, boolean textured) {
             int cell = 1 << level;
             int originX = nodeX * CELLS * cell, originZ = nodeZ * CELLS * cell;
             int offset = cell / 2;
             int corner = this.generator.cellWidth();
             LodTile tile = new LodTile();
+            tile.originX = originX;
+            tile.originZ = originZ;
             int count = STRIDE * STRIDE;
+            if (textured) tile.surfaces = new long[count];
             // Generated columns are finished in a second pass, once neighbouring heights are known.
             int[] ground = new int[count];
             @SuppressWarnings("unchecked") Holder<Biome>[] biomes = new Holder[count];
@@ -68,6 +86,7 @@ final class LodTile {
                     LodChunk chunk = this.real.get(ChunkPos.pack(x >> 4, z >> 4));
                     if (chunk != null) {
                         tile.cells[index] = chunk.cell(x, z);
+                        if (tile.surfaces != null) tile.surfaces[index] = chunk.surface(x, z);
                         if (LodCell.hasFluid(tile.cells[index])) tile.fluid(index, chunk.fluidColor(x, z));
                         ground[index] = Integer.MIN_VALUE;
                         continue;
@@ -121,16 +140,20 @@ final class LodTile {
             int bottom = this.generator.bottom(x, z, top);
             if (this.generator.fluid != null && top < sea) {
                 if (this.generator.fluid.is(Blocks.WATER) && value.coldEnoughToSnow(pos.set(x, sea - 1, z), sea)) {
+                    this.surface(tile, index, ICE, ICE, value);
                     return LodCell.pack(sea, bottom, this.worldMinY, colors.color(ICE, value, x, z), 0);
                 }
                 int rgb = colors.color(surface.floor(), value, x, z);
                 tile.fluid(index, colors.color(this.generator.fluid.is(Blocks.WATER) ? WATER : this.generator.fluid, value, x, z));
+                this.surface(tile, index, surface.floor(), surface.floor(), value);
                 return LodCell.pack(top, bottom, sea, rgb, 0);
             }
             BlockState shown = surface.top();
             boolean snowy = value.hasPrecipitation() && value.coldEnoughToSnow(pos.set(x, top, z), sea);
             if (snowy) shown = SNOW;
             if (steep(ground, i, j, cell) && erodes(shown)) shown = STONE;
+            // Snow over soil is a snowy grass block; over rock (peaks, slopes) it stays snow.
+            BlockState side = shown == SNOW && surface.floor() != STONE ? SNOWY_GRASS : shown;
             int rgb = colors.color(shown, value, x, z);
             BlockState leaves = surface.leaves();
             if (leaves != null && surface.treeCover() > 0 && !(shown == STONE)) {
@@ -143,9 +166,15 @@ final class LodTile {
                 } else if (canopy(Math.floorDiv(x, 4), Math.floorDiv(z, 4)) < surface.treeCover()) {
                     top += surface.canopyHeight();
                     rgb = foliage;
+                    shown = side = leaves;
                 }
             }
+            this.surface(tile, index, shown, side, value);
             return LodCell.pack(top, bottom, this.worldMinY, rgb & 0xFFFFFF, 0);
+        }
+
+        private void surface(LodTile tile, int index, BlockState top, BlockState side, Biome biome) {
+            if (tile.surfaces != null) tile.surfaces[index] = LodSurface.pack(Block.getId(top), Block.getId(side), this.biomes.id(biome));
         }
 
         /** Vanilla's surface rules expose rock where the ground rises two blocks per block. */

@@ -93,7 +93,10 @@ public final class MetalCraftLodOptionsScreen extends Screen {
         return switch (current) {
             case ACTIVE -> {
                 LodStats stats = LodSystem.stats();
-                yield text(key, stats.drawnNodes, Math.round(stats.gpuBytes / 1048576.0));
+                // Shows a settings change being applied: areas still building for the new view.
+                int left = stats.pending + stats.inFlight;
+                yield left > 0 ? text("status.building", left, stats.drawnNodes, Math.round(stats.gpuBytes / 1048576.0))
+                    : text(key, stats.drawnNodes, Math.round(stats.gpuBytes / 1048576.0));
             }
             case NOT_METAL -> text(key, RenderSystem.getDevice().getDeviceInfo().backendName());
             case RENDER_DISTANCE -> text(key, minecraft.options.renderDistance().get(), MetalCraftConfig.lodNativeDistance());

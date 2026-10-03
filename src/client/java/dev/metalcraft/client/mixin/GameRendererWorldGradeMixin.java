@@ -99,6 +99,8 @@ abstract class GameRendererWorldGradeMixin {
 				skyRuntime.worldSky().rasterProjection(this.metalcraft$waterProjection);
 			}
 			if (gpu != null && gpu.linearWorldSession() != null) {
+				gpu.linearWorldSession().windAnimationTime(self.gameRenderState().levelRenderState.gameTime,
+					deltaTracker.getGameTimeDeltaPartialTick(false));
 				gpu.linearWorldSession().waterFrameInputs(WaterFrameInputs.create(this.metalcraft$waterProjection,
 					new Vector3d(cameraState.pos.x, cameraState.pos.y, cameraState.pos.z),
 					self.gameRenderState().levelRenderState.gameTime, deltaTracker.getGameTimeDeltaPartialTick(false),
