@@ -93,7 +93,10 @@ fragment ResolveTargets resolve_fragment(
         : float3(0.0);
     float3 viewNormal = mc_decode_normal(previous.normal.rg);
     float3 worldNormal = normalize((camera.viewToCameraRelative * float4(viewNormal, 0.0)).xyz);
+    bool terrainNormal = mc_has_terrain_normal(previous.normal.b);
+    if (terrainNormal) worldNormal = mc_decode_terrain_normal(previous.normal.rgb);
     float3 shadowNormal = mc_shadow_receiver_normal(cameraRelative, worldNormal, previous.normal.b);
+    if (terrainNormal) shadowNormal = worldNormal;
     // Four comparisons in one coarse cascade retain real cast shadows beyond the detailed
     // range. Receiver derivatives stay above this branch, including the transition quads.
     float distantVisibility = 1.0;
@@ -132,7 +135,9 @@ fragment ResolveTargets resolve_fragment(
         return out;
     }
     if (options.debugView == 3) {
-        out.scene = mc_scene_seed(float4(previous.normal.rg, 0.5, 1.0));
+        float3 normalView = transpose(float3x3(camera.viewToCameraRelative[0].xyz,
+            camera.viewToCameraRelative[1].xyz, camera.viewToCameraRelative[2].xyz)) * worldNormal;
+        out.scene = mc_scene_seed(float4(terrainNormal ? mc_encode_normal(normalView) : previous.normal.rg, 0.5, 1.0));
         out.albedo.a = 0.0;
         return out;
     }

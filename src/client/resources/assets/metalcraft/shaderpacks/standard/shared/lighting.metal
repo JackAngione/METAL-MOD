@@ -10,7 +10,9 @@
 //   scene        fogged(albedo * RGB lightmap * overlays). Emissive skips the lightmap.
 //   albedo.rgb   surface before light. albedo.a = (materialId + 1) / 255; 0 means empty/sky.
 //   normal.rg    octahedral unit normal in view space (same space as reconstructed viewPos).
-//   normal.b     exact terrain shadow axis (byte 1=X, 2=Y, 3=Z); otherwise unused roughness placeholder.
+//   normal.b     exact terrain shadow axis (byte 1=X, 2=Y, 3=Z); bytes 64..127 mark
+//                an 11+11-bit world normal packed in RGB for deformed terrain.
+//                Otherwise RG is the view normal and B is unused roughness.
 //   light.rg     UV2 block/sky in [0, 1], from Minecraft's 0..240 range.
 //   normal.a + light.ba  24-bit linear view depth over [0, 1024].
 //
@@ -121,6 +123,27 @@ static inline float3 mc_decode_normal(float2 encoded) {
         n.xy = (1.0 - abs(n.yx)) * float2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
     }
     return normalize(n);
+}
+
+// A bent leaf/grass face has no exact axis tag. Preserve its geometric plane from
+// chunk-local raster derivatives instead of differentiating quantized scene depth
+// in the resolve. Reuse the unused roughness byte; attachments and bandwidth stay
+// unchanged. The marker does not overlap axis tags or any material's roughness.
+static inline float3 mc_encode_terrain_normal(float3 normal) {
+    uint2 oct = uint2(round(saturate(mc_encode_normal(normal)) * 2047.0));
+    return float3(oct.x & 255u, oct.y & 255u,
+        64u | (oct.x >> 8) | ((oct.y >> 8) << 3)) / 255.0;
+}
+
+static inline bool mc_has_terrain_normal(float metadata) {
+    return (uint(round(saturate(metadata) * 255.0)) & 192u) == 64u;
+}
+
+static inline float3 mc_decode_terrain_normal(float3 packed) {
+    uint3 bytes = uint3(round(saturate(packed) * 255.0));
+    uint2 oct = uint2(bytes.x | ((bytes.z & 7u) << 8),
+        bytes.y | (((bytes.z >> 3) & 7u) << 8));
+    return mc_decode_normal(float2(oct) / 2047.0);
 }
 
 static inline bool mc_sun_active(constant MCShadowFrame &frame) {

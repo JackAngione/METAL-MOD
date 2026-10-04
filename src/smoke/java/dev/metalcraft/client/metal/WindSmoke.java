@@ -14,9 +14,11 @@ import java.util.Arrays;
 import java.util.List;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import org.joml.Quaternionf;
 import org.joml.Vector3d;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 /** Real Metal displacement, original BLOCK vertices, nonzero base vertex and matching shadow coverage. */
 final class WindSmoke {
@@ -58,7 +60,7 @@ final class WindSmoke {
             runtime.worldGeometry().beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
             check(runtime.worldGeometry().windPipeline(original).isEmpty(), "zero strength selects ordinary geometry");
         } finally { gpu.close(); }
-        System.out.println("Foliage wind: 80% animation speed, seamless clock wrap, anchored roots, tall-grass joint, sparse metadata, bounded periodic motion, world-border precision, nonzero base vertex, cutout/shadow coverage, animation and option/cache lifecycle passed");
+        System.out.println("Foliage wind: 80% animation speed, seamless clock wrap, anchored roots, tall-grass joint, sparse metadata, bounded periodic motion, world-border precision, nonzero base vertex, cutout/shadow coverage, deformed receiver planes, animation and option/cache lifecycle passed");
     }
 
     private static void clock() {
@@ -221,8 +223,77 @@ final class WindSmoke {
             }
             check(count>100, "fixture has real visible terrain");
             check(differences<=4, "wind/shadow coverage matches: differences="+differences+", kind="+kind+", time="+seconds);
+            checkReceiverPlanes(device, normal.readback(queue,0), coverage, matrix, kind, seconds);
             return coverage;
         }
+    }
+
+    /** Compare the actual RGBA8 G-buffer with triangle planes measured from GPU-deformed vertices. */
+    private static void checkReceiverPlanes(MetalDevice device, ByteBuffer normals, boolean[] coverage,
+            Matrix4fc projection, float kind, float seconds) {
+        String source = resource("shared/wind.metal") + """
+            kernel void points(device float4* out [[buffer(0)]], uint id [[thread_position_in_grid]]) {
+                float3 p = float3(id == 0 || id == 3 ? -1 : 1, id >= 2 ? 2 : 0, -2);
+                float height = KIND > 0 && id < 2 ? 0 : KIND;
+                out[id] = float4(p + mc_wind_offset(p, height, SECONDS), 1);
+            }
+            """;
+        source = "#define KIND " + kind + "\n#define SECONDS " + seconds + "\n" + source;
+        var points = new Vector3f[4];
+        var screen = new Vector3f[4];
+        try (var queue = device.createCommandQueue();
+             var kernel = device.createComputePipeline(new MetalComputePipeline.Descriptor(source,"points"));
+             var output = device.createBuffer(64, MetalBuffer.StorageMode.SHARED)) {
+            try (var commands = queue.createCommandBuffer()) {
+                try (var pass = commands.beginComputePass()) {
+                    pass.setPipeline(kernel); pass.setBuffer(0,output,0); pass.dispatch(4,1,1,1,1,1);
+                }
+                commands.commitAndWait();
+            }
+            try (var mapping = output.map()) {
+                for (int i=0;i<4;i++) {
+                    points[i] = new Vector3f(i*16,mapping.bytes());
+                    var clip = projection.transform(new Vector4f(points[i],1));
+                    screen[i] = new Vector3f((clip.x/clip.w*.5F+.5F)*SIZE,
+                        (clip.y/clip.w*.5F+.5F)*SIZE,0);
+                }
+            }
+        }
+        int checked = 0;
+        for (int[] indices : new int[][]{{0,1,2},{0,2,3}}) {
+            Vector3f a=points[indices[0]], b=points[indices[1]], c=points[indices[2]];
+            var expected = new Vector3f(b).sub(a).cross(new Vector3f(c).sub(a)).normalize();
+            if (expected.dot(new Vector3f(a).add(b).add(c)) > 0) expected.negate();
+            Vector3f sa=screen[indices[0]], sb=screen[indices[1]], sc=screen[indices[2]];
+            float determinant=(sb.y-sc.y)*(sa.x-sc.x)+(sc.x-sb.x)*(sa.y-sc.y);
+            for (int y=0;y<SIZE;y++) for(int x=0;x<SIZE;x++) {
+                int i=y*SIZE+x;
+                if(!coverage[i]) continue;
+                float u=((sb.y-sc.y)*(x+.5F-sc.x)+(sc.x-sb.x)*(y+.5F-sc.y))/determinant;
+                float v=((sc.y-sa.y)*(x+.5F-sc.x)+(sa.x-sc.x)*(y+.5F-sc.y))/determinant;
+                if(u<.1F || v<.1F || 1-u-v<.1F) continue;
+                int r=normals.get(i*4)&255, g=normals.get(i*4+1)&255, tag=normals.get(i*4+2)&255;
+                Vector3f actual;
+                if(kind==0) {
+                    check(tag==3,"still block retains exact Z shadow plane");
+                    actual = new Vector3f(0,0,1);
+                } else {
+                    check((tag&192)==64,"wind-deformed triangle retains its plane, not quantized-depth derivatives");
+                    float nx=((r|((tag&7)<<8))/2047F)*2-1;
+                    float ny=((g|(((tag>>3)&7)<<8))/2047F)*2-1;
+                    float nz=1-Math.abs(nx)-Math.abs(ny);
+                    if(nz<0) {
+                        float oldX=nx;
+                        nx=(1-Math.abs(ny))*(oldX>=0?1:-1);
+                        ny=(1-Math.abs(oldX))*(ny>=0?1:-1);
+                    }
+                    actual=new Vector3f(nx,ny,nz).normalize();
+                }
+                check(actual.distance(expected)<.003F,"stored wind plane matches real displaced triangle: "+actual+" vs "+expected);
+                checked++;
+            }
+        }
+        check(checked>50,"receiver plane regression sampled visible triangle interiors");
     }
 
     private static int slot(String source,String name) {

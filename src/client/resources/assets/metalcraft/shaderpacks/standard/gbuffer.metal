@@ -112,7 +112,13 @@ struct GBufferVaryings {
 	/// Camera-view space. Keeping positions and normals in the same space lets the resolve rebuild
 	/// a shadow lookup from screen position plus the packed linear depth.
     float3 worldPos;
+#ifdef MC_PROGRAM_TERRAIN
+    // Only the plane is used: affine interpolation stays on that same triangle
+    // without a per-pixel perspective divide amplifying derivative roundoff.
+    float3 normal [[center_no_perspective]];
+#else
     float3 normal;
+#endif
     float4 tint;
     float4 lightMapColor;
     float2 uv;
@@ -509,6 +515,15 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     );
     uint shadowAxis = mc_shadow_axis_tag(in.normal);
     if (shadowAxis != 0u) out.normal.b = float(shadowAxis) / 255.0;
+#ifdef MC_TERRAIN_WIND
+    float3 plane = cross(dfdx(in.normal), dfdy(in.normal));
+    float planeLength = length(plane);
+    float facing = dot(cross(dfdx(in.worldPos), dfdy(in.worldPos)), in.worldPos);
+    if (shadowAxis == 0u && all(isfinite(plane)) && planeLength > 1e-8) {
+        // Match mc_reconstruct_normal's camera-facing orientation in world space.
+        out.normal.rgb = mc_encode_terrain_normal(plane / (facing > 0.0 ? -planeLength : planeLength));
+    }
+#endif
     return out;
 #endif
 }
