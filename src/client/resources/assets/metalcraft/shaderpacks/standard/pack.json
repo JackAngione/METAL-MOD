@@ -133,6 +133,16 @@
       "apply": "recompile"
     },
     {
+      "id": "distant_shadow_distance",
+      "category": "shadows",
+      "type": "int",
+      "min": 0,
+      "max": 512,
+      "step": 32,
+      "default": 256,
+      "apply": "recompile"
+    },
+    {
       "id": "shadow_caster_distance",
       "category": "shadows",
       "type": "int",

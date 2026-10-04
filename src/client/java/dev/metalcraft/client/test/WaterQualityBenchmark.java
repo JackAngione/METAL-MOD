@@ -44,7 +44,7 @@ final class WaterQualityBenchmark {
 				report.put("halfResolution", MetalCraftConfig.halfResolution());
 				report.put("opaqueSnapshotBytes", (long)device.lastWorldOpaqueWaterWidth() * device.lastWorldOpaqueWaterHeight() * 12);
 				report.put("ssrAdditionalTextureBytes", 0);
-				report.put("memoryNote", "Existing RGBA16_FLOAT+D32 snapshots remain allocated for every tier including water_off; SSR allocates no texture/history.");
+				report.put("memoryNote", "RGBA16_FLOAT+D32 storage is reused; unused snapshots skip copies, including water_off. SSR allocates no texture/history.");
 				report.put("renderDistance", client.options.renderDistance().get());
 				report.put("camera", client.player.position().toString());
 				report.put("yaw", client.player.getYRot());

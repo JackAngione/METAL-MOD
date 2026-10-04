@@ -199,6 +199,8 @@ public final class MetalCraftOptionsScreen extends Screen {
 				? Component.translatable("metalcraft.wind." + option.id() + ".tooltip")
 				: isStandardWaterOption(runtime, option)
 				? Component.translatable("metalcraft.water." + option.id() + ".tooltip")
+				: isShadowDistanceOption(runtime, option)
+				? Component.translatable("metalcraft.shadows." + option.id() + ".tooltip")
 				: Component.translatable("metalcraft.options.shader_option.tooltip",
 					option.category(), option.apply().name().toLowerCase())));
 			contents.addChild(optionWidget);
@@ -267,6 +269,9 @@ public final class MetalCraftOptionsScreen extends Screen {
 			return Component.translatable("metalcraft.water." + option.id(), label);
 		}
 		Object value = runtime.optionValue(option.id());
+		if (isShadowDistanceOption(runtime, option)) {
+			return Component.translatable("metalcraft.shadows." + option.id(), ((Number)value).intValue());
+		}
 		Component valueLabel = value instanceof Boolean bool
 			? Component.translatable("metalcraft.options.value." + bool)
 			: value instanceof String string ? Component.literal(humanize(string)) : Component.literal(value.toString());
@@ -280,6 +285,11 @@ public final class MetalCraftOptionsScreen extends Screen {
 
 	private static boolean isStandardWaterOption(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
 		return ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId()) && option.id().startsWith("water_");
+	}
+
+	private static boolean isShadowDistanceOption(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		return ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId())
+			&& (option.id().equals("shadow_distance") || option.id().equals("distant_shadow_distance"));
 	}
 
 	private static Object nextValue(final Object current, final ShaderPack.Option option) {

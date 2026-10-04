@@ -52,6 +52,32 @@ public final class ShadowCascadesSmoke {
 		if (Math.abs(before.x - after.x) > 1.0e-5F || Math.abs(before.y - after.y) > 1.0e-5F) {
 			throw new AssertionError("Sun-shadow texels drift under subtexel camera translation");
 		}
+		// Live stabilization must retain world locking while avoiding absolute-position
+		// amplification under a rotating sun. It must also reset across world changes.
+		for (var position : List.of(new Vector3d(), new Vector3d(4702.5,216,546.5), origin)) {
+			var stabilization = new ShadowCascades.Stabilization();
+			var a = ShadowCascades.fit(settings, position, new Quaternionf(), fov, aspect, sun, stabilization).getFirst();
+			var b = ShadowCascades.fit(settings, new Vector3d(position).add(movement,0,0),
+				new Quaternionf(), fov, aspect, sun, stabilization).getFirst();
+			var fixedBefore = a.cameraRelativeToShadow().transformPosition(new Vector3f(0,0,-10));
+			var fixedAfter = b.cameraRelativeToShadow().transformPosition(new Vector3f((float)-movement,0,-10));
+			if (Math.abs(fixedBefore.x-fixedAfter.x)>1e-5F || Math.abs(fixedBefore.y-fixedAfter.y)>1e-5F)
+				throw new AssertionError("Local shadow stabilization lost camera translation locking");
+			stabilization.reset();
+			var reset = ShadowCascades.fit(settings, position, new Quaternionf(), fov, aspect, sun, stabilization).getFirst();
+			if (!reset.cameraRelativeToShadow().equals(a.cameraRelativeToShadow()))
+				throw new AssertionError("Shadow grid retained previous-world phase");
+		}
+		Vector3f previousRight = null;
+		for (float angle : new float[]{-.15F,-.1416F,-.1415F,-.00002F,0,.00002F,.1415F,.1416F,.15F}) {
+			var light = new Vector3f(-(float)Math.sin(angle),(float)Math.cos(angle),0);
+			var matrix = ShadowCascades.fit(settings, origin, new Quaternionf(), fov, aspect, light,
+				new ShadowCascades.Stabilization()).getFirst().cameraRelativeToShadow();
+			var right = new Vector3f(matrix.m00(),matrix.m10(),matrix.m20()).normalize();
+			if (previousRight != null && previousRight.dot(right)<.99999F)
+				throw new AssertionError("Shadow grid changes orientation near noon");
+			previousRight = right;
+		}
 		try {
 			ShadowCascades.fit(settings, origin, new Quaternionf(), fov, aspect, new Vector3f());
 			throw new AssertionError("Zero sun direction accepted");

@@ -19,6 +19,10 @@ public final class TerrainShadowRenderer implements AutoCloseable {
 	public record Draw(ChunkSectionLayer layer, MetalBuffer vertices, long vertexOffset,
 		MetalBuffer indices, long indexOffset, MetalRenderPass.IndexType indexType, int indexCount,
 		float relativeX, float relativeY, float relativeZ, int cascadeMask, MetalBuffer wind, int originX, int originY, int originZ) {
+		public Draw withCascadeMask(final int mask) {
+			return new Draw(layer, vertices, vertexOffset, indices, indexOffset, indexType, indexCount,
+				relativeX, relativeY, relativeZ, mask, wind, originX, originY, originZ);
+		}
 		public Draw(ChunkSectionLayer layer, MetalBuffer vertices, long vertexOffset,
 			MetalBuffer indices, long indexOffset, MetalRenderPass.IndexType indexType, int indexCount,
 			float relativeX, float relativeY, float relativeZ, int cascadeMask) {

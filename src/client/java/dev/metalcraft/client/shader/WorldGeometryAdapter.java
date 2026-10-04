@@ -62,6 +62,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private static final Logger LOGGER = LogUtils.getLogger();
 	private static final int UNIFORM_ALIGNMENT = 256;
 	private static final int RESOLVE_CAMERA_BYTES = 176;
+	private static final boolean BASELINE_PROBE = Boolean.getBoolean("metalcraft.baselineLightingBenchmark");
 	private static volatile @Nullable WorldGeometryAdapter active;
 
 	public enum Program {
@@ -122,14 +123,17 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final int shadowFrameSlot;
 	private final int resolveCameraSlot;
 	private final int lightingFrameSlot;
+	private final boolean distantShadows;
 	private final @Nullable WorldLocalLighting localLighting;
 	private Map<RenderPipeline, Optional<Substitution>> substitutions = new IdentityHashMap<>();
 	private Map<RenderPipeline, Optional<RenderPipeline>> windSubstitutions = new IdentityHashMap<>();
 	private Map<RenderPipeline, Optional<RenderPipeline>> waterSubstitutions = new IdentityHashMap<>();
+	private Map<RenderPipeline, Optional<RenderPipeline>> waterWithoutSnapshots = new IdentityHashMap<>();
 	private Map<RenderPipeline, RenderPipeline> linearColorPipelines = new IdentityHashMap<>();
 	private record CachedPrograms(
 		Map<RenderPipeline, Optional<Substitution>> substitutions,
 		Map<RenderPipeline, Optional<RenderPipeline>> water,
+		Map<RenderPipeline, Optional<RenderPipeline>> waterWithoutSnapshots,
 		Map<RenderPipeline, Optional<RenderPipeline>> wind,
 		Map<RenderPipeline, RenderPipeline> colors,
 		@Nullable MetalRenderPipeline resolve, MetalTexture.@Nullable Format resolveFormat, boolean unavailable) { }
@@ -138,13 +142,18 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	private final Set<String> declined = new LinkedHashSet<>();
 	private final Matrix4f inverseProjection = new Matrix4f();
 	private final Matrix4f viewToCameraRelative = new Matrix4f();
+	private final Matrix4f lastRasterProjection = new Matrix4f(), lastRasterView = new Matrix4f();
+	private final Matrix4f captureMatrix = new Matrix4f();
+	private boolean cachedRasterProjection, cachedRasterView;
 	private List<Channel> channels;
 	private @Nullable RenderPass gbufferPass;
 	private @Nullable GpuTextureView sceneAttachment;
 	private @Nullable GpuTextureView depthAttachment;
 	private @Nullable MetalRenderPipeline resolvePipeline;
+	private final Map<String, MetalRenderPipeline> diagnosticResolvePipelines = new java.util.HashMap<>();
 	private MetalTexture.@Nullable Format resolveSceneFormat;
 	private Supplier<WorldShadowModule.@Nullable Frame> shadowFrameSupplier = () -> null;
+	private Supplier<WorldShadowModule.@Nullable Frame> distantShadowFrameSupplier = () -> null;
 	private @Nullable MetalTexture unoccludedDepth;
 	private @Nullable MetalTextureView unoccludedDepthView;
 	private @Nullable MetalSampler unoccludedSampler;
@@ -193,6 +202,9 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		this.lightingFrameOffset = Math.addExact(this.resolveCameraOffset, UNIFORM_ALIGNMENT);
 		this.resolveFrameBytes = Math.addExact(this.lightingFrameOffset, WorldLightingModule.FRAME_BYTES);
 		this.optionValue = optionValue;
+		this.distantShadows = ShaderPackRuntime.BUILTIN_ID.equals(packId)
+			&& ((Number)optionValue.apply("distant_shadow_distance")).floatValue()
+				> ((Number)optionValue.apply("shadow_distance")).floatValue();
 		int textureSlot = 0;
 		int shadowMap = -1;
 		for (String read : resolvePass.reads()) {
@@ -220,7 +232,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			this.createUnoccludedBindings();
 		}
 		device.setDeferredResolve(this::encodeMergedResolve);
-		device.setWorldUniformCapture(this::captureWorldUniform);
+		device.setWorldUniformCapture(new dev.metalcraft.client.metal.WorldUniformCapture() {
+			@Override public boolean needed() { return WorldGeometryAdapter.this.pendingResolve && !WorldGeometryAdapter.this.closed; }
+			@Override public void capture(String name, ByteBuffer bytes) { WorldGeometryAdapter.this.captureWorldUniform(name, bytes); }
+		});
 		active = this;
 	}
 
@@ -232,6 +247,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 
 	public void setShadowFrameSupplier(final Supplier<WorldShadowModule.@Nullable Frame> supplier) {
 		this.shadowFrameSupplier = supplier == null ? () -> null : supplier;
+	}
+
+	public void setDistantShadowFrameSupplier(final Supplier<WorldShadowModule.@Nullable Frame> supplier) {
+		this.distantShadowFrameSupplier = supplier == null ? () -> null : supplier;
 	}
 
 	/**
@@ -299,7 +318,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			binding.validateSceneEncoding(color);
 			binding.forwardPassColorFormat = color.texture().getFormat();
 		}
-		if (binding == null || depth == null || pipelines.isEmpty()) {
+		if (binding == null || depth == null || pipelines.isEmpty()
+			|| BASELINE_PROBE && Boolean.getBoolean("metalcraft.baselineSkipGbuffer")) {
 			return encoder.createRenderPass(label, color, clearColor, depth, clearDepth);
 		}
 		for (RenderPipeline pipeline : pipelines) {
@@ -413,11 +433,12 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			// The hand/HUD needs legacy semantics after each HDR world. Keep both sets
 			// of programs alive instead of compiling them again on every transition.
 			this.parkedPrograms.put(this.colorEncoding, new CachedPrograms(this.substitutions,
-				this.waterSubstitutions, this.windSubstitutions, this.linearColorPipelines, this.resolvePipeline,
+				this.waterSubstitutions, this.waterWithoutSnapshots, this.windSubstitutions, this.linearColorPipelines, this.resolvePipeline,
 				this.resolveSceneFormat, this.resolveUnavailable));
 			CachedPrograms cached = this.parkedPrograms.remove(encoding);
 			this.substitutions = cached == null ? new IdentityHashMap<>() : cached.substitutions();
 			this.waterSubstitutions = cached == null ? new IdentityHashMap<>() : cached.water();
+			this.waterWithoutSnapshots = cached == null ? new IdentityHashMap<>() : cached.waterWithoutSnapshots();
 			this.windSubstitutions = cached == null ? new IdentityHashMap<>() : cached.wind();
 			this.linearColorPipelines = cached == null ? new IdentityHashMap<>() : cached.colors();
 			this.resolvePipeline = cached == null ? null : cached.resolve();
@@ -430,6 +451,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		this.gbufferPass = null;
 		this.haveRasterProjection = false;
 		this.haveRasterView = false;
+		this.cachedRasterProjection = this.cachedRasterView = false;
 	}
 
 	void refreshChannels() {
@@ -515,6 +537,10 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		if (!this.pendingResolve || this.resolvePipeline == null) {
 			return false;
 		}
+		if (BASELINE_PROBE && Boolean.getBoolean("metalcraft.baselineSkipResolve")) {
+			this.pendingResolve = false;
+			return true;
+		}
 		// Reserve immutable, aligned slices from the encoder's existing upload arena. The arena
 		// retires only after this submission completes, including resolves flushed during submit.
 		// Allocating through transientMemory does not close or split the active Metal render pass.
@@ -531,7 +557,9 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			GpuBufferSlice slice = mapping.slice();
 			MetalBuffer uniforms = this.device.nativeBuffer(slice.buffer());
 			openPass.setScissor(0, 0, this.sceneAttachment.getWidth(0), this.sceneAttachment.getHeight(0));
-			openPass.setPipeline(this.resolvePipeline);
+			openPass.setPipeline(BASELINE_PROBE && Boolean.getBoolean("metalcraft.baselineScalarShadows")
+				? this.diagnosticResolvePipelines.computeIfAbsent(this.colorEncoding + "/" + this.resolveSceneFormat,
+					key -> this.compileResolvePipeline(this.resolveSceneFormat, true)) : this.resolvePipeline);
 			openPass.setUniformBuffer(0, uniforms, slice.offset(), MetalRenderPass.STAGE_FRAGMENT);
 			openPass.setUniformBuffer(this.resolveCameraSlot, uniforms, slice.offset() + this.resolveCameraOffset, MetalRenderPass.STAGE_FRAGMENT);
 			openPass.setUniformBuffer(this.lightingFrameSlot, uniforms, slice.offset() + this.lightingFrameOffset, MetalRenderPass.STAGE_FRAGMENT);
@@ -581,13 +609,30 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		if (this.resolvePipeline != null && this.resolveSceneFormat == sceneFormat) {
 			return;
 		}
+		MetalRenderPipeline replacement = this.compileResolvePipeline(sceneFormat, false);
+		if (this.resolvePipeline != null) this.resolvePipeline.close();
+		this.resolvePipeline = replacement;
+		this.resolveSceneFormat = sceneFormat;
+		MetalPassCensus.kindFor("MetalCraft shader: " + this.resolvePass.id());
+	}
+
+	private MetalRenderPipeline compileResolvePipeline(final MetalTexture.Format sceneFormat, final boolean scalar) {
 		List<MetalRenderPipeline.ColorTarget> targets = new ArrayList<>();
 		targets.add(MetalRenderPipeline.ColorTarget.opaque(sceneFormat));
 		for (Channel channel : this.channels) {
 			targets.add(MetalRenderPipeline.ColorTarget.opaque(channel.view().attachment().descriptor().format()));
 		}
 		String selectedSource = this.encodedSource(this.resolveSource);
-		MetalRenderPipeline replacement = this.device.metal().createRenderPipeline(new MetalRenderPipeline.Descriptor(
+		if (scalar) {
+			selectedSource = "#define MC_SHADOW_GATHER 0\n" + selectedSource;
+		}
+		if (this.distantShadows) {
+			// Standard-owned optional bindings follow the five local-light buffers. Custom packs
+			// keep their declared ABI, and disabled distant shadows compile away completely.
+			selectedSource = "#define MC_BUFFER_DISTANT_SHADOW_FRAME " + (this.lightingFrameSlot + 6)
+				+ "\n#define MC_TEX_DISTANT_SHADOW_MAP " + (this.shadowMapSlot + 1) + "\n" + selectedSource;
+		}
+		return this.device.metal().createRenderPipeline(new MetalRenderPipeline.Descriptor(
 			selectedSource,
 			"resolve_vertex",
 			selectedSource,
@@ -598,12 +643,6 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			MetalRenderPipeline.DepthState.DISABLED,
 			MetalRenderPipeline.RasterState.DEFAULT
 		));
-		if (this.resolvePipeline != null) {
-			this.resolvePipeline.close();
-		}
-		this.resolvePipeline = replacement;
-		this.resolveSceneFormat = sceneFormat;
-		MetalPassCensus.kindFor("MetalCraft shader: " + this.resolvePass.id());
 	}
 
 	private Optional<Substitution> substitutionFor(final RenderPipeline pipeline) {
@@ -661,20 +700,31 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 
 	/** Forward water shares vanilla terrain coverage, sorting and color semantics. */
 	public Optional<RenderPipeline> waterPipeline(final RenderPipeline pipeline) {
+		return this.waterPipeline(pipeline, true);
+	}
+
+	public boolean waterEnabled() {
+		return !this.closed && ShaderPackRuntime.BUILTIN_ID.equals(this.packId)
+			&& Boolean.TRUE.equals(this.optionValue.apply("water_enabled"));
+	}
+
+	/** Underwater and Fabulous water retain waves/reflections without unused snapshot bindings. */
+	public Optional<RenderPipeline> waterPipeline(final RenderPipeline pipeline, final boolean opaqueInputs) {
 		if (this.closed || this.colorEncoding != FrameBindings.ColorEncoding.LINEAR_SRGB
 			|| !ShaderPackRuntime.BUILTIN_ID.equals(this.packId)
 			|| programFor(pipeline) != Program.TERRAIN || !hasVertexElements(pipeline, Program.TERRAIN)
 			|| !isBlended(pipeline) || !Program.TERRAIN.implementedDefines().containsAll(declaredDefines(pipeline))) {
 			return Optional.empty();
 		}
-		return this.waterSubstitutions.computeIfAbsent(pipeline, original -> {
+		return (opaqueInputs ? this.waterSubstitutions : this.waterWithoutSnapshots).computeIfAbsent(pipeline, original -> {
 			Map<String, Integer> slots = resourceSlots(original);
 			if (!slots.keySet().containsAll(List.of("Projection", "Fog", "Globals", "ChunkSection", "Sampler0", "Sampler2"))
 				|| slots.values().stream().anyMatch(slot -> slot >= 8)) return Optional.empty();
 			RenderPipeline stand = this.standIn(original, Program.TERRAIN, Material.WATER, true);
 			try {
 				this.device.registerNativePipeline(stand, new MetalGpuDevice.NativeProgram(
-					"#define MC_WATER_FORWARD 1\n" + this.programSource(original, Program.TERRAIN, Material.WATER, slots, "ChunkSection"),
+					"#define MC_WATER_FORWARD 1\n#define MC_WATER_OPAQUE_INPUTS " + (opaqueInputs ? 1 : 0) + "\n"
+						+ this.programSource(original, Program.TERRAIN, Material.WATER, slots, "ChunkSection"),
 					"gbuffer_terrain_vertex", "gbuffer_terrain_fragment", FrameBindings.ColorEncoding.LINEAR_SRGB));
 				if (!this.device.precompileLinearWorldPipeline(stand, null).isValid()) {
 					this.device.forgetNativePipeline(stand);
@@ -866,7 +916,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		}
 		if (bytes.remaining() < 64) return;
 		// JOML's enabled Unsafe path assumes direct buffers; private-upload mirrors are heap-backed.
-		Matrix4f matrix = new Matrix4f(
+		Matrix4f matrix = this.captureMatrix.set(
 			bytes.getFloat(0), bytes.getFloat(4), bytes.getFloat(8), bytes.getFloat(12),
 			bytes.getFloat(16), bytes.getFloat(20), bytes.getFloat(24), bytes.getFloat(28),
 			bytes.getFloat(32), bytes.getFloat(36), bytes.getFloat(40), bytes.getFloat(44),
@@ -880,10 +930,14 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	}
 
 	private void setRasterProjection(final Matrix4fc projection) {
+		if (this.cachedRasterProjection && this.lastRasterProjection.equals(projection)
+			&& this.lastRasterProjection.properties() == projection.properties()) return;
 		Matrix4f inverse = new Matrix4f(projection).invert();
 		if (!inverse.isFinite() || inverse.determinant() == 0.0F) {
 			return;
 		}
+		this.lastRasterProjection.set(projection);
+		this.cachedRasterProjection = true;
 		if (this.haveRasterProjection && this.inverseProjection.equals(inverse, 1.0e-5F)) {
 			return;
 		}
@@ -895,10 +949,14 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	}
 
 	private void setRasterView(final Matrix4fc view) {
+		if (this.cachedRasterView && this.lastRasterView.equals(view)
+			&& this.lastRasterView.properties() == view.properties()) return;
 		Matrix4f inverse = new Matrix4f(view).invert();
 		if (!inverse.isFinite() || inverse.determinant() == 0.0F) {
 			return;
 		}
+		this.lastRasterView.set(view);
+		this.cachedRasterView = true;
 		if (this.haveRasterView && this.viewToCameraRelative.equals(inverse, 1.0e-5F)) {
 			return;
 		}
@@ -916,6 +974,17 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 	}
 
 	private void bindShadowResources(final MetalRenderPass pass) {
+		if (this.distantShadows) {
+			WorldShadowModule.Frame distant = this.distantShadowFrameSupplier.get();
+			if (distant != null) {
+				distant.bindUniforms(pass, this.lightingFrameSlot + 6, MetalRenderPass.STAGE_FRAGMENT);
+				distant.bindDepth(pass, this.shadowMapSlot + 1);
+			} else {
+				pass.setUniformBuffer(this.lightingFrameSlot + 6, this.unoccludedFrame, 0, MetalRenderPass.STAGE_FRAGMENT);
+				pass.setTexture(this.shadowMapSlot + 1, this.unoccludedDepthView, MetalRenderPass.STAGE_FRAGMENT);
+				pass.setSampler(this.shadowMapSlot + 1, this.unoccludedSampler, MetalRenderPass.STAGE_FRAGMENT);
+			}
+		}
 		WorldShadowModule.Frame frame = this.shadowFrameSupplier.get();
 		if (frame != null) {
 			if (this.shadowFrameSlot >= 0) {
@@ -995,6 +1064,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		for (CachedPrograms cached : this.parkedPrograms.values()) {
 			cached.substitutions().values().forEach(value -> value.ifPresent(s -> this.device.forgetNativePipeline(s.pipeline())));
 			cached.water().values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
+			cached.waterWithoutSnapshots().values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
 			cached.wind().values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
 			if (cached.resolve() != null) cached.resolve().close();
 		}
@@ -1011,6 +1081,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			water.ifPresent(this.device::forgetNativePipeline);
 		}
 		this.waterSubstitutions.clear();
+		this.waterWithoutSnapshots.values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
+		this.waterWithoutSnapshots.clear();
 		this.windSubstitutions.values().forEach(value -> value.ifPresent(this.device::forgetNativePipeline));
 		this.windSubstitutions.clear();
 		this.linearColorPipelines.clear();
@@ -1023,6 +1095,8 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			return;
 		}
 		this.closed = true;
+		this.diagnosticResolvePipelines.values().forEach(MetalRenderPipeline::close);
+		this.diagnosticResolvePipelines.clear();
 		if (this.localLighting != null) this.localLighting.close();
 		this.device.setDeferredResolve(null);
 		this.device.setWorldUniformCapture(null);

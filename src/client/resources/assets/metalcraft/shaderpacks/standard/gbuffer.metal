@@ -16,6 +16,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
+#ifndef MC_WATER_OPAQUE_INPUTS
+#define MC_WATER_OPAQUE_INPUTS 1
+#endif
+
 #ifdef MC_PASS_GBUFFER
 
 // ---- Minecraft's uniform blocks, in the layout std140 gives them -------------------------------
@@ -321,12 +325,14 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     sampler atlasSampler [[sampler(MC_SLOT_SAMPLER0)]]
 #ifdef MC_WATER_FORWARD
     , constant WaterFrameUniform &waterFrame [[buffer(13)]]
+#if MC_WATER_OPAQUE_INPUTS
     , texture2d<float> opaqueColor [[texture(12)]]
     , depth2d<float> opaqueDepth [[texture(13)]]
+#endif
     , constant WaterDraw &waterDraw [[buffer(15)]]
 #endif
 ) {
-#ifdef MC_WATER_FORWARD
+#if defined(MC_WATER_FORWARD) && MC_WATER_OPAQUE_INPUTS
     if (in.waterMaterial == 1.0 && waterDraw.debugMode >= 2u && waterDraw.debugMode <= 3u) {
         float2 extent = float2(float(opaqueDepth.get_width()), float(opaqueDepth.get_height()));
         float2 pixel = clamp(in.position.xy, float2(0.0), max(extent - 1.0, float2(0.0)));
@@ -404,6 +410,7 @@ fragment GBufferTargets gbuffer_terrain_fragment(
         float3 normalView = mc_water_safe_normalize(
             viewRotation * normalWorld, float3(0.0, 1.0, 0.0));
         McWaterSsrHit ssr = {float3(0.0), 0.0, float3(0.0), 0.0};
+#if MC_WATER_OPAQUE_INPUTS
         // The captured opaque color is a valid reflection source only in the ordinary above-water
         // composition path. Fabulous and submerged rendering retain the baseline environment.
         if (waterFrame.cameraSubmerged == 0u && waterFrame.refractionEnabled != 0u) {
@@ -483,7 +490,9 @@ fragment GBufferTargets gbuffer_terrain_fragment(
                     waterFrame.sunDirectionEnergy, waterFrame.environment, ssr
                 ), shaded.a);
             }
-        } else {
+        } else
+#endif
+        {
             shaded = float4(mc_water_configured_reflection_with_ssr(
                 shaded.rgb, normalWorld, viewToCameraWorld, 0.08, in.lightLevels.y,
                 waterFrame.sunDirectionEnergy, waterFrame.environment, ssr

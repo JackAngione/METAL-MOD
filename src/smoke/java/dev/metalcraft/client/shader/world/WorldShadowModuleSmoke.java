@@ -22,6 +22,7 @@ public final class WorldShadowModuleSmoke {
 	}
 
 	public static void run(final MetalDevice device) {
+		ShadowFrameReuseSmoke.run();
 		String contract;
 		try (var input = WorldShadowModuleSmoke.class.getResourceAsStream(
 			"/assets/metalcraft/shaderpacks/standard/shared/shadows.metal")) {
@@ -33,9 +34,11 @@ public final class WorldShadowModuleSmoke {
 		for (int count = 1; count <= 4; count++) check(device, contract, count);
 		checkWalkingReconstruction(device, contract);
 		ShadowFilteringSmoke.run(device, contract);
+		ShadowAxisTagSmoke.run(device, contract);
 		ShadowReceiverPlaneSmoke.run(device, contract);
 		ShadowCascadeTransitionSmoke.run(device, contract);
 		TerrainShadowRendererSmoke.run(device, contract);
+		ShadowSunMotionSmoke.run(device, contract);
 		System.out.println("Shadow resources: 1–4 cascades, named bindings, reconstruction and immutable uploads passed");
 	}
 
@@ -109,7 +112,7 @@ public final class WorldShadowModuleSmoke {
 		var sun = new Vector3f(1, 2, 3).normalize();
 		float fov = 1.1F;
 		var inverse = new Matrix4f().perspective(fov, 1.5F, 0.1F, 200, true).invert();
-		var cascades = ShadowCascades.fit(settings, camera, rotation, fov, 1.5F, sun);
+		var cascades = ShadowCascades.fit(settings, camera, rotation, fov, 1.5F, sun, new ShadowCascades.Stabilization());
 		var point = new Vector4f(2, 3, -7, 1);
 		StringBuilder checks = new StringBuilder();
 		for (int i = 0; i < count; i++) {

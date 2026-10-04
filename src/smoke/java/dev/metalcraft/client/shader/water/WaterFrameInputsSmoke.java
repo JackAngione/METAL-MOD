@@ -15,6 +15,7 @@ public final class WaterFrameInputsSmoke {
 	}
 
 	public static void run() {
+		checkSnapshotConsumers();
 		Matrix4f projection = reverseZProjection();
 		Vector3d camera = new Vector3d(29_999_999.875, -64.25, -29_999_999.625);
 		var input = WaterFrameInputs.create(projection, camera, Long.MAX_VALUE, 0.75F, true)
@@ -79,6 +80,27 @@ public final class WaterFrameInputsSmoke {
 		assertRejected(reverseZProjection(), new Vector3d(), Float.NaN, "Non-finite partial tick");
 		assertRejected(reverseZProjection(), new Vector3d(), -0.01F, "Negative partial tick");
 		assertRejected(reverseZProjection(), new Vector3d(), 1.01F, "Oversized partial tick");
+	}
+
+	private static void checkSnapshotConsumers() {
+		var above = WaterFrameInputs.create(reverseZProjection(), new Vector3d(), 0, 0, false).orElseThrow().withRefraction(true);
+		var below = WaterFrameInputs.create(reverseZProjection(), new Vector3d(), 0, 0, true).orElseThrow().withRefraction(true);
+		for (var mode : WaterRoutingDebug.Mode.values()) {
+			if (WaterSnapshotPolicy.capture(false, true, mode, above)
+				|| WaterSnapshotPolicy.capture(true, true, mode, null)) throw new AssertionError("Copy without a prepared, valid consumer");
+		}
+		if (!WaterSnapshotPolicy.capture(true, true, WaterRoutingDebug.Mode.OFF, above)
+			|| WaterSnapshotPolicy.capture(true, false, WaterRoutingDebug.Mode.OFF, above)
+			|| WaterSnapshotPolicy.capture(true, true, WaterRoutingDebug.Mode.OFF, below)
+			|| WaterSnapshotPolicy.capture(true, true, WaterRoutingDebug.Mode.OFF, above.withRefraction(false))) {
+			throw new AssertionError("Water disabled, underwater or Fabulous snapshot policy");
+		}
+		if (!WaterSnapshotPolicy.capture(true, false, WaterRoutingDebug.Mode.OPAQUE_DEPTH, below)
+			|| WaterSnapshotPolicy.capture(true, true, WaterRoutingDebug.Mode.NORMALS, above)
+			|| !WaterSnapshotPolicy.shadeWater(true, WaterRoutingDebug.Mode.OFF)
+			|| !WaterSnapshotPolicy.shadeWater(false, WaterRoutingDebug.Mode.IDENTITY)) {
+			throw new AssertionError("Snapshot-free shading or explicit depth diagnostic lost");
+		}
 	}
 
 	private static void assertSkyInputs() {

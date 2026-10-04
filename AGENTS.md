@@ -11,6 +11,7 @@ This is a Minecraft mod which the entire purpose is to maximally optimize Minecr
 
 
 ## Testing:
+- Always run in-game visual and performance tests at 4K (3840×2160), unless the user explicitly requests another resolution. Verify the actual world render-target dimensions rather than relying only on the requested window size; record the drawable/presentation dimensions separately.
 - Use 16 render and simulation distance for shaders testing. When doing LOD testing, use 128 render distance. Default graphics engine so that metal is used. 
 - Keep live in-game test runs to a minimum. Do not run unnecessarily long test. It wastes time. Only increase in-game test time/complexity when absolutely necessary.
 - Reuse an existing standard-world save for test runs when practical. Do not create a new world unless the test explicitly needs a fresh world or different world configuration.

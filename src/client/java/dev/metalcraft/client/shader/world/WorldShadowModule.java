@@ -25,6 +25,7 @@ public final class WorldShadowModule implements AutoCloseable {
 	/** Matches shared/shadows.metal: four matrices, two camera matrices, three 16-byte vectors. */
 	public static final int FRAME_BYTES = 432;
 	private final ShadowCascades.Settings settings;
+	private final ShadowCascades.Stabilization stabilization = new ShadowCascades.Stabilization();
 	private final MetalTexture depth;
 	private final MetalTextureView depthView;
 	private final MetalSampler sampler;
@@ -73,7 +74,7 @@ public final class WorldShadowModule implements AutoCloseable {
 			throw new IllegalArgumentException("Invalid inverse camera projection");
 		}
 		List<ShadowCascades.Cascade> cascades = ShadowCascades.fit(this.settings, cameraPosition,
-			cameraRotation, verticalFovRadians, aspect, directionToSun);
+			cameraRotation, verticalFovRadians, aspect, directionToSun, this.stabilization);
 		MetalBuffer buffer = this.depth.device().createBuffer(FRAME_BYTES, MetalBuffer.StorageMode.SHARED);
 		try (MetalBuffer.Mapping mapping = buffer.map()) {
 			ByteBuffer bytes = mapping.bytes();
@@ -113,6 +114,9 @@ public final class WorldShadowModule implements AutoCloseable {
 		}
 		return new Frame(buffer, List.of());
 	}
+
+	/** A different world must not inherit the previous world's camera trajectory. */
+	public void resetStabilization() { this.stabilization.reset(); }
 
 	/** Borrowed bindings, valid while this module and frame are open. Slots come from the caller's layout. */
 	public final class Frame implements AutoCloseable {

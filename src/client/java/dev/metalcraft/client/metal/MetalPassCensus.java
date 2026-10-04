@@ -45,6 +45,7 @@ public final class MetalPassCensus {
 	/** A pass that is not being measured, and which therefore carries no counter samples. */
 	public static final int UNTIMED_KIND = -1;
 	private static final int REPORTED_KINDS = 12;
+	private static final boolean ENABLED = Boolean.parseBoolean(System.getProperty("metalcraft.passCensus", "true"));
 
 	/** Interned on the render thread while capturing, and read on the same thread when reporting. */
 	private static final Map<String, Integer> KINDS = new HashMap<>();
@@ -89,7 +90,7 @@ public final class MetalPassCensus {
 	 * @return {@link #UNTIMED_KIND} when nothing is being measured, so the caller skips the label
 	 */
 	public static int kindFor(final String label) {
-		if (!MetalStallProbe.isEnabled() || label == null || kinds() == 0) {
+		if (!ENABLED || !MetalStallProbe.isEnabled() || label == null || kinds() == 0) {
 			return UNTIMED_KIND;
 		}
 		Integer existing = KINDS.get(label);

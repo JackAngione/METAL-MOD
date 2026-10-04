@@ -831,18 +831,25 @@ final class MetalWaterIdentityGameTest {
 				throw new AssertionError("Water validation requires 16 render and simulation distance");
 			}
 			var device = MetalGpuDevices.current();
-			if (device == null || !device.lastWorldHadOpaqueWaterInputs()) {
-				throw new AssertionError("Opaque water inputs were not captured in the live HDR world");
+			boolean enabled = Boolean.TRUE.equals(ShaderPackRuntime.active().optionValue("water_enabled"));
+			boolean submerged = client.gameRenderer.gameRenderState().levelRenderState.cameraRenderState.fogType
+				== net.minecraft.world.level.material.FogType.WATER;
+			boolean expectsSnapshot = mode == WaterRoutingDebug.Mode.SURFACE_DEPTH || mode == WaterRoutingDebug.Mode.OPAQUE_DEPTH
+				|| enabled && !fabulous && !submerged && (mode == WaterRoutingDebug.Mode.OFF
+					|| mode == WaterRoutingDebug.Mode.REFRACTION_OFF || mode == WaterRoutingDebug.Mode.FOAM_OFF
+					|| mode == WaterRoutingDebug.Mode.UNDERWATER_DISTORTION_OFF);
+			if (device == null || device.lastWorldHadOpaqueWaterInputs() != expectsSnapshot) {
+				throw new AssertionError("Opaque water capture does not match the live consumer: " + name);
 			}
-			if (device.lastWorldWaterDraws() == 0) {
+			if ((enabled || mode != WaterRoutingDebug.Mode.OFF) && device.lastWorldWaterDraws() == 0) {
 				throw new AssertionError("Production water metadata did not reach a forward draw");
 			}
 			if (device.opaqueWaterInputs().isPresent()) {
 				throw new AssertionError("Opaque water inputs escaped the world session");
 			}
 			var view = client.gameRenderer.mainRenderTarget().getColorTextureView();
-			if (device.lastWorldOpaqueWaterWidth() != view.getWidth(0)
-				|| device.lastWorldOpaqueWaterHeight() != view.getHeight(0)) {
+			if (device.lastWorldOpaqueWaterWidth() != (expectsSnapshot ? view.getWidth(0) : 0)
+				|| device.lastWorldOpaqueWaterHeight() != (expectsSnapshot ? view.getHeight(0) : 0)) {
 				throw new AssertionError("Opaque snapshot extent " + device.lastWorldOpaqueWaterWidth()
 					+ "x" + device.lastWorldOpaqueWaterHeight() + " did not match world attachment "
 					+ view.getWidth(0) + "x" + view.getHeight(0));

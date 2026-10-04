@@ -263,6 +263,13 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	public void captureOpaqueWaterInputs() {
 		MetalLinearWorldSession session = this.linearWorldSession;
 		if (session == null || session.isClosed() || session.isPoisoned()) return;
+		var geometry = this.shaderPackRuntime == null ? null : this.shaderPackRuntime.worldGeometry();
+		if (!dev.metalcraft.client.shader.water.WaterSnapshotPolicy.capture(session.hasPreparedWater(),
+			geometry != null && geometry.waterEnabled(), dev.metalcraft.client.shader.water.WaterRoutingDebug.mode(),
+			session.waterFrameInputs())) {
+			this.invalidateOpaqueWaterInputs();
+			return;
+		}
 		if (this.opaqueSnapshots == null) this.opaqueSnapshots = new MetalOpaqueSnapshotOwner(this);
 		if (this.opaqueSnapshots.current().isPresent()) return;
 		this.opaqueSnapshots.capture(this.commandEncoder, session.hdrColor(), session.hdrDepth());

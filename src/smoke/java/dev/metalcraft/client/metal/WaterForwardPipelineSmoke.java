@@ -172,6 +172,22 @@ final class WaterForwardPipelineSmoke {
 				var activeWater = activeGeometry.waterPipeline(original).orElseThrow();
 				var activePipeline = ((MetalCompiledRenderPipeline)gpu.precompileLinearWorldPipeline(
 					activeWater, null)).metal(false, MetalTexture.Format.RGBA16_FLOAT);
+				var noSnapshotWater = activeGeometry.waterPipeline(original, false).orElseThrow();
+				var noSnapshotPipeline = ((MetalCompiledRenderPipeline)gpu.precompileLinearWorldPipeline(
+					noSnapshotWater, null)).metal(false, MetalTexture.Format.RGBA16_FLOAT);
+				for (int submerged = 0; submerged <= 1; submerged++) {
+					try (var mapping = waterFrame.map()) {
+						mapping.bytes().putInt(164, submerged).putInt(168, 0);
+					}
+					writeDraw(baselineDraw, 0);
+					draw(queue, activePipeline, baseline, atlasView, lightmapView, sampler, vertices, indices,
+						metadata, projection, section, globals, fog, baselineDraw, waterFrame, opaqueColorView, opaqueDepthView);
+					draw(queue, noSnapshotPipeline, identity, atlasView, lightmapView, sampler, vertices, indices,
+						metadata, projection, section, globals, fog, baselineDraw, waterFrame, null, null);
+					ByteBuffer expected = baseline.readback(queue, 0), actual = identity.readback(queue, 0);
+					if (!expected.equals(actual)) throw new AssertionError("Water changed without snapshots, submerged=" + submerged);
+				}
+				try (var mapping = waterFrame.map()) { mapping.bytes().putInt(164, 0); }
 				writeDraw(baselineDraw, 0);
 				draw(queue, activePipeline, baseline, atlasView, lightmapView, sampler, vertices, indices,
 					metadata, projection, section, globals, fog, baselineDraw, waterFrame,
@@ -320,8 +336,8 @@ final class WaterForwardPipelineSmoke {
 			pass.setTexture(5, lightmap, STAGES);
 			pass.setSampler(5, sampler, STAGES);
 			pass.setUniformBuffer(13, waterFrame, 0, STAGES);
-			pass.setTexture(12, opaqueColor, MetalRenderPass.STAGE_FRAGMENT);
-			pass.setTexture(13, opaqueDepth, MetalRenderPass.STAGE_FRAGMENT);
+			if (opaqueColor != null) pass.setTexture(12, opaqueColor, MetalRenderPass.STAGE_FRAGMENT);
+			if (opaqueDepth != null) pass.setTexture(13, opaqueDepth, MetalRenderPass.STAGE_FRAGMENT);
 			pass.setUniformBuffer(14, metadata, 0, MetalRenderPass.STAGE_VERTEX);
 			pass.setUniformBuffer(15, waterDraw, 0, STAGES);
 			pass.drawIndexed(MetalRenderPass.Primitive.TRIANGLE, indices, 0,

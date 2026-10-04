@@ -11,5 +11,12 @@ import org.spongepowered.asm.mixin.Unique;
 abstract class RenderPassWaterDrawMixin implements WaterDrawSource {
 	@Unique private @Nullable WaterMeshBinding metalcraft$water;
 	@Override public @Nullable WaterMeshBinding metalcraft$waterMesh() { return this.metalcraft$water; }
-	@Override public void metalcraft$waterMesh(final @Nullable WaterMeshBinding binding) { this.metalcraft$water = binding; }
+	@Override public void metalcraft$waterMesh(final @Nullable WaterMeshBinding binding) {
+		this.metalcraft$water = binding;
+		if (binding != null) {
+			var device = dev.metalcraft.client.metal.MetalGpuDevices.current();
+			var session = device == null ? null : device.linearWorldSession();
+			if (session != null) session.prepareWaterDraw();
+		}
+	}
 }

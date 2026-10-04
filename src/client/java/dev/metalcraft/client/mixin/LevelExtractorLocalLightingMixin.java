@@ -17,5 +17,6 @@ abstract class LevelExtractorLocalLightingMixin {
     @Inject(method = {"setLevel", "allChanged"}, at = @At("HEAD"))
     private void metalcraft$resetLocalLight(CallbackInfo ci) {
         WorldLocalLighting.reset();
+        dev.metalcraft.client.shader.world.WorldTerrainShadows.clearWorldCache();
     }
 }

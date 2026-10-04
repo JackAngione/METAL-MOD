@@ -78,7 +78,8 @@ float3 mc_shadow_receiver_normal(float3 cameraRelative, float3 storedNormal, flo
 // distance or hardware depth). Bias is in normalized shadow depth and moves toward the sun.
 // Manual comparisons use the module's nearest sampler, avoiding a new comparison-sampler ABI.
 float mc_shadow_visibility_in_cascade(float3 cameraRelative, uint cascade, float depthBias,
-    constant MCShadowFrame& frame, depth2d_array<float> map, sampler nearestSampler, float3 worldNormal) {
+    constant MCShadowFrame& frame, depth2d_array<float> map, sampler nearestSampler, float3 worldNormal,
+    bool coarse = false) {
     if (cascade >= min(frame.cascadeCount, 4u) || cascade >= map.get_array_size()
         || !all(isfinite(cameraRelative))) return 1.0;
     float4 clip = frame.cameraRelativeToShadow[cascade] * float4(cameraRelative, 1.0);
@@ -108,13 +109,40 @@ float mc_shadow_visibility_in_cascade(float3 cameraRelative, uint cascade, float
     float2 texelPosition = uv * resolution - 0.5;
     float2 base = floor(texelPosition);
     float2 fraction = texelPosition - base;
-    float4 weightsX = float4(1.0 - fraction.x, 1.0, 1.0, fraction.x);
-    float4 weightsY = float4(1.0 - fraction.y, 1.0, 1.0, fraction.y);
+    float4 weightsX = coarse ? float4(1.0 - fraction.x, fraction.x, 0.0, 0.0)
+        : float4(1.0 - fraction.x, 1.0, 1.0, fraction.x);
+    float4 weightsY = coarse ? float4(1.0 - fraction.y, fraction.y, 0.0, 0.0)
+        : float4(1.0 - fraction.y, 1.0, 1.0, fraction.y);
     float visibility = 0.0;
-    for (int y = 0; y < 4; ++y) {
-        for (int x = 0; x < 4; ++x) {
+    int taps = coarse ? 2 : 4;
+    int offset = coarse ? 0 : -1;
+#ifndef MC_SHADOW_GATHER
+#define MC_SHADOW_GATHER 1
+#endif
+#if MC_SHADOW_GATHER
+    // A gather returns the same four nearest depths in bottom-left, bottom-right,
+    // top-right, top-left order. Keep each texel's plane correction and border test;
+    // hardware comparison filtering would use one receiver depth for all four.
+    float inverseResolution = 1.0 / resolution;
+    for (int y = 0; y < taps; y += 2) {
+        for (int x = 0; x < taps; x += 2) {
+            float2 first = base + float2(x + offset, y + offset);
+            float4 stored = map.gather(nearestSampler, (first + 1.0) * inverseResolution, cascade);
+            float4 centerX = (first.x + float4(0.5, 1.5, 1.5, 0.5)) * inverseResolution;
+            float4 centerY = (first.y + float4(1.5, 1.5, 0.5, 0.5)) * inverseResolution;
+            float4 depth = receiverDepth + depthGradient.x * (centerX - uv.x)
+                + depthGradient.y * (centerY - uv.y);
+            bool4 outside = (centerX < 0.0) | (centerX >= 1.0) | (centerY < 0.0) | (centerY >= 1.0);
+            float4 weights = float4(weightsX[x], weightsX[x + 1], weightsX[x + 1], weightsX[x])
+                * float4(weightsY[y + 1], weightsY[y + 1], weightsY[y], weightsY[y]);
+            visibility += dot(weights, select(float4(0.0), float4(1.0), outside | (stored >= 1.0) | (depth <= stored)));
+        }
+    }
+#else
+    for (int y = 0; y < taps; ++y) {
+        for (int x = 0; x < taps; ++x) {
             float weight = weightsX[x] * weightsY[y];
-            float2 center = (base + float2(x - 1, y - 1) + 0.5) / resolution;
+            float2 center = (base + float2(x + offset, y + offset) + 0.5) / resolution;
             // Treat taps beyond the light volume as unoccluded, not clamped edge casters.
             if (any(center < 0.0) || any(center >= 1.0)) visibility += weight;
             else {
@@ -128,7 +156,8 @@ float mc_shadow_visibility_in_cascade(float3 cameraRelative, uint cascade, float
             }
         }
     }
-    return visibility / 9.0;
+#endif
+    return visibility / (coarse ? 1.0 : 9.0);
 }
 
 // Matches ShadowCascades' expanded fit. Only the last 10% of a cascade samples

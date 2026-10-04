@@ -51,6 +51,11 @@ fragment ResolveTargets resolve_fragment(
     constant McFog &fog [[buffer(MC_BUFFER_LIGHTING_FRAME)]],
     depth2d_array<float> shadowMap [[texture(MC_TEX_SHADOW_MAP)]],
     sampler shadowSampler [[sampler(MC_TEX_SHADOW_MAP)]]
+#ifdef MC_BUFFER_DISTANT_SHADOW_FRAME
+    , constant MCShadowFrame &distantShadowFrame [[buffer(MC_BUFFER_DISTANT_SHADOW_FRAME)]]
+    , depth2d_array<float> distantShadowMap [[texture(MC_TEX_DISTANT_SHADOW_MAP)]]
+    , sampler distantShadowSampler [[sampler(MC_TEX_DISTANT_SHADOW_MAP)]]
+#endif
 #if MC_OPTION_LOCAL_LIGHTS
     , constant MCLocalFrame &localFrame [[buffer(MC_BUFFER_LOCAL_FRAME)]]
     , device const uint *localScene [[buffer(MC_BUFFER_LOCAL_SCENE)]]
@@ -72,7 +77,7 @@ fragment ResolveTargets resolve_fragment(
 #ifndef MC_REDUCE_DISTANT_LIGHTING
 #define MC_REDUCE_DISTANT_LIGHTING 1
 #endif
-#if MC_REDUCE_DISTANT_LIGHTING && defined(MC_OPTION_SHADOW_DISTANCE) && MC_OPTION_SHADOW_DISTANCE < 128
+#if MC_REDUCE_DISTANT_LIGHTING && defined(MC_OPTION_SHADOW_DISTANCE) && MC_OPTION_SHADOW_DISTANCE < 128 && !defined(MC_BUFFER_DISTANT_SHADOW_FRAME)
     if (options.debugView == 0 && isfinite(viewDepth) && viewDepth >= max(shadowFrame.shadowDistance, 32.0)) {
         out.albedo.a = 0.0;
         return out;
@@ -89,6 +94,27 @@ fragment ResolveTargets resolve_fragment(
     float3 viewNormal = mc_decode_normal(previous.normal.rg);
     float3 worldNormal = normalize((camera.viewToCameraRelative * float4(viewNormal, 0.0)).xyz);
     float3 shadowNormal = mc_shadow_receiver_normal(cameraRelative, worldNormal, previous.normal.b);
+    // Four comparisons in one coarse cascade retain real cast shadows beyond the detailed
+    // range. Receiver derivatives stay above this branch, including the transition quads.
+    float distantVisibility = 1.0;
+#ifdef MC_BUFFER_DISTANT_SHADOW_FRAME
+    if (validDepth && distantShadowFrame.cascadeCount > 0u
+        && viewDepth > shadowFrame.shadowDistance * 0.9
+        && viewDepth < distantShadowFrame.shadowDistance) {
+        float distantBias = mc_shadow_receiver_bias_in_cascade(shadowNormal, 0u, distantShadowFrame);
+        distantVisibility = mc_shadow_visibility_in_cascade(cameraRelative, 0u, distantBias,
+            distantShadowFrame, distantShadowMap, distantShadowSampler, shadowNormal, true);
+        distantVisibility = mix(1.0, distantVisibility, mc_shadow_distance_fade(viewDepth, distantShadowFrame));
+    }
+    if (options.debugView == 0 && validDepth && viewDepth >= max(shadowFrame.shadowDistance, 32.0)) {
+        // Local shadows end at 32 blocks. Keep the distant path small: no near PCF, cascade
+        // blending, cloud-density noise or local-light traversal, but preserve material/fog.
+        out.scene = mc_compose_lighting(previous.scene, previous.albedo, previous.light.rg,
+            cameraRelative, distantVisibility, fog, shadowFrame, options.shadowStrength);
+        out.albedo.a = 0.0;
+        return out;
+    }
+#endif
     uint cascade = validDepth ? mc_shadow_cascade(viewDepth, shadowFrame) : shadowFrame.cascadeCount;
     float bias = mc_shadow_receiver_bias(shadowNormal, viewDepth, shadowFrame);
     float visibility = validDepth
@@ -99,7 +125,7 @@ fragment ResolveTargets resolve_fragment(
         visibility *= mc_cloud_sun_visibility(cameraRelative, shadowFrame.directionToSun.xyz,
             camera.cloudOrigin, camera.cloudSettings);
     }
-    visibility = mix(1.0, visibility, fade);
+    visibility = mix(distantVisibility, visibility, fade);
     if (options.debugView == 2) {
         out.scene = mc_scene_seed(float4(previous.albedo.rgb, 1.0));
         out.albedo.a = 0.0;

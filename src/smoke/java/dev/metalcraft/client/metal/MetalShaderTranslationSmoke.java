@@ -1869,6 +1869,45 @@ public final class MetalShaderTranslationSmoke {
 				assertWorldSunLighting(gpu, runtime, encoder, scene, sceneView, depthView, queue, packed, viewDepth, fov, true);
 			}
 
+			// Real caster depth and the actual tile resolve: 96-block detailed shadows hand
+			// off to a low-resolution map, instead of fading to unoccluded terrain.
+			var farSettings = dev.metalcraft.client.shader.world.WorldTerrainShadows.distantSettings(
+				new ShadowCascades.Settings(4, 1024, 0.05F, 96, 0.6F, 96), 256);
+			if (farSettings.count() != 1 || farSettings.resolution() != 512 || Math.abs(farSettings.near() - 86.4F) > 0.001F)
+				throw new AssertionError("Distant shadow allocation/overlap contract");
+			try (var distantModule = new WorldShadowModule(gpu.metal(), farSettings);
+				var nearFrame = module.prepareFrame(new Vector3d(), new Quaternionf(), fov, 1,
+					new Vector3f(0, 1, 0), new Matrix4f(projection).invert());
+				var distantFrame = distantModule.prepareFrame(new Vector3d(), new Quaternionf(), fov, 1,
+					new Vector3f(0, 1, 0), new Matrix4f(projection).invert())) {
+				runtime.worldGeometry().setShadowFrameSupplier(() -> nearFrame);
+				runtime.worldGeometry().setDistantShadowFrameSupplier(() -> distantFrame);
+				gpu.encodeNativePass(module.depthPass(), "near-clear", pass -> {});
+				gpu.encodeNativePass(distantModule.depthPass(), "distant-caster", pass -> renderer.encode(pass,
+					distantFrame, List.of(new TerrainShadowRenderer.Draw(layer, vertices, 32, indices, 4,
+						MetalRenderPass.IndexType.UINT16, 6, 0, 300, 0, 1)), atlasView, sampler));
+				runtime.setOption("debug_view", "visibility");
+				for (float depth : new float[]{80, 86.4F, 88, 90, 92, 94, 95.99F, 96.01F, 128, 200, 230.4F, 243.2F, 256, 280}) {
+					int bits = Math.round(depth / 1024 * 16_777_215);
+					RenderPipeline distantSeed = packedSeedPipeline();
+					String source = packedSeedSource(bits);
+					gpu.registerNativePipeline(distantSeed, new MetalGpuDevice.NativeProgram(source, "seed_vertex", "seed_fragment"));
+					try {
+						drawWorldSeed(runtime, encoder, sceneView, depthView, distantSeed);
+						float visibility = depth < 96 ? Math.clamp((96 - depth) / 9.6F, 0, 1)
+							: Math.clamp((depth - 230.4F) / 25.6F, 0, 1);
+						byte expected = (byte)Math.round(visibility * 255);
+						assertBgraDelta(scene.readback(queue, 0), expected, expected, expected, 3, "near/distant shadow transition at " + depth);
+					} finally { gpu.forgetNativePipeline(distantSeed); }
+				}
+				assertWorldSunLighting(gpu, runtime, encoder, scene, sceneView, depthView, queue,
+					Math.round(128.0F / 1024 * 16_777_215), 128, fov, true);
+				runtime.worldGeometry().setDistantShadowFrameSupplier(() -> null);
+				assertWorldSunLighting(gpu, runtime, encoder, scene, sceneView, depthView, queue,
+					Math.round(128.0F / 1024 * 16_777_215), 128, fov, false);
+				System.out.println("Distant shadows: actual 512px caster map, 80–280 block transition, distant sun/cave/emissive/fog composition and missing-frame fallback passed");
+			}
+
 			try (WorldShadowModule.Frame empty = module.prepareUnoccludedFrame()) {
 				runtime.worldGeometry().setShadowFrameSupplier(() -> empty);
 				runtime.setOption("debug_view", "visibility");

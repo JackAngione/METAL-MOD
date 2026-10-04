@@ -229,7 +229,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		if (!(value.buffer() instanceof MetalGpuBuffer metal)) throw new IllegalArgumentException("Uniform buffer does not belong to Metal");
 		this.uniforms.put(name, value);
 		WorldUniformCapture capture = this.device.worldUniformCapture();
-		if (capture != null) {
+		if (capture != null && capture.needed()) {
 			metal.captureUniform(name, value.offset(), value.length(), capture);
 		}
 	}
@@ -322,8 +322,9 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		var worldSession = this.device.linearWorldSession();
 		var worldInputs = worldSession == null ? null : worldSession.waterFrameInputs();
 		RenderPipeline windPipeline = null;
-		boolean waterEligible = geometry != null && this.device.opaqueWaterInputs().isPresent()
-			&& this.device.linearWorldSession().waterFrameInputs() != null
+		var opaqueInputs = this.device.opaqueWaterInputs();
+		boolean waterEligible = geometry != null && worldInputs != null
+			&& dev.metalcraft.client.shader.water.WaterSnapshotPolicy.shadeWater(geometry.waterEnabled(), WaterRoutingDebug.mode())
 			&& draws.stream().anyMatch(draw -> ((Object)draw) instanceof WaterDrawSource source && source.metalcraft$waterMesh() != null);
 		// Distant terrain draws sample their own colour atlas through Sampler0. The block atlas
 		// binding is restored for ordinary sections and when the multi-draw ends.
@@ -364,7 +365,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 					}
 				}
 				MetalBuffer metadata = water == null ? null : water.upload(this.device.metal());
-				RenderPipeline selected = metadata == null ? baseline : geometry.waterPipeline(baseline).orElse(baseline);
+				RenderPipeline selected = metadata == null ? baseline : geometry.waterPipeline(baseline, opaqueInputs.isPresent()).orElse(baseline);
 				if (selected != this.originalPipeline) this.setPipeline(selected);
 				if (selected != baseline) {
 					try (GpuBufferSlice.MappedView mapping = this.device.createCommandEncoder().transientMemory()
@@ -373,9 +374,11 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 							.putInt(WaterRoutingDebug.mode().gpuValue).putInt(0);
 						this.device.linearWorldSession().recordWaterDraw();
 						this.encodeUniformBuffer(13, this.device.linearWorldSession().waterFrameBuffer(), 0, MetalRenderPass.STAGE_VERTEX | MetalRenderPass.STAGE_FRAGMENT);
-						var opaque = this.device.opaqueWaterInputs().orElseThrow();
-						this.encodeTexture(12, opaque.color().metal(), MetalRenderPass.STAGE_FRAGMENT);
-						this.encodeTexture(13, opaque.depth().metal(), MetalRenderPass.STAGE_FRAGMENT);
+						if (opaqueInputs.isPresent()) {
+							var opaque = opaqueInputs.get();
+							this.encodeTexture(12, opaque.color().metal(), MetalRenderPass.STAGE_FRAGMENT);
+							this.encodeTexture(13, opaque.depth().metal(), MetalRenderPass.STAGE_FRAGMENT);
+						}
 						this.encodeUniformBuffer(14, metadata, 0, MetalRenderPass.STAGE_VERTEX);
 						this.encodeUniformBuffer(15, this.device.nativeBuffer(mapping.slice().buffer()), mapping.slice().offset(),
 							MetalRenderPass.STAGE_VERTEX | MetalRenderPass.STAGE_FRAGMENT);

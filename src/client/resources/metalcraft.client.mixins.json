@@ -38,6 +38,8 @@
     "WindowFramebufferAccessor",
     "WindowRenderResolutionMixin",
     "LevelRendererShadowMixin",
+    "RenderSectionShadowRevisionMixin",
+    "MinecraftShadowLifecycleMixin",
     "LevelExtractorLocalLightingMixin",
     "LevelRendererSkyMixin",
     "SkyRendererStarsInvoker",

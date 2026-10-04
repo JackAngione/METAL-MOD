@@ -10,6 +10,7 @@ import org.joml.Vector3d;
 import org.joml.Vector3dc;
 import org.joml.Vector3f;
 import org.joml.Vector3fc;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Fits sun-shadow cascades without depending on Minecraft or owning GPU resources.
@@ -41,10 +42,44 @@ public final class ShadowCascades {
 	public record Cascade(float near, float far, float texelSize, Matrix4fc cameraRelativeToShadow) {
 	}
 
+	/**
+	 * Transport the texel-grid phase using camera translation only. Reprojecting an absolute
+	 * world origin through a rotating sun basis sweeps nearby geometry across the grid even
+	 * when the camera is still (the error grows with distance from world origin).
+	 */
+	public static final class Stabilization {
+		private final Vector3d previousCamera = new Vector3d();
+		private double phaseX, phaseY;
+		private boolean initialized;
+
+		private void update(final Vector3dc camera, final Vector3fc right, final Vector3fc up) {
+			if (this.initialized) {
+				double x = camera.x() - this.previousCamera.x, y = camera.y() - this.previousCamera.y,
+					z = camera.z() - this.previousCamera.z;
+				this.phaseX += x * right.x() + y * right.y() + z * right.z();
+				this.phaseY += x * up.x() + y * up.y() + z * up.z();
+			}
+			this.previousCamera.set(camera);
+			this.initialized = true;
+		}
+
+		public void reset() {
+			this.initialized = false;
+			this.phaseX = this.phaseY = 0;
+		}
+	}
+
 	/** Returns cascades in increasing positive view-depth order. No jitter enters this calculation. */
 	public static List<Cascade> fit(final Settings settings, final Vector3dc cameraPosition,
 		final Quaternionfc cameraRotation, final float verticalFovRadians, final float aspect,
 		final Vector3fc directionToSun) {
+		return fit(settings, cameraPosition, cameraRotation, verticalFovRadians, aspect, directionToSun, null);
+	}
+
+	/** Live maps retain one stabilization state for their world; null retains absolute-grid fitting. */
+	public static List<Cascade> fit(final Settings settings, final Vector3dc cameraPosition,
+		final Quaternionfc cameraRotation, final float verticalFovRadians, final float aspect,
+		final Vector3fc directionToSun, final @Nullable Stabilization stabilization) {
 		if (!cameraPosition.isFinite() || !Float.isFinite(verticalFovRadians)
 			|| verticalFovRadians <= 0 || verticalFovRadians >= Math.PI
 			|| !Float.isFinite(aspect) || aspect <= 0 || !directionToSun.isFinite()
@@ -58,10 +93,14 @@ public final class ShadowCascades {
 		rotation.normalize();
 		Vector3f forward = rotation.transform(new Vector3f(0, 0, -1));
 		Vector3f sun = new Vector3f(directionToSun).normalize();
-		// Avoid a degenerate basis at noon, when the sun is parallel to world up.
-		Vector3f reference = Math.abs(sun.y) > 0.99F ? new Vector3f(0, 0, 1) : new Vector3f(0, 1, 0);
-		Vector3f right = reference.cross(sun).normalize();
+		// The celestial orbit lies in XY. Project its Z axis onto the light plane so the
+		// grid never flips axes near noon. Retain a fallback for arbitrary non-celestial lights.
+		Vector3f reference = Math.abs(sun.z) > 0.99F ? new Vector3f(0, 1, 0) : new Vector3f(0, 0, 1);
+		Vector3f right = reference.fma(-reference.dot(sun), sun).normalize();
 		Vector3f up = new Vector3f(sun).cross(right).normalize();
+		if (stabilization != null) stabilization.update(cameraPosition, right, up);
+		double originX = stabilization == null ? dot(cameraPosition, right) : stabilization.phaseX;
+		double originY = stabilization == null ? dot(cameraPosition, up) : stabilization.phaseY;
 		double tanHalfFov = Math.tan(verticalFovRadians * 0.5);
 		double diagonal = tanHalfFov * tanHalfFov * (1.0 + (double)aspect * aspect);
 		List<Cascade> result = new ArrayList<>(settings.count());
@@ -85,8 +124,8 @@ public final class ShadowCascades {
 			double extent = radius * settings.resolution() / (settings.resolution() - 2.0);
 			double texel = 2.0 * extent / settings.resolution();
 			Vector3d center = new Vector3d(forward).mul(middle);
-			double centerX = snappedRelativeCenter(cameraPosition, center, right, texel);
-			double centerY = snappedRelativeCenter(cameraPosition, center, up, texel);
+			double centerX = snappedRelativeCenter(originX, center, right, texel);
+			double centerY = snappedRelativeCenter(originY, center, up, texel);
 			double centerZ = dot(center, sun);
 			double depthRange = 2.0 * radius + settings.casterExtension();
 			Matrix4f matrix = new Matrix4f()
@@ -103,9 +142,8 @@ public final class ShadowCascades {
 		return List.copyOf(result);
 	}
 
-	private static double snappedRelativeCenter(final Vector3dc camera, final Vector3dc center,
+	private static double snappedRelativeCenter(final double origin, final Vector3dc center,
 		final Vector3fc axis, final double texel) {
-		double origin = dot(camera, axis);
 		return Math.rint((origin + dot(center, axis)) / texel) * texel - origin;
 	}
 

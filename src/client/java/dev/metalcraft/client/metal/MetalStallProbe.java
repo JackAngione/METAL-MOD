@@ -169,7 +169,11 @@ public final class MetalStallProbe {
 		 */
 		JVM_GC,
 		/** Loaded-terrain selection and bounded uploads before dispatcher locking. */
-		LOD_PREPARE;
+		LOD_PREPARE,
+		/** CPU collection and submission of terrain shadows, not GPU execution time. */
+		SHADOW_RENDER,
+		/** CPU local-light scene preparation and uploads. */
+		LOCAL_LIGHT_PREPARE;
 
 		static final Source[] VALUES = values();
 

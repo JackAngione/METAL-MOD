@@ -8,4 +8,6 @@ package dev.metalcraft.client.metal;
 @FunctionalInterface
 public interface WorldUniformCapture {
 	void capture(String name, java.nio.ByteBuffer bytes);
+	/** A declined capture must not map shared GPU storage just to discard the bytes. */
+	default boolean needed() { return true; }
 }

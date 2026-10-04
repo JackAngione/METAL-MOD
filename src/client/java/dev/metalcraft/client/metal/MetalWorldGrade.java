@@ -8,6 +8,7 @@ import java.util.List;
 
 /** Owns the optional world-depth snapshot and the grade-to-main copy at the world seam. */
 final class MetalWorldGrade implements AutoCloseable {
+    private static final boolean BASELINE_PROBE = Boolean.getBoolean("metalcraft.baselineLightingBenchmark");
 	private MetalTexture depth;
 	private MetalTextureView depthView;
 	private MetalRenderPipeline copy;
@@ -42,7 +43,7 @@ final class MetalWorldGrade implements AutoCloseable {
 		if (readsDepth) {
 			commands.copyTexture(worldDepth.attachment(), this.depth, 0, 0, 0, 0, 0, width, height);
 		}
-		if (!executor.encode(commands, WorldComposition.world(
+		if (!(BASELINE_PROBE && Boolean.getBoolean("metalcraft.baselineSkipGrade")) && !executor.encode(commands, WorldComposition.world(
 			scene.attachment(), scene.metal(), width, height, this.depth, this.depthView, null, encoding).withUnderwater(underwater))) {
 			throw new IllegalStateException("World grade inputs are unavailable");
 		}

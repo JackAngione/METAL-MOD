@@ -413,10 +413,13 @@ public final class ShaderPackRuntime implements AutoCloseable {
 					Boolean.TRUE.equals(this.optionValueUnchecked("wind_enabled"))
 						&& ((Number)this.optionValueUnchecked("wind_strength")).floatValue() > 0
 						? "#define MC_OPTION_WIND_STRENGTH " + this.optionValueUnchecked("wind_strength") + "\n"
-							+ this.pack.metalSources().get("shared/wind.metal") : "");
+							+ this.pack.metalSources().get("shared/wind.metal") : "",
+					((Number)this.optionValueUnchecked("distant_shadow_distance")).floatValue());
 				this.worldGeometry.setShadowFrameSupplier(
 					() -> this.worldShadows == null ? null : this.worldShadows.currentFrame()
 				);
+				this.worldGeometry.setDistantShadowFrameSupplier(
+					() -> this.worldShadows == null ? null : this.worldShadows.currentDistantFrame());
 			}
 		} catch (IOException | RuntimeException error) {
 			throw new IllegalStateException("Could not build world geometry adapter: " + error.getMessage(), error);

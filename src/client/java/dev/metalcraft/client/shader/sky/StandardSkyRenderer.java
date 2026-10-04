@@ -16,6 +16,7 @@ import org.jspecify.annotations.Nullable;
 
 /** Standard's linear sky and premultiplied cloud layer, before any terrain draws. */
 public final class StandardSkyRenderer implements AutoCloseable {
+    private static final boolean BASELINE_PROBE = Boolean.getBoolean("metalcraft.baselineLightingBenchmark");
     private final MetalDevice device;
     private final MetalRenderPipeline atmosphere;
     private final MetalRenderPipeline celestials;
@@ -91,6 +92,10 @@ public final class StandardSkyRenderer implements AutoCloseable {
             throw new IllegalStateException("Standard sky requires an active linear Metal world");
         }
         MetalTexture scene = session.hdrColor().attachment();
+        if (BASELINE_PROBE && Boolean.getBoolean("metalcraft.baselineSkipSky")) {
+            this.renderedSession = session;
+            return;
+        }
         // A fresh immutable buffer is pinned by the command buffer; no in-flight uniform overwrite.
         try (MetalBuffer frame = this.device.createBuffer(SkyFrameInputs.UNIFORM_BYTES, MetalBuffer.StorageMode.SHARED)) {
             try (var mapping = frame.map()) { inputs.write(mapping.bytes()); }

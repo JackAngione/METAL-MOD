@@ -12,12 +12,19 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /** Runs terrain shadows in the main graph pass, immediately before its opaque terrain draws. */
 @Mixin(LevelRenderer.class)
 abstract class LevelRendererShadowMixin {
 	@Shadow @Final private LevelRenderState levelRenderState;
 	@Shadow private ViewArea viewArea;
+
+	@Inject(method = {"resetLevelRenderData", "invalidateCompiledGeometry", "close"}, at = @At("HEAD"))
+	private void metalcraft$discardOldShadowScene(CallbackInfo callback) {
+		WorldTerrainShadows.clearWorldCache();
+	}
 
 	@Redirect(method = "lambda$addMainPass$0", at = @At(value = "INVOKE",
 		target = "Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;renderGroup("

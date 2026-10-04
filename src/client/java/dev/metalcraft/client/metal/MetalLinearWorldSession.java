@@ -59,6 +59,10 @@ public final class MetalLinearWorldSession implements AutoCloseable {
 	private @Nullable MetalBuffer waterFrameBuffer;
 	private float windAnimationSeconds;
 	private int waterDraws;
+	private boolean preparedWater;
+	/** Called as native and LOD translucent draws receive their immutable water metadata. */
+	public void prepareWaterDraw() { this.requireOpen(); this.preparedWater = true; }
+	boolean hasPreparedWater() { return this.preparedWater; }
 	void recordWaterDraw() { this.waterDraws++; }
 	int waterDraws() { return this.waterDraws; }
 	private boolean closed;
