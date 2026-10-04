@@ -108,7 +108,13 @@ struct GBufferTargets {
 };
 
 struct GBufferVaryings {
+#ifdef MC_PROGRAM_TERRAIN
+    // Grass-block sides have coplanar SOLID dirt and CUTOUT tinted overlays.
+    // Zero-weight vertices must land at identical depth in wind/plain variants.
+    float4 position [[position, invariant]];
+#else
     float4 position [[position]];
+#endif
 	/// Camera-view space. Keeping positions and normals in the same space lets the resolve rebuild
 	/// a shadow lookup from screen position plus the packed linear depth.
     float3 worldPos;

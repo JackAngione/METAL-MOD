@@ -46,6 +46,10 @@ final class WindSmoke {
             geometry.beginFrame(FrameBindings.ColorEncoding.LINEAR_SRGB);
             check(geometry.windPipeline(original).orElseThrow() == wind, "wind pipeline cache survives HDR transitions");
             var pipeline = compiled.metal(false, MetalTexture.Format.RGBA16_FLOAT);
+            var solidWind = geometry.windPipeline(ChunkSectionLayer.SOLID.pipeline()).orElseThrow();
+            var solid = ((MetalCompiledRenderPipeline)gpu.precompileLinearWorldPipeline(solidWind,null))
+                .metal(false,MetalTexture.Format.RGBA16_FLOAT);
+            WindOverlayDepthSmoke.run(gpu.metal(), solid.descriptor(), pipeline.descriptor());
             boolean[] still = render(gpu.metal(), pipeline, 0, 0);
             check(Arrays.equals(still, render(gpu.metal(), pipeline, 0, 2)), "unrelated blocks remain still");
             boolean[] leaves = render(gpu.metal(), pipeline, -1, 0);

@@ -58,6 +58,14 @@ final class MetalWindGameTest {
                 s.getGameRules().set(GameRules.BLOCK_DROPS, false, s);
             });
             command(context, "gamemode spectator @a");
+            if (Boolean.getBoolean("metalcraft.windRecordingTest")) {
+                recordingScene(context);
+                return;
+            }
+            if (Boolean.getBoolean("metalcraft.windGrassBlockTest")) {
+                grassBlockOverlay(context);
+                return;
+            }
             command(context, "tp @a 8 204 12 147 15");
             command(context, "time set 3000"); command(context, "weather clear");
             command(context, "fill -10 201 -8 10 212 8 air");
@@ -172,6 +180,125 @@ final class MetalWindGameTest {
             System.out.println("Wind receiver speckling: " + noisy + "/" + samples);
             check(samples>8000 && noisy<samples/100, "wind-deformed leaf face must not self-shadow with pixel noise");
         } catch(java.io.IOException e) { throw new AssertionError(e); }
+    }
+    private static void grassBlockOverlay(ClientGameTestContext context) {
+        command(context,"time set 3000"); command(context,"weather clear");
+        command(context,"fill -10 201 -8 10 212 8 air");
+        command(context,"fill -10 200 -8 10 200 8 grass_block");
+        command(context,"fill -4 201 5 4 205 5 grass_block");
+        // Hidden plants share both grass-block CUTOUT meshes. Their presence must
+        // never change the stationary tinted overlay on the wall in front.
+        command(context,"fill -4 201 3 4 201 3 short_grass");
+        command(context,"tp @a 0.375 201.25 11.125 175 5");
+        context.runOnClient(c -> {
+            check(WindVertexMetadata.kind(Blocks.GRASS_BLOCK.defaultBlockState()) == WindVertexMetadata.NONE,
+                "grass blocks are excluded from wind");
+            ShaderPackRuntime.active().setOption("debug_view",System.getProperty("metalcraft.windGrassBlockDebug","off"));
+        });
+        context.waitTicks(30);
+        context.runOnClient(c -> check(c.levelRenderer.visibleSections().stream().anyMatch(section ->
+            section.getRenderOrigin().equals(new net.minecraft.core.BlockPos(0,192,0))
+                && section.getSectionMesh() instanceof WindMeshSource source
+                && source.metalcraft$windMesh(ChunkSectionLayer.CUTOUT)!=null),
+            "grass-block overlays share a wind-enabled mesh with plants"));
+        int total=0;
+        for (int turn=0;turn<3;turn++) {
+            context.getInput().lookAt(175+turn*2.125F,5+turn*.375F);
+            context.runOnClient(c -> ShaderPackRuntime.active().setOption("wind_enabled",false));
+            context.waitTicks(5);
+            Path off=capture(context,"grass-block-off-"+turn);
+            if (turn==0) context.runOnClient(MetalWindGameTest::checkGrassBlockWeights);
+            context.runOnClient(c -> ShaderPackRuntime.active().setOption("wind_enabled",true));
+            context.waitTicks(5);
+            Path on=capture(context,"grass-block-on-"+turn);
+            int changed=grassBlockDifferences(off,on);
+            System.out.println("Grass-block overlay wind toggle: camera="+turn+", changedPixels="+changed);
+            total+=changed;
+        }
+        check(total==0,"wind changes the grass-block surface: "+total+" pixels");
+    }
+
+    private static void recordingScene(ClientGameTestContext context) {
+        command(context,"tp @a 70.895 66 75.867 14.1 5.7");
+        context.getInput().lookAt(14.1F,5.7F);
+        // The recorded close-up exposes coplanar depth differences that the
+        // distant artificial wall did not. Albedo isolates these from real
+        // moving foliage shadows; the lower foreground contains grass blocks only.
+        context.runOnClient(c -> ShaderPackRuntime.active().setOption("debug_view","albedo"));
+        context.waitTicks(40);
+        for (int turn=0;turn<3;turn++) {
+            context.getInput().lookAt(14.1F+turn*.5F,5.7F+turn*.75F);
+            context.runOnClient(c -> ShaderPackRuntime.active().setOption("wind_enabled",false));
+            context.waitTicks(5);
+            Path off=capture(context,"recording-off-"+turn);
+            context.runOnClient(c -> ShaderPackRuntime.active().setOption("wind_enabled",true));
+            context.waitTicks(5);
+            Path on=capture(context,"recording-on-"+turn);
+            int changed=regionDifferences(off,on,.15F,.86F,.65F,.95F);
+            System.out.println("Recorded grass-block view: camera="+turn+", changedPixels="+changed);
+            check(changed==0,"wind changes the grass-block overlay in the recorded view: "+changed);
+        }
+        context.runOnClient(c -> ShaderPackRuntime.active().setOption("debug_view","off"));
+        context.waitTicks(5);
+        capture(context,"recording-shaded");
+        context.runOnClient(c -> MetalFrameMetrics.beginCapture(4));
+        context.waitTicks(20);
+        var timing=context.computeOnClient(c -> MetalFrameMetrics.endCapture("recorded-wind-4k"));
+        System.out.println("Recorded wind 4K GPU frame timing smoke: medianMs="+timing.gpuFrame().p50Ms());
+    }
+
+    private static void checkGrassBlockWeights(net.minecraft.client.Minecraft client) {
+        var gpu=dev.metalcraft.client.metal.MetalGpuDevices.current();
+        var dispatcher=client.levelRenderer.sectionRenderDispatcher();
+        var section=client.levelRenderer.visibleSections().stream().filter(candidate ->
+            candidate.getRenderOrigin().equals(new net.minecraft.core.BlockPos(0,192,0))).findFirst().orElseThrow();
+        dispatcher.lock();
+        try {
+            var mesh=section.getSectionMesh();
+            var binding=((WindMeshSource)mesh).metalcraft$windMesh(ChunkSectionLayer.CUTOUT);
+            check(binding!=null,"mixed grass-block/plant mesh has metadata");
+            var slice=dispatcher.getRenderSectionSlice(mesh,ChunkSectionLayer.CUTOUT);
+            int stride=ChunkSectionLayer.CUTOUT.vertexFormat().getVertexSize();
+            try(var queue=gpu.metal().createCommandQueue();
+                var vertices=gpu.metal().createBuffer((long)binding.vertexCount()*stride,
+                    dev.metalcraft.client.metal.MetalBuffer.StorageMode.SHARED)) {
+                try(var commands=queue.createCommandBuffer()) {
+                    commands.copyBuffer(gpu.nativeBuffer(slice.vertexBuffer()),slice.vertexBufferOffset(),vertices,0,vertices.size());
+                    commands.commitAndWait();
+                }
+                int staticVertices=0, animatedVertices=0;
+                try(var positions=vertices.map();var metadata=binding.upload(gpu.metal()).map()) {
+                    for(int vertex=0;vertex<binding.vertexCount();vertex++) {
+                        float x=positions.bytes().getFloat(vertex*stride);
+                        float y=positions.bytes().getFloat(vertex*stride+4);
+                        float z=positions.bytes().getFloat(vertex*stride+8);
+                        float weight=metadata.bytes().getFloat(vertex*4);
+                        if(x>=0 && x<=5 && y>=9 && y<=14 && z>=5 && z<=6) {
+                            check(weight==0,"grass-block vertex has wind weight "+weight);
+                            staticVertices++;
+                        }
+                        if(weight!=0) animatedVertices++;
+                    }
+                }
+                check(staticVertices>=40 && animatedVertices>0,"fixture includes static grass overlays and animated plants");
+                System.out.println("Grass-block mesh: zero-weight vertices="+staticVertices+", animated plant vertices="+animatedVertices);
+            }
+        } finally { dispatcher.unlock(); }
+    }
+
+    private static int grassBlockDifferences(Path first,Path second) {
+        return regionDifferences(first,second,.4F,.4F,.6F,.6F);
+    }
+
+    private static int regionDifferences(Path first,Path second,float left,float top,float right,float bottom) {
+        try(var a=NativeImage.read(Files.newInputStream(first));var b=NativeImage.read(Files.newInputStream(second))) {
+            int changed=0;
+            for(int y=(int)(a.getHeight()*top);y<(int)(a.getHeight()*bottom);y++) for(int x=(int)(a.getWidth()*left);x<(int)(a.getWidth()*right);x++) {
+                int p=a.getPixel(x,y),q=b.getPixel(x,y);
+                if(Math.abs((p&255)-(q&255))+Math.abs((p>>>8&255)-(q>>>8&255))+Math.abs((p>>>16&255)-(q>>>16&255))>3) changed++;
+            }
+            return changed;
+        }catch(java.io.IOException e){throw new AssertionError(e);}
     }
     private static void command(ClientGameTestContext context,String text) {
         server(context,s -> s.getCommands().performPrefixedCommand(s.createCommandSourceStack(),text));

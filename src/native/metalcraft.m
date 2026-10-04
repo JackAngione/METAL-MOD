@@ -109,7 +109,12 @@ static MCLibraryEntry *mc_cached_library(id<MTLDevice> device, NSString *source,
     @synchronized(cache) {
         MCLibraryEntry *entry = [cache->libraries objectForKey:source];
         if (entry != nil) { cache->libraryHits++; return entry; }
-        id<MTLLibrary> library = [device newLibraryWithSource:source options:nil error:error];
+        // Honour [[invariant]] position outputs across shader variants. Coplanar
+        // block overlays must compare at exactly the same depth when their mesh
+        // shares the wind pipeline with plants. Unmarked shaders keep fast math.
+        MTLCompileOptions *options = [[MTLCompileOptions alloc] init];
+        options.preserveInvariance = YES;
+        id<MTLLibrary> library = [device newLibraryWithSource:source options:options error:error];
         if (library == nil) return nil;
         entry = [[MCLibraryEntry alloc] init];
         entry.library = library;
