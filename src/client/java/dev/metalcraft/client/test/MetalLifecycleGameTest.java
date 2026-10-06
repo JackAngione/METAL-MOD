@@ -71,6 +71,14 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	}
 
 	private void runConfiguredTest(final ClientGameTestContext context) {
+		if (Boolean.getBoolean("metalcraft.postEffectsTest")) {
+			MetalPostEffectsGameTest.run(context);
+			return;
+		}
+		if (Boolean.getBoolean("metalcraft.colorGradingTest")) {
+			MetalColorGradingGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.baselineLightingBenchmark")) {
 			BaselineLightingBenchmark.run(context);
 			return;

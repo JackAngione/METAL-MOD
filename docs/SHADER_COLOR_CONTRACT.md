@@ -12,8 +12,28 @@ uses linear RGBA16_FLOAT with one world-only grade before hand/HUD. GGX remains 
 | Lightmap | `Lightmap` allocates `RGBA8_UNORM`; `assets/minecraft/shaders/core/lightmap.fsh` combines sky/block/ambient/night vision, clamps, and mixes in `notGamma` using `BrightnessFactor` | This is a bounded, brightness-adjusted artistic multiplier. It is neither isolated sunlight nor a known sRGB encoding of radiance. Applying an sRGB decoder to this multiplier is not a justified physical conversion. |
 | Geometry | Vanilla `terrain.fsh` multiplies sampled color by vertex color, then applies visibility fade and fog. Standard `gbuffer.metal` similarly multiplies atlas, tint and lightmap, then writes fogged `scene` | Live linear variants decode that completed compatibility seed (`mc_scene_seed`) before fade/fog. Lightmap/cardinal lighting remain artistic multipliers, not physical illuminance. GGX is separate. |
 | World target | Live HDR session identity-routes main color/depth to stored RGBA16_FLOAT / DEPTH32_FLOAT; encoded `MainTarget` remains the hand/HUD/present attachment | Values above 1 survive world composition. Grade writes encoded bytes into the original UNORM main color. |
-| Grade | Linear `MC_SCENE_LINEAR_HDR` Standard grade applies exposure/optional ACES then sRGB encode once at the world seam | Hand/HUD composite after that encode. Default exposure 1 / tonemap none preserves the linear seed's encoded appearance. |
+| Grade | Linear `MC_SCENE_LINEAR_HDR` Standard grade applies exposure, white balance, shadows/highlights, contrast, saturation/vibrance, optional ACES or Reinhard tone mapping, then gamma and one sRGB encode at the world seam | Hand/HUD composite after that encode. Neutral control defaults, exposure 1 and tonemap none preserve the linear seed's encoded appearance. Controls update uniforms in the existing pass. |
 | Present | `mc_presentation_pipeline` returns the linearly filtered source sample; `MCMetalSurface` selects `BGRA8Unorm` and explicitly assigns `kCGColorSpaceSRGB` | Neither the fragment program nor the pixel format performs another sRGB transfer. The layer tells the compositor to interpret the already encoded bytes as sRGB. Live window captures of the water identity fixture confirm ungraded HUD over a graded world. |
+
+Standard's optional bloom and depth of field prepare linear color in quarter-size
+RGBA16_FLOAT targets before the grade. Bloom extracts bright radiance and blurs it;
+depth of field derives signed blur amounts from the actual world projection and a
+GPU center-depth focus sample. Their results enter the grade before exposure and
+tone mapping. Film grain adds zero-mean monochrome noise after the display transfer.
+All three effects exclude hand/HUD and bypass scene debug. Off skips preparation
+and releases effect textures; only enabled depth of field requests a world-depth
+snapshot. The legacy encoded fallback explicitly decodes and re-encodes spatial
+effects while preserving its existing grading/tone-mapping domain.
+
+The DOF focus band extends toward the camera by `max(6, 0.6 * focus)` blocks
+and behind the subject by `max(12, 1.25 * focus)` blocks. Outside it, blur grows
+gradually, with tier caps of 4/8/12 full-resolution pixels and 25%/50%/75% blend.
+The signed focus error is independent of tier so depth rejection stays consistent.
+Film grain uses two-pixel cells at 2160p and encoded peak-to-peak amplitudes of
+0.07/0.14/0.21 before luminance modulation. Bloom begins its soft threshold at
+0.06 linear luminance, with a 0.12 core threshold and 0.6/1.1/1.8 additive gains.
+Dense Gaussian kernels with sigma 3/5/8 quarter-resolution texels use paired
+bilinear taps, preserving a smooth halo without extra passes or per-pixel exponentials.
 
 Mapped sources are in the project's Loom `minecraft-clientOnly-043a8b3edf-26.2-sources.jar`;
 vanilla GLSL is in the cached 26.2 client jar. Backend evidence is in

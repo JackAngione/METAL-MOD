@@ -45,7 +45,7 @@ final class HdrCompositionSmoke {
 			 var scene = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA16_FLOAT, 8, 1, 1));
 			 var output = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.BGRA8_UNORM, 8, 1, 1));
 			 var sceneView = scene.createView();
-			 var options = device.createBuffer(16, MetalBuffer.StorageMode.SHARED);
+			 var options = device.createBuffer(60, MetalBuffer.StorageMode.SHARED);
 			 var sampler = device.createSampler(new MetalSampler.Descriptor(MetalSampler.Filter.NEAREST,
 				MetalSampler.Filter.NEAREST, MetalSampler.AddressMode.CLAMP_TO_EDGE));
 			 var opaque = pipeline(device, source, "vs", "opaque", MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.RGBA16_FLOAT));
@@ -75,14 +75,18 @@ final class HdrCompositionSmoke {
 			for (boolean invert : new boolean[]{false, true}) {
 				String gradeSource = "#define MC_PASS_GRADE 1\n#define MC_SCENE_LINEAR_HDR 1\n#define MC_TEX_SCENE 0\n"
 					+ "#define MC_OPTION_INVERT " + (invert ? 1 : 0) + "\n" + resource("shared/options.metal")
-					+ resource("grade.metal").replace("#include \"shared/color.metal\"", color);
+					+ resource("grade.metal").replace("#include \"shared/color.metal\"", color)
+						.replace("#include \"shared/post_effects.metal\"", resource("shared/post_effects.metal"));
 				try (var grade = pipeline(device, gradeSource, "grade_vertex", "grade_fragment",
 					MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.BGRA8_UNORM))) {
 					for (int tonemap : new int[]{0, 1}) {
 						for (float exposure : new float[]{0.5F, 1.0F, 2.0F}) {
 							try (var mapping = options.map()) {
 								mapping.bytes().order(ByteOrder.nativeOrder()).putFloat(0, exposure)
-									.putInt(4, tonemap).putInt(8, 0).putFloat(12, 1);
+									.putInt(4, tonemap).putInt(8, 0).putFloat(12, 1)
+									.putFloat(16, 0).putFloat(20, 0).putFloat(24, 1).putFloat(28, 1)
+									.putFloat(32, 0).putFloat(36, 1).putFloat(40, 0).putFloat(44, 0)
+									.putInt(48, 0).putInt(52, 0).putInt(56, 0);
 							}
 							try (var commands = queue.createCommandBuffer()) {
 								try (var pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(

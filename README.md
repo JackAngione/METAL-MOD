@@ -135,6 +135,51 @@ short existing-standard-world check uses `-PmetalLifecycleTest` and
 `-PmetalJvmArgs='-Xmx8G -Dmetalcraft.windTest=true'` with `runClient` and the default
 graphics backend, at 16 render / 16 simulation distance.
 
+Standard's **Video Settings → MetalCraft Settings → Shader Packs → Color Grading**
+submenu offers exposure, white balance (temperature and tint), contrast,
+saturation, vibrance, gamma, highlights and shadows. Tone mapping offers Off,
+ACES and Reinhard. Changes apply immediately and persist with the selected pack;
+**Reset Color Grading** restores the neutral defaults while retaining other shader
+settings. Invert is available under Debug. The default grade preserves Standard's
+existing appearance. Grading uses the existing Metal world post-processing pass,
+before the hand and HUD.
+
+The same menu's **Effects** group has **Film grain**, **Bloom**, and **Depth of
+field** sliders with **Off / Low / Medium / High** strength. They start Off,
+apply immediately, save with the pack, and participate in Reset Color Grading.
+Film grain adds visible animated monochrome noise with two-pixel grains at 4K.
+Bloom spreads ordinary bright highlights into soft halos. Depth of field focuses
+on the center of the view with a broad sharp range: at an eight-block focus,
+scenery from two to twenty blocks remains sharp. Outside that range, Low/Medium/High
+limit blur radii to 4/8/12 pixels and blend at most 25%/50%/75% blurred color, retaining
+scene detail. Hand and HUD remain sharp. Transparent surfaces
+that do not write depth use the scenery behind them for focus.
+
+Bloom and depth-of-field preparation use quarter-resolution Metal textures;
+autofocus reads depth on the GPU. Turning an effect Off skips its preparation
+passes and releases its extra textures. With depth of field Off, Standard skips
+the world-depth snapshot. The default all-Off configuration retains the original
+grading path without additional fullscreen passes or render targets.
+
+`./gradlew build` includes native Metal grading/readback and settings-persistence
+checks. A short visual/performance check reuses a disposable copy of a standard
+world, verifies an actual 3840×2160 world target, reports drawable dimensions
+separately, and uses 16 render / 16 simulation distance:
+
+```bash
+./gradlew runClient -PmetalLifecycleTest -PmetalColorGradingTest=true \
+  '-PmetalColorGradingTestWorld=YOUR_DISPOSABLE_STANDARD_SAVE_COPY' \
+  -PmetalJvmArgs=-Xmx8G --args='--graphicsBackend default'
+```
+
+Use `-PmetalPostEffectsTest=true` and
+`-PmetalPostEffectsTestWorld=YOUR_DISPOSABLE_STANDARD_SAVE_COPY` instead of the two
+color-grading properties to exercise the effect sliders, grain animation, bloom,
+depth of field, autofocus, GUI exclusion and brief frame timing. This route makes
+a test copy of the supplied save and waits for nearby terrain to settle.
+`./gradlew postEffectsSmoke` runs the focused Metal strength, focus-range, halo
+smoothness, and resource-lifecycle checks without launching Minecraft.
+
 ## Shader add-on pathway
 
 Shader add-ons should stay inside Blaze3D instead of issuing raw OpenGL, Vulkan, or Metal calls. Backend-neutral pipelines use the active Metal device while remaining compatible with Minecraft's OpenGL recovery path.

@@ -259,6 +259,15 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		return this.linearWorldSession;
 	}
 
+	private org.joml.@Nullable Matrix4f worldPostProjection;
+
+	/** Captured final world raster projection, retained through the pre-hand grade seam. */
+	public void captureWorldPostProjection(final org.joml.@Nullable Matrix4fc projection) {
+		this.worldPostProjection = projection == null ? null : new org.joml.Matrix4f(projection);
+	}
+
+	org.joml.@Nullable Matrix4fc worldPostProjection() { return this.worldPostProjection; }
+
 	/** Capture once after opaque resolve and before forward features change world attachments. */
 	public void captureOpaqueWaterInputs() {
 		MetalLinearWorldSession session = this.linearWorldSession;

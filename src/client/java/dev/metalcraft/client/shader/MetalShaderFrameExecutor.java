@@ -34,6 +34,10 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 	private final List<ExecutablePass> passes;
 	private final boolean readsDepth;
 	private final boolean supportsLinearScene;
+	private final MetalDevice device;
+	private final @Nullable StandardPostEffects postEffects;
+	private @Nullable UniformRing postUniforms;
+	private int animationFrame;
 	private @Nullable MetalTexture boundScene;
 	private @Nullable MetalTextureView boundSceneView;
 	private @Nullable MetalTexture boundOutput;
@@ -44,7 +48,9 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		ShaderGraphCompiler.CompiledPass compiled,
 		@Nullable MetalRenderPipeline render,
 		@Nullable MetalComputePipeline compute,
-		@Nullable MetalRenderPipeline linearRender
+		@Nullable MetalRenderPipeline linearRender,
+		@Nullable MetalRenderPipeline dofRender,
+		@Nullable MetalRenderPipeline linearDofRender
 	) implements AutoCloseable {
 		ShaderPack.Pass declaration() {
 			return this.compiled.declaration();
@@ -56,6 +62,8 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 				this.render.close();
 			}
 			if (this.linearRender != null) this.linearRender.close();
+			if (this.dofRender != null) this.dofRender.close();
+			if (this.linearDofRender != null) this.linearDofRender.close();
 			if (this.compute != null) {
 				this.compute.close();
 			}
@@ -72,6 +80,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		Objects.requireNonNull(graph, "graph");
 		this.allocator = Objects.requireNonNull(allocator, "allocator");
 		this.supportsLinearScene = ShaderPackRuntime.BUILTIN_ID.equals(pack.id());
+		this.device = device;
 		this.optionValue = Objects.requireNonNull(optionValue, "optionValue");
 		this.uniformOptions = pack.manifest().options().stream()
 			.filter(option -> option.apply() == ShaderPack.ApplyMode.UNIFORM)
@@ -80,6 +89,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		MetalSampler unfilteredSampler = null;
 		UniformRing uniformRing = null;
 		UniformRing underwaterRing = null;
+		StandardPostEffects effects = null;
 		List<ExecutablePass> compiled = new ArrayList<>();
 		boolean needsDepth = false;
 		try {
@@ -110,7 +120,9 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 					compiled.add(compilePass(device, pack, pass, values));
 				}
 			}
+			if (this.supportsLinearScene) effects = new StandardPostEffects(device, pack);
 		} catch (RuntimeException | ShaderPackLoader.LoadException error) {
+			if (effects != null) effects.close();
 			compiled.forEach(ExecutablePass::close);
 			if (underwaterRing != null) underwaterRing.close();
 			if (uniformRing != null) {
@@ -130,12 +142,20 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		this.underwaterUniforms = underwaterRing;
 		this.passes = List.copyOf(compiled);
 		this.readsDepth = needsDepth;
+		this.postEffects = effects;
 	}
 
 	@Override
 	public boolean requiresWorldDepth() {
 		this.requireOpen();
-		return this.readsDepth;
+		return this.readsDepth || (this.postEffects != null && this.level("depth_of_field") > 0
+			&& this.level("debug_view") != 1);
+	}
+
+	private int level(final String option) {
+		Object value = this.optionValue.apply(option);
+		return value instanceof Number number ? number.intValue()
+			: "scene".equals(value) ? 1 : 0;
 	}
 
 	@Override
@@ -181,15 +201,38 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			(bindings.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB
 				? bindings.underwater() : dev.metalcraft.client.shader.water.UnderwaterFrameInputs.NONE).write(bytes);
 		});
+		boolean effectsEnabled = this.postEffects != null && this.level("debug_view") != 1;
+		boolean dof = effectsEnabled && this.level("depth_of_field") > 0
+			&& bindings.worldDepthView() != null && bindings.worldProjection() != null
+			&& bindings.worldProjection().isFinite();
+		UniformBinding postFrame = underwater;
+		boolean needsPostFrame = effectsEnabled && (this.level("film_grain") > 0 || dof);
+		if (needsPostFrame) {
+			if (this.postUniforms == null) this.postUniforms = new UniformRing(this.device, 32);
+			postFrame = this.postUniforms.write(bytes -> {
+				bytes.clear();
+				var projection = bindings.worldProjection();
+				bytes.putFloat(projection == null ? 0 : projection.m22());
+				bytes.putFloat(projection == null ? 0 : projection.m32());
+				bytes.putFloat(projection == null ? 0 : projection.m23());
+				bytes.putFloat(projection == null ? 0 : projection.m33());
+				bytes.putInt(this.animationFrame++).putInt(0).putInt(0).putInt(0);
+			});
+		}
+		if (this.postEffects != null) {
+			this.postEffects.encode(commands, bindings, effectsEnabled ? this.level("bloom") : 0, dof,
+				this.filtered, uniform.buffer(), uniform.offset(), postFrame.buffer(), postFrame.offset());
+		}
 		for (ExecutablePass pass : this.passes) {
 			if (pass.compute() != null) {
 				this.encodeCompute(commands, pass, bindings, testingPost, uniform);
 			} else {
-				this.encodeFullscreen(commands, pass, bindings, testingPost, uniform, underwater);
+				this.encodeFullscreen(commands, pass, bindings, testingPost, uniform, underwater, postFrame, dof);
 			}
 		}
 		this.uniforms.signal(commands, uniform);
 		this.underwaterUniforms.signal(commands, underwater);
+		if (needsPostFrame) this.postUniforms.signal(commands, postFrame);
 		return true;
 	}
 
@@ -216,7 +259,9 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		final FrameBindings bindings,
 		final @Nullable MetalTexture testingPost,
 		final UniformBinding uniform,
-		final UniformBinding underwater
+		final UniformBinding underwater,
+		final UniformBinding postFrame,
+		final boolean dof
 	) {
 		List<MetalRenderPass.ColorAttachment> colors = new ArrayList<>();
 		for (ShaderGraphCompiler.WriteDecision write : pass.compiled().writes()) {
@@ -235,8 +280,10 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			new MetalRenderPass.Descriptor(colors, null, 0),
 			MetalPassCensus.kindFor("MetalCraft shader: " + pass.declaration().id())
 		)) {
-			render.setPipeline(bindings.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB
-				&& pass.linearRender() != null ? pass.linearRender() : pass.render());
+			boolean linear = bindings.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB;
+			boolean standardGrade = this.postEffects != null && pass.declaration().id().equals("grade");
+			render.setPipeline(standardGrade && dof ? (linear ? pass.linearDofRender() : pass.dofRender())
+				: linear && pass.linearRender() != null ? pass.linearRender() : pass.render());
 			int slot = 0;
 			for (String read : pass.declaration().reads()) {
 				MetalTextureView view = this.viewFor(read, bindings, testingPost);
@@ -247,6 +294,15 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			render.setUniformBuffer(0, uniform.buffer(), uniform.offset(), MetalRenderPass.STAGE_FRAGMENT);
 			if (pass.declaration().buffers().contains("underwater_frame")) {
 				render.setUniformBuffer(1, underwater.buffer(), underwater.offset(), MetalRenderPass.STAGE_FRAGMENT);
+			}
+			if (standardGrade) {
+				render.setTexture(1, this.postEffects.bloomView(bindings), MetalRenderPass.STAGE_FRAGMENT);
+				render.setTexture(2, this.postEffects.dofView(bindings), MetalRenderPass.STAGE_FRAGMENT);
+				render.setUniformBuffer(2, postFrame.buffer(), postFrame.offset(), MetalRenderPass.STAGE_FRAGMENT);
+				if (dof) {
+					render.setTexture(3, bindings.worldDepthView(), MetalRenderPass.STAGE_FRAGMENT);
+					render.setTexture(4, this.postEffects.focusView(), MetalRenderPass.STAGE_FRAGMENT);
+				}
 			}
 			render.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 		}
@@ -438,7 +494,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		final Map<String, Object> values
 	) throws ShaderPackLoader.LoadException {
 		if (pass.declaration().kind() == ShaderPack.PassKind.COMPUTE) {
-			return new ExecutablePass(pass, null, ShaderPassCompiler.compileCompute(device, pack, pass.declaration(), values), null);
+			return new ExecutablePass(pass, null, ShaderPassCompiler.compileCompute(device, pack, pass.declaration(), values), null, null, null);
 		}
 		List<MetalRenderPipeline.ColorTarget> colors = new ArrayList<>();
 		for (String write : pass.declaration().writes()) {
@@ -446,12 +502,20 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 			colors.add(MetalRenderPipeline.ColorTarget.opaque(MetalTexture.Format.valueOf(target.format().name())));
 		}
 		MetalRenderPipeline render = ShaderPassCompiler.compileFullscreen(device, pack, pass.declaration(), values, colors);
+		MetalRenderPipeline linear = null, dof = null, linearDof = null;
 		try {
-			MetalRenderPipeline linear = ShaderPackRuntime.BUILTIN_ID.equals(pack.id()) && pass.declaration().id().equals("grade")
+			linear = ShaderPackRuntime.BUILTIN_ID.equals(pack.id()) && pass.declaration().id().equals("grade")
 				? ShaderPassCompiler.compileFullscreen(device, pack, pass.declaration(), values, colors, true) : null;
-			return new ExecutablePass(pass, render, null, linear);
+			if (linear != null) {
+				dof = ShaderPassCompiler.compileFullscreen(device, pack, pass.declaration(), values, colors, false, true);
+				linearDof = ShaderPassCompiler.compileFullscreen(device, pack, pass.declaration(), values, colors, true, true);
+			}
+			return new ExecutablePass(pass, render, null, linear, dof, linearDof);
 		} catch (RuntimeException | ShaderPackLoader.LoadException error) {
 			render.close();
+			if (linear != null) linear.close();
+			if (dof != null) dof.close();
+			if (linearDof != null) linearDof.close();
 			throw error;
 		}
 	}
@@ -517,6 +581,8 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		this.passes.forEach(ExecutablePass::close);
 		this.uniforms.close();
 		this.underwaterUniforms.close();
+		if (this.postUniforms != null) this.postUniforms.close();
+		if (this.postEffects != null) this.postEffects.close();
 		this.filtered.close();
 		this.unfiltered.close();
 	}

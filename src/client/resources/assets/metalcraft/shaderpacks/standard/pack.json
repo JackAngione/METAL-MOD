@@ -63,9 +63,9 @@
       "id": "exposure",
       "category": "tonemap",
       "type": "float",
-      "min": 0.5,
-      "max": 2.0,
-      "step": 0.25,
+      "min": 0.25,
+      "max": 4.0,
+      "step": 0.05,
       "default": 1.0,
       "apply": "uniform"
     },
@@ -73,7 +73,7 @@
       "id": "tonemap",
       "category": "tonemap",
       "type": "enum",
-      "values": ["none", "aces"],
+      "values": ["none", "aces", "reinhard"],
       "default": "none",
       "apply": "uniform"
     },
@@ -97,7 +97,7 @@
     },
     {
       "id": "invert",
-      "category": "tonemap",
+      "category": "debug",
       "type": "bool",
       "default": false,
       "apply": "recompile"
@@ -258,6 +258,116 @@
       "step": 0.25,
       "default": 1.0,
       "apply": "recompile"
+    },
+    {
+      "id": "temperature",
+      "category": "tonemap",
+      "type": "float",
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.05,
+      "default": 0.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "tint",
+      "category": "tonemap",
+      "type": "float",
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.05,
+      "default": 0.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "contrast",
+      "category": "tonemap",
+      "type": "float",
+      "min": 0.5,
+      "max": 1.5,
+      "step": 0.05,
+      "default": 1.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "saturation",
+      "category": "tonemap",
+      "type": "float",
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.05,
+      "default": 1.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "vibrance",
+      "category": "tonemap",
+      "type": "float",
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.05,
+      "default": 0.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "gamma",
+      "category": "tonemap",
+      "type": "float",
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.05,
+      "default": 1.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "highlights",
+      "category": "tonemap",
+      "type": "float",
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.05,
+      "default": 0.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "shadows",
+      "category": "tonemap",
+      "type": "float",
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.05,
+      "default": 0.0,
+      "apply": "uniform"
+    },
+    {
+      "id": "film_grain",
+      "category": "tonemap",
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "default": 0,
+      "apply": "uniform"
+    },
+    {
+      "id": "bloom",
+      "category": "tonemap",
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "default": 0,
+      "apply": "uniform"
+    },
+    {
+      "id": "depth_of_field",
+      "category": "tonemap",
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "default": 0,
+      "apply": "uniform"
     }
   ]
 }

@@ -44,7 +44,8 @@ final class MetalWorldGrade implements AutoCloseable {
 			commands.copyTexture(worldDepth.attachment(), this.depth, 0, 0, 0, 0, 0, width, height);
 		}
 		if (!(BASELINE_PROBE && Boolean.getBoolean("metalcraft.baselineSkipGrade")) && !executor.encode(commands, WorldComposition.world(
-			scene.attachment(), scene.metal(), width, height, this.depth, this.depthView, null, encoding).withUnderwater(underwater))) {
+			scene.attachment(), scene.metal(), width, height, this.depth, this.depthView,
+			device.worldPostProjection(), encoding).withUnderwater(underwater))) {
 			throw new IllegalStateException("World grade inputs are unavailable");
 		}
 		MetalTexture post = runtime.target("post_color");

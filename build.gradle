@@ -75,6 +75,14 @@ tasks.named('check') {
 	dependsOn tasks.named('shaderTranslationSmoke')
 }
 
+// Focused production Metal readback checks for optional camera post effects.
+tasks.register('postEffectsSmoke', JavaExec) {
+	dependsOn tasks.named('clientClasses'), tasks.named('compileShaderSmokeJava')
+	onlyIf { isAppleSiliconBuild }
+	classpath = sourceSets.shaderSmoke.runtimeClasspath
+	mainClass = 'dev.metalcraft.client.metal.PostEffectsSmoke'
+}
+
 // Paired GPU cost probe for zero-weight water bands; timings are not a build gate.
 tasks.register('waterFilteringBenchmark', JavaExec) {
 	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
@@ -173,6 +181,12 @@ tasks.named('runClient') {
 		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
 		systemProperty 'metalcraft.skyTest', providers.gradleProperty('metalSkyTest').getOrElse('false')
 		systemProperty 'metalcraft.skyMotionTest', providers.gradleProperty('metalSkyMotionTest').getOrElse('false')
+		systemProperty 'metalcraft.colorGradingTest', providers.gradleProperty('metalColorGradingTest').getOrElse('false')
+		def colorGradingTestWorld = providers.gradleProperty('metalColorGradingTestWorld')
+		if (colorGradingTestWorld.isPresent()) systemProperty 'metalcraft.colorGradingTestWorld', colorGradingTestWorld.get()
+		systemProperty 'metalcraft.postEffectsTest', providers.gradleProperty('metalPostEffectsTest').getOrElse('false')
+		def postEffectsTestWorld = providers.gradleProperty('metalPostEffectsTestWorld')
+		if (postEffectsTestWorld.isPresent()) systemProperty 'metalcraft.postEffectsTestWorld', postEffectsTestWorld.get()
 		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
 		systemProperty 'metalcraft.nativeChunkDistanceTest', providers.gradleProperty('metalNativeChunkDistanceTest').getOrElse('false')
 		systemProperty 'metalcraft.lodTest', providers.gradleProperty('metalLodTest').getOrElse('false')

@@ -338,6 +338,9 @@ public final class MetalShaderTranslationSmoke {
 			assertMemorylessPassMerge();
 			WorldHdrTargetsSmoke.run();
 			WorldGradeDepthSmoke.run();
+			ColorGradingSmoke.run(device);
+			PostEffectsSmoke.run(device);
+			ColorGradingPersistenceSmoke.run();
 			OpaqueSnapshotSmoke.run();
 			WaterForwardPipelineSmoke.run();
 			WaterDepthDebugSmoke.run();

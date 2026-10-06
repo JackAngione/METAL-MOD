@@ -39,7 +39,15 @@ abstract class GameRendererWorldGradeMixin {
 		target = "Lnet/minecraft/client/renderer/ProjectionMatrixBuffer;getBuffer(Lorg/joml/Matrix4f;)Lcom/mojang/blaze3d/buffers/GpuBufferSlice;"))
 	private GpuBufferSlice metalcraft$captureWaterProjection(final ProjectionMatrixBuffer buffer, final Matrix4f projection) {
 		this.metalcraft$waterProjection = new Matrix4f(projection);
+		MetalGpuDevice gpu = MetalGpuDevices.current();
+		if (gpu != null) gpu.captureWorldPostProjection(projection);
 		return buffer.getBuffer(projection);
+	}
+
+	@Inject(method = "renderLevel", at = @At("RETURN"))
+	private void metalcraft$clearWorldPostProjection(final CallbackInfo callback) {
+		MetalGpuDevice gpu = MetalGpuDevices.current();
+		if (gpu != null) gpu.captureWorldPostProjection(null);
 	}
 
 	@Redirect(

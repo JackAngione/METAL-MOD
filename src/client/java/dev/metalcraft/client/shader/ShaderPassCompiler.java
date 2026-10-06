@@ -27,6 +27,9 @@ final class ShaderPassCompiler {
 		Objects.requireNonNull(pass, "pass");
 		Objects.requireNonNull(optionValues, "optionValues");
 		StringBuilder preamble = new StringBuilder();
+		if (ShaderPackRuntime.BUILTIN_ID.equals(pack.id()) && pass.id().equals("grade")) {
+			preamble.append("#define MC_STANDARD_POST_EFFECTS 1\n");
+		}
 		preamble.append("#define MC_SCENE_LINEAR_HDR ").append(linearScene ? 1 : 0).append("\n");
 		preamble.append("#define MC_PASS_").append(symbol(pass.id())).append(" 1\n");
 		int textureSlot = 0;
@@ -81,12 +84,20 @@ final class ShaderPassCompiler {
 		final ShaderPack.Pass pass, final Map<String, Object> optionValues,
 		final List<MetalRenderPipeline.ColorTarget> colorTargets, final boolean linearScene)
 		throws ShaderPackLoader.LoadException {
+		return compileFullscreen(device, pack, pass, optionValues, colorTargets, linearScene, false);
+	}
+
+	static MetalRenderPipeline compileFullscreen(final MetalDevice device, final ShaderPack pack,
+		final ShaderPack.Pass pass, final Map<String, Object> optionValues,
+		final List<MetalRenderPipeline.ColorTarget> colorTargets, final boolean linearScene, final boolean depthOfField)
+		throws ShaderPackLoader.LoadException {
 		if (colorTargets == null || colorTargets.isEmpty()) {
 			throw new ShaderPackLoader.LoadException(
 				"Fullscreen pass '" + pass.id() + "' requires at least one color target"
 			);
 		}
-		String compiled = source(pack, pass, optionValues, linearScene);
+		String compiled = "#define MC_STANDARD_DOF " + (depthOfField ? 1 : 0) + "\n"
+			+ source(pack, pass, optionValues, linearScene);
 		String passId = pass.id();
 		return device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
 			compiled,
