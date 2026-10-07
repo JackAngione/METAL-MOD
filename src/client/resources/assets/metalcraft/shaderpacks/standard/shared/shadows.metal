@@ -73,25 +73,55 @@ float3 mc_shadow_receiver_normal(float3 cameraRelative, float3 storedNormal, flo
     return mc_shadow_receiver_normal(cameraRelative, storedNormal);
 }
 
+// Light-facing weight for an exact block face: 0 facing away from the light, 1 facing it.
+// Filtering cannot answer for these faces. A face turned away projects behind its own
+// block, and an edge-on face (every north/south face, as the sun orbits in XY) projects to
+// its own silhouette, where the kernel averages that block with open air. That average
+// depends on where the edge falls in the selected cascade's texel grid, so it changes as
+// the camera moves a split across the face. Edge-on returns 0.5, the mean of that average.
+float mc_shadow_face_light(float3 faceNormal, float3 directionToLight) {
+    if (!all(isfinite(faceNormal)) || !all(isfinite(directionToLight))
+        || dot(directionToLight, directionToLight) < 1e-8) return 1.0;
+    return smoothstep(-0.1, 0.1, dot(faceNormal, normalize(directionToLight)));
+}
+
+// Near-edge-on vertical block faces sample just outside their own silhouette (see
+// mc_shadow_visibility_in_cascade). Ground keeps its receiver plane at a low sun: broad
+// terrain stays coplanar across the kernel there, unlike one-block wall steps.
+float mc_shadow_face_grazing(float3 faceNormal, float3 directionToLight) {
+    if (abs(faceNormal.y) > 0.5 || !all(isfinite(faceNormal)) || !all(isfinite(directionToLight))
+        || dot(directionToLight, directionToLight) < 1e-8) return 0.0;
+    return 1.0 - smoothstep(0.0, 0.1, abs(dot(faceNormal, normalize(directionToLight))));
+}
+
 // Visibility only: lighting decides how much sunlight to apply. The receiver position is
 // camera-relative world space, and viewDepth is positive forward camera depth (not radial
 // distance or hardware depth). Bias is in normalized shadow depth and moves toward the sun.
 // Manual comparisons use the module's nearest sampler, avoiding a new comparison-sampler ABI.
+// grazing (mc_shadow_face_grazing) moves the receiver off its own silhouette by the kernel's
+// reach and retires the receiver plane, whose extrapolation leaves the face's projection.
 float mc_shadow_visibility_in_cascade(float3 cameraRelative, uint cascade, float depthBias,
     constant MCShadowFrame& frame, depth2d_array<float> map, sampler nearestSampler, float3 worldNormal,
-    bool coarse = false) {
+    bool coarse = false, float grazing = 0.0) {
     if (cascade >= min(frame.cascadeCount, 4u) || cascade >= map.get_array_size()
         || !all(isfinite(cameraRelative))) return 1.0;
-    float4 clip = frame.cameraRelativeToShadow[cascade] * float4(cameraRelative, 1.0);
+    float4x4 matrix = frame.cameraRelativeToShadow[cascade];
+    float3 rowX = float3(matrix[0].x, matrix[1].x, matrix[2].x);
+    float3 rowY = float3(matrix[0].y, matrix[1].y, matrix[2].y);
+    float3 rowZ = float3(matrix[0].z, matrix[1].z, matrix[2].z);
+    float resolution = float(map.get_width());
+    grazing = saturate(grazing);
+    if (grazing > 0.0) {
+        // The 4x4 kernel reaches two texels from the receiver, the coarse 2x2 kernel one.
+        float texel = 2.0 / (max(length(rowX), 1e-8) * resolution);
+        cameraRelative += worldNormal * (grazing * (coarse ? 1.0 : 2.0) * texel);
+    }
+    float4 clip = matrix * float4(cameraRelative, 1.0);
     if (!all(isfinite(clip)) || clip.w <= 0.0) return 1.0;
     float3 ndc = clip.xyz / clip.w;
     if (any(abs(ndc.xy) > 1.0) || ndc.z < 0.0 || ndc.z > 1.0) return 1.0;
     // shadow_terrain_vertex flips clip Y; Metal's viewport flip cancels it.
     float2 uv = ndc.xy * 0.5 + 0.5;
-    float4x4 matrix = frame.cameraRelativeToShadow[cascade];
-    float3 rowX = float3(matrix[0].x, matrix[1].x, matrix[2].x);
-    float3 rowY = float3(matrix[0].y, matrix[1].y, matrix[2].y);
-    float3 rowZ = float3(matrix[0].z, matrix[1].z, matrix[2].z);
     // Inverse-transpose the receiver plane into this orthographic light volume.
     float3 plane = float3(dot(rowX, worldNormal) / max(dot(rowX, rowX), 1e-12),
                          dot(rowY, worldNormal) / max(dot(rowY, rowY), 1e-12),
@@ -101,11 +131,11 @@ float mc_shadow_visibility_in_cascade(float3 cameraRelative, uint cascade, float
     // own plane and visibly pop as the light or receiver crosses that threshold.
     // Only a genuinely degenerate light-space plane needs the bias-only fallback.
     float2 depthGradient = abs(plane.z) > 1e-5 ? -2.0 * plane.xy / plane.z : float2(0.0);
+    depthGradient *= 1.0 - grazing;
     float receiverDepth = ndc.z - max(depthBias, 0.0);
     // Bilinearly interpolate depth comparisons, not stored depth. Nine nearest
     // comparisons jump by 1/9 when the receiver crosses a texel boundary. The
     // overlapping bilinear 3x3 kernels combine into sixteen weighted comparisons.
-    float resolution = float(map.get_width());
     float2 texelPosition = uv * resolution - 0.5;
     float2 base = floor(texelPosition);
     float2 fraction = texelPosition - base;
@@ -168,12 +198,13 @@ float mc_shadow_blend_start(uint cascade, constant MCShadowFrame& frame) {
 }
 
 float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBias,
-    constant MCShadowFrame& frame, depth2d_array<float> map, sampler nearestSampler, float3 worldNormal) {
+    constant MCShadowFrame& frame, depth2d_array<float> map, sampler nearestSampler, float3 worldNormal,
+    float grazing = 0.0) {
     uint cascade = mc_shadow_cascade(viewDepth, frame);
     uint count = min(min(frame.cascadeCount, 4u), map.get_array_size());
     if (cascade >= count || !all(isfinite(cameraRelative))) return 1.0;
     float visibility = mc_shadow_visibility_in_cascade(cameraRelative, cascade, depthBias,
-        frame, map, nearestSampler, worldNormal);
+        frame, map, nearestSampler, worldNormal, false, grazing);
     if (cascade + 1u >= count) return visibility;
     float start = mc_shadow_blend_start(cascade, frame);
     if (viewDepth <= start) return visibility;
@@ -185,7 +216,7 @@ float mc_shadow_visibility(float3 cameraRelative, float viewDepth, float depthBi
     float nextDepthScale = length(float3(next[0].z, next[1].z, next[2].z));
     float nextBias = depthBias * nextDepthScale / max(currentDepthScale, 1e-8);
     float nextVisibility = mc_shadow_visibility_in_cascade(cameraRelative, cascade + 1u, nextBias,
-        frame, map, nearestSampler, worldNormal);
+        frame, map, nearestSampler, worldNormal, false, grazing);
     return mix(visibility, nextVisibility, smoothstep(start, frame.cascadeFar[cascade], viewDepth));
 }
 

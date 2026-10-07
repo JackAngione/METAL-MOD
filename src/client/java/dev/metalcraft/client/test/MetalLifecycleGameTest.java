@@ -91,6 +91,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			MetalWindGameTest.run(context);
 			return;
 		}
+		if (Boolean.getBoolean("metalcraft.shadowStabilityTest")) {
+			ShadowStabilityGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.coreIntegrationTest")) {
 			MetalCoreIntegrationGameTest.run(context);
 			return;

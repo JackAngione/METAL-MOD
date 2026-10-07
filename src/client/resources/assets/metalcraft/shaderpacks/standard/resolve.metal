@@ -97,6 +97,11 @@ fragment ResolveTargets resolve_fragment(
     if (terrainNormal) worldNormal = mc_decode_terrain_normal(previous.normal.rgb);
     float3 shadowNormal = mc_shadow_receiver_normal(cameraRelative, worldNormal, previous.normal.b);
     if (terrainNormal) shadowNormal = worldNormal;
+    // Only exact block faces are known to be one-sided and to sit on their own block.
+    uint shadowAxis = uint(round(saturate(previous.normal.b) * 255.0));
+    bool blockFace = !terrainNormal && shadowAxis >= 1u && shadowAxis <= 3u;
+    float faceLight = blockFace ? mc_shadow_face_light(shadowNormal, shadowFrame.directionToSun.xyz) : 1.0;
+    float faceGrazing = blockFace ? mc_shadow_face_grazing(shadowNormal, shadowFrame.directionToSun.xyz) : 0.0;
     // Four comparisons in one coarse cascade retain real cast shadows beyond the detailed
     // range. Receiver derivatives stay above this branch, including the transition quads.
     float distantVisibility = 1.0;
@@ -105,8 +110,8 @@ fragment ResolveTargets resolve_fragment(
         && viewDepth > shadowFrame.shadowDistance * 0.9
         && viewDepth < distantShadowFrame.shadowDistance) {
         float distantBias = mc_shadow_receiver_bias_in_cascade(shadowNormal, 0u, distantShadowFrame);
-        distantVisibility = mc_shadow_visibility_in_cascade(cameraRelative, 0u, distantBias,
-            distantShadowFrame, distantShadowMap, distantShadowSampler, shadowNormal, true);
+        distantVisibility = faceLight * mc_shadow_visibility_in_cascade(cameraRelative, 0u, distantBias,
+            distantShadowFrame, distantShadowMap, distantShadowSampler, shadowNormal, true, faceGrazing);
         distantVisibility = mix(1.0, distantVisibility, mc_shadow_distance_fade(viewDepth, distantShadowFrame));
     }
     if (options.debugView == 0 && validDepth && viewDepth >= max(shadowFrame.shadowDistance, 32.0)) {
@@ -121,7 +126,8 @@ fragment ResolveTargets resolve_fragment(
     uint cascade = validDepth ? mc_shadow_cascade(viewDepth, shadowFrame) : shadowFrame.cascadeCount;
     float bias = mc_shadow_receiver_bias(shadowNormal, viewDepth, shadowFrame);
     float visibility = validDepth
-        ? mc_shadow_visibility(cameraRelative, viewDepth, bias, shadowFrame, shadowMap, shadowSampler, shadowNormal)
+        ? faceLight * mc_shadow_visibility(cameraRelative, viewDepth, bias, shadowFrame, shadowMap, shadowSampler,
+            shadowNormal, faceGrazing)
         : 1.0;
     float fade = mc_shadow_distance_fade(viewDepth, shadowFrame);
     if (fade > 0.0 && validDepth && shadowFrame.cascadeCount > 0u) {

@@ -36,6 +36,7 @@ public final class WorldShadowModuleSmoke {
 		ShadowFilteringSmoke.run(device, contract);
 		ShadowAxisTagSmoke.run(device, contract);
 		ShadowReceiverPlaneSmoke.run(device, contract);
+		ShadowFaceLightSmoke.run(device, contract);
 		ShadowCascadeTransitionSmoke.run(device, contract);
 		TerrainShadowRendererSmoke.run(device, contract);
 		ShadowSunMotionSmoke.run(device, contract);

@@ -135,6 +135,16 @@ short existing-standard-world check uses `-PmetalLifecycleTest` and
 `-PmetalJvmArgs='-Xmx8G -Dmetalcraft.windTest=true'` with `runClient` and the default
 graphics backend, at 16 render / 16 simulation distance.
 
+Block faces turned away from the sun, or edge-on to it (every north/south face, as the
+sun orbits east-west), take their sunlight from which way they face instead of from
+where their edge falls in a shadow cascade's texel grid, so wall shading stays put while
+walking and turning. `./gradlew build` checks this on the GPU. The short live check
+copies an existing standard save once (`New World (5)` by default, or
+`-Dmetalcraft.shadowStabilityWorld=<save>`), and tracks fixed faces at 4K and 16/16 as the camera
+backs away and turns: `-PmetalLifecycleTest` and
+`-PmetalJvmArgs='-Xmx8G -Dmetalcraft.shadowStabilityTest=true'` with `runClient` and the
+default graphics backend.
+
 Standard's **Video Settings → MetalCraft Settings → Shader Packs → Color Grading**
 submenu offers exposure, white balance (temperature and tint), contrast,
 saturation, vibrance, gamma, highlights and shadows. Tone mapping offers Off,

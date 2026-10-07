@@ -24,7 +24,9 @@
 //   sunWeight = saturate(sky / (sky + block) * shadowStrength)   when the sun is active
 //   lit       = unfogged - unfogged * sunWeight * (1 - visibility)
 // Gating on N·L would leave dawn ground and walls unshadowed because the seed still
-// carries full sky lightmap on those faces. vis = 1 is an identity. Blocklight, emission,
+// carries full sky lightmap on those faces. Visibility itself does include an exact block
+// face's facing (mc_shadow_face_light): 0 turned away, 0.5 edge-on, so turning a face from
+// the light still darkens it. vis = 1 is an identity. Blocklight, emission,
 // and fog stay unshadowed by this directional stage. cascadeCount == 0 (other dimensions, missing frame)
 // leaves sunWeight = 0.
 
