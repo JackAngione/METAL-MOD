@@ -1,6 +1,6 @@
 package dev.metalcraft.api;
 
-/** A discovered shader pack that can be selected in the MetalCraft runtime. */
+/** A discovered shader pack that can be selected in the Metal Mod runtime. */
 public record MetalCraftShaderPackInfo(String id, String name) {
 	public MetalCraftShaderPackInfo {
 		if (id == null || id.isBlank()) {

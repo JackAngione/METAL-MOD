@@ -105,7 +105,7 @@ final class StandardPostEffects implements AutoCloseable {
 		final MetalBuffer frame, final long frameOffset, final MetalTextureView... textures) {
 		try (MetalRenderPass pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
 			new MetalRenderPass.ColorAttachment(destination.texture(), MetalRenderPass.LoadAction.DONT_CARE,
-				MetalRenderPass.StoreAction.STORE, 0, 0, 0, 0)), MetalPassCensus.kindFor("MetalCraft " + label))) {
+				MetalRenderPass.StoreAction.STORE, 0, 0, 0, 0)), MetalPassCensus.kindFor("Metal Mod " + label))) {
 			pass.setPipeline(pipeline);
 			for (int slot = 0; slot < textures.length; slot++)
 				pass.setTexture(slot, textures[slot], MetalRenderPass.STAGE_FRAGMENT);

@@ -35,10 +35,10 @@ public final class MetalWorldTargets implements AutoCloseable {
 		MetalGpuTexture color = null, depth = null;
 		MetalGpuTextureView colorView = null, depthView = null;
 		try {
-			color = (MetalGpuTexture)this.device.createTexture("MetalCraft HDR world color", USAGE,
+			color = (MetalGpuTexture)this.device.createTexture("Metal Mod HDR world color", USAGE,
 				GpuFormat.RGBA16_FLOAT, width, height, 1, 1);
 			colorView = (MetalGpuTextureView)this.device.createTextureView(color);
-			depth = (MetalGpuTexture)this.device.createTexture("MetalCraft HDR world depth", USAGE,
+			depth = (MetalGpuTexture)this.device.createTexture("Metal Mod HDR world depth", USAGE,
 				GpuFormat.D32_FLOAT, width, height, 1, 1);
 			depthView = (MetalGpuTextureView)this.device.createTextureView(depth);
 		} catch (RuntimeException error) {

@@ -117,10 +117,10 @@ public final class MetalOpaqueSnapshotOwner implements AutoCloseable {
 		MetalGpuTexture color = null, depth = null;
 		MetalGpuTextureView colorView = null, depthView = null;
 		try {
-			color = (MetalGpuTexture)this.device.createTexture("MetalCraft opaque HDR color snapshot",
+			color = (MetalGpuTexture)this.device.createTexture("Metal Mod opaque HDR color snapshot",
 				DESTINATION_USAGE, GpuFormat.RGBA16_FLOAT, width, height, 1, 1);
 			colorView = (MetalGpuTextureView)this.device.createTextureView(color);
-			depth = (MetalGpuTexture)this.device.createTexture("MetalCraft opaque depth snapshot",
+			depth = (MetalGpuTexture)this.device.createTexture("Metal Mod opaque depth snapshot",
 				DESTINATION_USAGE, GpuFormat.D32_FLOAT, width, height, 1, 1);
 			depthView = (MetalGpuTextureView)this.device.createTextureView(depth);
 		} catch (RuntimeException error) {

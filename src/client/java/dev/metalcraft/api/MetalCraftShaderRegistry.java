@@ -23,7 +23,7 @@ public final class MetalCraftShaderRegistry {
 		Objects.requireNonNull(pipeline, "pipeline");
 		Identifier id = pipeline.getLocation();
 		if (this.entries.putIfAbsent(id, new Entry(pipeline, shaderSource)) != null) {
-			throw new IllegalArgumentException("A MetalCraft shader pipeline is already registered as " + id);
+			throw new IllegalArgumentException("A Metal Mod shader pipeline is already registered as " + id);
 		}
 	}
 

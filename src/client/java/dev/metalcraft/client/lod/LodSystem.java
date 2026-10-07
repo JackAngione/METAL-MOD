@@ -133,11 +133,11 @@ public final class LodSystem {
         loggedStatus = current;
         if (current == null || current == Status.READY) return;
         switch (current) {
-            case NOT_METAL -> LOGGER.warn("MetalCraft distant terrain is inactive: it needs the Metal graphics backend, but this session uses {}. "
+            case NOT_METAL -> LOGGER.warn("Metal Mod distant terrain is inactive: it needs the Metal graphics backend, but this session uses {}. "
                 + "Set Video Settings > Graphics API to Default and restart.", RenderSystem.getDevice().getDeviceInfo().backendName());
-            case RENDER_DISTANCE -> LOGGER.info("MetalCraft distant terrain is inactive: Render Distance {} is not larger than the native distance {}",
+            case RENDER_DISTANCE -> LOGGER.info("Metal Mod distant terrain is inactive: Render Distance {} is not larger than the native distance {}",
                 client.options.renderDistance().get(), MetalCraftConfig.lodNativeDistance());
-            default -> LOGGER.info("MetalCraft distant terrain: {}", current.name().toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
+            default -> LOGGER.info("Metal Mod distant terrain: {}", current.name().toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
         }
     }
 
@@ -146,7 +146,7 @@ public final class LodSystem {
             workerThreads = Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 1, 8);
             AtomicInteger count = new AtomicInteger();
             workers = Executors.newFixedThreadPool(workerThreads, runnable -> {
-                Thread thread = new Thread(runnable, "MetalCraft distant terrain " + count.incrementAndGet());
+                Thread thread = new Thread(runnable, "Metal Mod distant terrain " + count.incrementAndGet());
                 thread.setDaemon(true);
                 thread.setPriority(Thread.MIN_PRIORITY);
                 return thread;

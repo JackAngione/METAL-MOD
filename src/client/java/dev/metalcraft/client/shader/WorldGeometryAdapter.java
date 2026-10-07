@@ -613,7 +613,7 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 		if (this.resolvePipeline != null) this.resolvePipeline.close();
 		this.resolvePipeline = replacement;
 		this.resolveSceneFormat = sceneFormat;
-		MetalPassCensus.kindFor("MetalCraft shader: " + this.resolvePass.id());
+		MetalPassCensus.kindFor("Metal Mod shader: " + this.resolvePass.id());
 	}
 
 	private MetalRenderPipeline compileResolvePipeline(final MetalTexture.Format sceneFormat, final boolean scalar) {

@@ -5,7 +5,7 @@ import dev.metalcraft.client.mixin.WindowFramebufferAccessor;
 import net.minecraft.client.Minecraft;
 import org.lwjgl.glfw.GLFW;
 
-/** Applies MetalCraft's render scale while leaving the native presentation surface untouched. */
+/** Applies Metal Mod's render scale while leaving the native presentation surface untouched. */
 public final class MetalCraftRenderResolution {
 	private MetalCraftRenderResolution() {
 	}

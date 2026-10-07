@@ -297,7 +297,7 @@ public final class MetalShaderTranslationSmoke {
 		assertMappedDescriptor(mappedDescriptor);
 
 		if (!MetalNative.load()) {
-			throw new AssertionError("MetalCraft native library did not load", MetalNative.loadFailure().orElse(null));
+			throw new AssertionError("Metal Mod native library did not load", MetalNative.loadFailure().orElse(null));
 		}
 		try (MetalDevice device = MetalNative.openDefaultDevice().orElseThrow();
 			 MetalRenderPipeline pipeline = device.createRenderPipeline(new MetalRenderPipeline.GlslDescriptor(
@@ -1272,9 +1272,9 @@ public final class MetalShaderTranslationSmoke {
 				try {
 					MetalPassCensus.reset();
 					encodeGrade(queue, executor, scene, output);
-					if (!MetalPassCensus.internedNames().contains("MetalCraft shader: grade")) {
+					if (!MetalPassCensus.internedNames().contains("Metal Mod shader: grade")) {
 						throw new AssertionError(
-							"Interned census names omitted MetalCraft shader: grade: " + MetalPassCensus.internedNames()
+							"Interned census names omitted Metal Mod shader: grade: " + MetalPassCensus.internedNames()
 						);
 					}
 				} finally {
@@ -1856,7 +1856,7 @@ public final class MetalShaderTranslationSmoke {
 				new Vector3d(), new Quaternionf(), fov, 1.0F, new Vector3f(0, 1, 0), new Matrix4f(projection).invert()
 			)) {
 				runtime.worldGeometry().setShadowFrameSupplier(() -> frame);
-				gpu.encodeNativePass(module.depthPass(), "MetalCraft shader: shadow_terrain", pass ->
+				gpu.encodeNativePass(module.depthPass(), "Metal Mod shader: shadow_terrain", pass ->
 					renderer.encode(pass, frame, draws, atlasView, sampler));
 				runtime.setOption("debug_view", "visibility");
 				drawWorldSeed(runtime, encoder, sceneView, depthView, seed);
@@ -2257,7 +2257,7 @@ public final class MetalShaderTranslationSmoke {
 				throw new AssertionError("Built-in post_color must exist and not be memoryless");
 			}
 		} catch (IOException error) {
-			throw new AssertionError("Could not load the bundled MetalCraft Standard pack", error);
+			throw new AssertionError("Could not load the bundled Metal Mod Standard pack", error);
 		}
 	}
 

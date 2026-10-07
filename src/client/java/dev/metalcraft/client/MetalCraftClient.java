@@ -32,9 +32,9 @@ public final class MetalCraftClient implements ClientModInitializer {
 		DeviceInfo info = device.getDeviceInfo();
 		boolean metalPath = MetalCraftPlatform.isAppleSilicon() && "Metal".equalsIgnoreCase(info.backendName());
 		if (metalPath) {
-			LOGGER.info("MetalCraft direct renderer active: {} / {} using {}", info.vendorName(), info.name(), info.backendName());
+			LOGGER.info("Metal Mod direct renderer active: {} / {} using {}", info.vendorName(), info.name(), info.backendName());
 		} else {
-			LOGGER.warn("MetalCraft Metal path is not active; current backend is {} on {} / {}", info.backendName(), info.vendorName(), info.name());
+			LOGGER.warn("Metal Mod Metal path is not active; current backend is {} on {} / {}", info.backendName(), info.vendorName(), info.name());
 		}
 
 		MetalCraftShaderRegistry registry = MetalCraftShaders.registry();
@@ -55,7 +55,7 @@ public final class MetalCraftClient implements ClientModInitializer {
 				extension.registerShaders(context);
 			} catch (RuntimeException | Error error) {
 				LOGGER.error(
-					"MetalCraft shader extension {} failed to register; other extensions will still load",
+					"Metal Mod shader extension {} failed to register; other extensions will still load",
 					extension.getClass().getName(),
 					error
 				);
@@ -73,7 +73,7 @@ public final class MetalCraftClient implements ClientModInitializer {
 		GpuDevice device = RenderSystem.getDevice();
 		int valid = registry.precompileAll(device);
 		if (total > 0) {
-			LOGGER.info("Precompiled {}/{} MetalCraft shader pipelines for the {} backend", valid, total, device.getDeviceInfo().backendName());
+			LOGGER.info("Precompiled {}/{} Metal Mod shader pipelines for the {} backend", valid, total, device.getDeviceInfo().backendName());
 		}
 	}
 

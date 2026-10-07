@@ -117,7 +117,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 			ShaderPack builtin = this.loadById(BUILTIN_ID);
 			packs.add(new MetalCraftShaderPackInfo(BUILTIN_ID, builtin.manifest().name()));
 		} catch (IOException | RuntimeException error) {
-			LOGGER.warn("Could not load the built-in MetalCraft shader pack", error);
+			LOGGER.warn("Could not load the built-in Metal Mod shader pack", error);
 		}
 		this.refreshDiscovery();
 		for (ShaderPackLoader.PackRef ref : this.discovered.values()) {
@@ -258,9 +258,9 @@ public final class ShaderPackRuntime implements AutoCloseable {
 		this.closeWorldGeometry();
 		this.allocator.release();
 		if (error == null) {
-			LOGGER.error("MetalCraft shader pack '{}': {}", this.settings.selectedPack(), message);
+			LOGGER.error("Metal Mod shader pack '{}': {}", this.settings.selectedPack(), message);
 		} else {
-			LOGGER.error("MetalCraft shader pack '{}': {}", this.settings.selectedPack(), message, error);
+			LOGGER.error("Metal Mod shader pack '{}': {}", this.settings.selectedPack(), message, error);
 		}
 	}
 
@@ -309,7 +309,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 				targetBytes = post.descriptor().byteSize();
 			}
 			LOGGER.info(
-				"Loaded MetalCraft shader pack '{}': {} pass(es), {} target(s), {} option(s), {} bytes",
+				"Loaded Metal Mod shader pack '{}': {} pass(es), {} target(s), {} option(s), {} bytes",
 				loaded.manifest().name(),
 				compiled.passes().size(),
 				compiled.targets().size(),

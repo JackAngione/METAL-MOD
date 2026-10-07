@@ -664,7 +664,7 @@ final class LodSession implements AutoCloseable {
             try (LodMesh mesh = result.mesh) {
                 GpuBuffer vertices = null;
                 if (mesh.solidQuads + mesh.fluidQuads > 0) {
-                    vertices = RenderSystem.getDevice().createBuffer(() -> "MetalCraft distant terrain", GpuBuffer.USAGE_VERTEX, mesh.vertices());
+                    vertices = RenderSystem.getDevice().createBuffer(() -> "Metal Mod distant terrain", GpuBuffer.USAGE_VERTEX, mesh.vertices());
                 }
                 if (mesh.colors() != null) this.atlas.upload(result.slot, mesh.colors());
                 this.release(node);

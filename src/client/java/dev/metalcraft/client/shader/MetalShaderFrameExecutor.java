@@ -278,7 +278,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		}
 		try (MetalRenderPass render = commands.beginRenderPass(
 			new MetalRenderPass.Descriptor(colors, null, 0),
-			MetalPassCensus.kindFor("MetalCraft shader: " + pass.declaration().id())
+			MetalPassCensus.kindFor("Metal Mod shader: " + pass.declaration().id())
 		)) {
 			boolean linear = bindings.colorEncoding() == FrameBindings.ColorEncoding.LINEAR_SRGB;
 			boolean standardGrade = this.postEffects != null && pass.declaration().id().equals("grade");
@@ -319,7 +319,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 		int[] threads = threadgroup2d(pipeline);
 		MetalTexture coverage = this.textureFor(pass.declaration().writes().getFirst(), bindings, testingPost);
 		try (MetalComputePass compute = commands.beginComputePass(
-			MetalPassCensus.kindFor("MetalCraft shader: " + pass.declaration().id())
+			MetalPassCensus.kindFor("Metal Mod shader: " + pass.declaration().id())
 		)) {
 			compute.setPipeline(pipeline);
 			int slot = 0;

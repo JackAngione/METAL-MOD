@@ -30,7 +30,7 @@ final class LodAtlas implements AutoCloseable {
 
     LodAtlas() {
         var device = RenderSystem.getDevice();
-        this.texture = device.createTexture("MetalCraft distant terrain colours",
+        this.texture = device.createTexture("Metal Mod distant terrain colours",
             GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, SIZE, SIZE, 1, 1);
         this.view = device.createTextureView(this.texture);
         this.binding = new LodTextureBinding(this.view, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));

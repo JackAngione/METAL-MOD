@@ -28,7 +28,7 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 
-/** MetalCraft's renderer settings screen. */
+/** Metal Mod's renderer settings screen. */
 public final class MetalCraftOptionsScreen extends Screen {
 	private static final Component TITLE = Component.translatable("metalcraft.options.title");
 	private enum Page { HOME, DISPLAY, SHADERS, SHADER_CATEGORY }

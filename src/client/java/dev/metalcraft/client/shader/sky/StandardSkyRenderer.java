@@ -99,16 +99,16 @@ public final class StandardSkyRenderer implements AutoCloseable {
         // A fresh immutable buffer is pinned by the command buffer; no in-flight uniform overwrite.
         try (MetalBuffer frame = this.device.createBuffer(SkyFrameInputs.UNIFORM_BYTES, MetalBuffer.StorageMode.SHARED)) {
             try (var mapping = frame.map()) { inputs.write(mapping.bytes()); }
-            gpu.encodeNativePass(targetPass(scene, MetalRenderPass.LoadAction.LOAD), "MetalCraft sky: atmosphere",
+            gpu.encodeNativePass(targetPass(scene, MetalRenderPass.LoadAction.LOAD), "Metal Mod sky: atmosphere",
                 pass -> this.encodeAtmosphere(pass, frame));
             stars.run();
-            gpu.encodeNativePass(targetPass(scene, MetalRenderPass.LoadAction.LOAD), "MetalCraft sky: sun and moon",
+            gpu.encodeNativePass(targetPass(scene, MetalRenderPass.LoadAction.LOAD), "Metal Mod sky: sun and moon",
                 pass -> this.encodeCelestials(pass, frame));
             if (inputs.hasClouds()) {
                 this.resizeClouds(scene.descriptor().width(), scene.descriptor().height());
-                gpu.encodeNativePass(targetPass(this.cloudTarget, MetalRenderPass.LoadAction.DONT_CARE), "MetalCraft sky: clouds",
+                gpu.encodeNativePass(targetPass(this.cloudTarget, MetalRenderPass.LoadAction.DONT_CARE), "Metal Mod sky: clouds",
                     pass -> this.encodeClouds(pass, frame));
-                gpu.encodeNativePass(targetPass(scene, MetalRenderPass.LoadAction.LOAD), "MetalCraft sky: composite",
+                gpu.encodeNativePass(targetPass(scene, MetalRenderPass.LoadAction.LOAD), "Metal Mod sky: composite",
                     pass -> this.encodeComposite(pass, this.cloudView));
             }
         }

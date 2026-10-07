@@ -590,7 +590,7 @@ static id<MTLCounterSampleBuffer> mc_gpu_pass_sample_buffer(id<MTLDevice> device
 		if (timestampSet != nil && [device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary]) {
 			MTLCounterSampleBufferDescriptor *descriptor = [[MTLCounterSampleBufferDescriptor alloc] init];
 			descriptor.counterSet = timestampSet;
-			descriptor.label = @"MetalCraft pass GPU timing";
+			descriptor.label = @"Metal Mod pass GPU timing";
 			descriptor.storageMode = MTLStorageModeShared;
 			descriptor.sampleCount = MC_GPU_PASS_SLOTS * 2;
 			NSError *error = nil;
@@ -882,7 +882,7 @@ static void mc_capture_command_buffer(id<MTLCommandBuffer> buffer) {
 - (id<MTLBlitCommandEncoder>)blitEncoder {
 	if (_blitEncoder == nil) {
 		_blitEncoder = [self.commandBuffer blitCommandEncoder];
-		_blitEncoder.label = @"MetalCraft batched transfers";
+		_blitEncoder.label = @"Metal Mod batched transfers";
 	}
 	return _blitEncoder;
 }
@@ -1965,7 +1965,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateCommandQueue(JNIEnv *env, jc
 			mc_throw_state(env, @"Metal did not create a command queue for the selected device");
 			return 0;
 		}
-		commandQueue.label = @"MetalCraft primary command queue";
+		commandQueue.label = @"Metal Mod primary command queue";
 		objc_setAssociatedObject(commandQueue, &MCCommandScratchKey, [[MCCommandScratch alloc] init], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		return mc_register_object(commandQueue, MCObjectTypeCommandQueue, deviceHandle);
 	}
@@ -1983,7 +1983,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateCommandBuffer(JNIEnv *env, j
 			mc_throw_state(env, @"Metal did not create a command buffer");
 			return 0;
 		}
-		nativeCommandBuffer.label = @"MetalCraft frame command buffer";
+		nativeCommandBuffer.label = @"Metal Mod frame command buffer";
 		MCMetalCommandBuffer *commandBuffer = [[MCMetalCommandBuffer alloc] initWithCommandBuffer:nativeCommandBuffer];
 		return mc_register_object(commandBuffer, MCObjectTypeCommandBuffer, queueHandle);
 	}
@@ -2291,7 +2291,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateBuffer(
 			return 0;
 		}
 		mc_sample_allocation(device);
-		buffer.label = @"MetalCraft buffer";
+		buffer.label = @"Metal Mod buffer";
 		return mc_register_object(buffer, MCObjectTypeBuffer, deviceHandle);
 	}
 }
@@ -2729,7 +2729,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateFence(JNIEnv *env, jclass ty
 			mc_throw_state(env, @"Metal could not create a shared-event fence");
 			return 0;
 		}
-		event.label = @"MetalCraft GPU fence";
+		event.label = @"Metal Mod GPU fence";
 		return mc_register_object(event, MCObjectTypeFence, deviceHandle);
 	}
 }
@@ -2831,7 +2831,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTimestampQueryPool(
 		}
 		MTLCounterSampleBufferDescriptor *descriptor = [[MTLCounterSampleBufferDescriptor alloc] init];
 		descriptor.counterSet = timestampSet;
-		descriptor.label = @"MetalCraft timestamp queries";
+		descriptor.label = @"Metal Mod timestamp queries";
 		descriptor.storageMode = MTLStorageModeShared;
 		descriptor.sampleCount = (NSUInteger)size;
 		NSError *error = nil;
@@ -2845,7 +2845,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTimestampQueryPool(
 			size:(NSUInteger)size
 		];
 		if (pool == nil) {
-			mc_throw_state(env, @"MetalCraft could not allocate timestamp availability tracking");
+			mc_throw_state(env, @"Metal Mod could not allocate timestamp availability tracking");
 			return 0;
 		}
 		return mc_register_object(pool, MCObjectTypeTimestampQueryPool, deviceHandle);
@@ -2875,7 +2875,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nTimestampQueryValues(
 		}
 		jlong *values = calloc((NSUInteger)count * 2, sizeof(jlong));
 		if (values == NULL) {
-			mc_throw_state(env, @"MetalCraft could not allocate timestamp query results");
+			mc_throw_state(env, @"Metal Mod could not allocate timestamp query results");
 			return NULL;
 		}
 		for (jint offset = 0; offset < count; offset++) {
@@ -3009,7 +3009,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTexture(
 			return 0;
 		}
 		mc_sample_allocation(device);
-		texture.label = @"MetalCraft texture";
+		texture.label = @"Metal Mod texture";
 		return mc_register_object(texture, MCObjectTypeTexture, deviceHandle);
 	}
 }
@@ -3044,7 +3044,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateTextureView(
 			return 0;
 		}
 		mc_sample_allocation(texture.device);
-		textureView.label = @"MetalCraft texture view";
+		textureView.label = @"Metal Mod texture view";
 		return mc_register_object(textureView, MCObjectTypeTextureView, textureHandle);
 	}
 }
@@ -3090,7 +3090,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateSampler(
 		descriptor.maxAnisotropy = (NSUInteger)maxAnisotropy;
 		descriptor.lodMaxClamp = isinf(maxLod) ? FLT_MAX : (float)maxLod;
 		descriptor.lodMinClamp = (float)minLod;
-		descriptor.label = @"MetalCraft sampler";
+		descriptor.label = @"Metal Mod sampler";
 		id<MTLSamplerState> sampler = [device newSamplerStateWithDescriptor:descriptor];
 		if (sampler == nil) {
 			mc_throw_state(env, @"Metal could not create the requested sampler");
@@ -3281,7 +3281,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 				mc_throw_state(env, @"Unknown Metal pipeline input primitive topology");
 				return 0;
 		}
-		descriptor.label = @"MetalCraft render pipeline";
+		descriptor.label = @"Metal Mod render pipeline";
 		descriptor.vertexFunction = vertexFunction;
 		descriptor.fragmentFunction = fragmentFunction;
 		for (jsize index = 0; index < colorCount; index++) {
@@ -3348,7 +3348,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nCreateRenderPipeline(
 		MTLDepthStencilDescriptor *depthDescriptor = [[MTLDepthStencilDescriptor alloc] init];
 		depthDescriptor.depthCompareFunction = depthTestEnabled ? nativeCompareFunction : MTLCompareFunctionAlways;
 		depthDescriptor.depthWriteEnabled = depthTestEnabled && depthWriteEnabled;
-		depthDescriptor.label = @"MetalCraft depth-stencil state";
+		depthDescriptor.label = @"Metal Mod depth-stencil state";
 		id<MTLDepthStencilState> depthStencilState = [device newDepthStencilStateWithDescriptor:depthDescriptor];
 		if (depthStencilState == nil) {
 			mc_throw_state(env, @"Metal could not create the requested depth-stencil state");
@@ -3615,7 +3615,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginRenderPass(
 			mc_throw_state(env, @"Metal did not create a render command encoder");
 			return 0;
 		}
-		encoder.label = @"MetalCraft render pass";
+		encoder.label = @"Metal Mod render pass";
 		[encoder setViewport:(MTLViewport){0.0, 0.0, (double)targetWidth, (double)targetHeight, 0.0, 1.0}];
 		[encoder setScissorRect:(MTLScissorRect){0, 0, targetWidth, targetHeight}];
 		MCMetalRenderPass *renderPass = [[MCMetalRenderPass alloc]
@@ -3829,7 +3829,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nSetTexelBuffer(
 				return;
 			}
 			mc_sample_allocation(buffer.device);
-			texture.label = @"MetalCraft texel-buffer view";
+			texture.label = @"Metal Mod texel-buffer view";
 			[viewCache storeView:texture offset:(NSUInteger)offset length:logicalBytes format:pixelFormat];
 		}
 		MCMetalRenderPass *renderPass = objects[0];
@@ -4697,7 +4697,7 @@ Java_dev_metalcraft_client_metal_MetalNative_nBeginComputePass(
 			mc_throw_state(env, @"Metal did not create a compute command encoder");
 			return 0;
 		}
-		encoder.label = @"MetalCraft compute pass";
+		encoder.label = @"Metal Mod compute pass";
 		MCMetalComputePass *pass = [[MCMetalComputePass alloc] initWithEncoder:encoder commandBuffer:commandBuffer];
 		return mc_register_object(pass, MCObjectTypeComputePass, commandBufferHandle);
 	}

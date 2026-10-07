@@ -42,7 +42,7 @@ final class ShaderPackSettings {
 			ShaderPackSettings loaded = GSON.fromJson(reader, ShaderPackSettings.class);
 			return loaded == null ? new ShaderPackSettings() : loaded.normalized();
 		} catch (IOException | RuntimeException error) {
-			LOGGER.warn("Could not read MetalCraft shader settings from {}", path, error);
+			LOGGER.warn("Could not read Metal Mod shader settings from {}", path, error);
 			return new ShaderPackSettings();
 		}
 	}
@@ -54,7 +54,7 @@ final class ShaderPackSettings {
 				GSON.toJson(this, writer);
 			}
 		} catch (IOException error) {
-			LOGGER.warn("Could not save MetalCraft shader settings to {}", path, error);
+			LOGGER.warn("Could not save Metal Mod shader settings to {}", path, error);
 		}
 	}
 

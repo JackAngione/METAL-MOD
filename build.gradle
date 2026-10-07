@@ -4,7 +4,7 @@ plugins {
 }
 
 base {
-	archivesName = 'metalcraft'
+	archivesName = 'metal-mod'
 }
 
 loom {
@@ -165,7 +165,7 @@ tasks.named('runClient') {
 	}
 	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
 		// The game-test harness forces its own options (render distance 5, clouds off, music off)
-		// and tests change MetalCraft settings. Keep the player's files as they were before the run,
+		// and tests change Metal Mod settings. Keep the player's files as they were before the run,
 		// even when the test fails or the game is stopped.
 		doFirst {
 			delete gametestSettingsBackup

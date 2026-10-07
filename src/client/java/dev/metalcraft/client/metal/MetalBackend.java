@@ -11,7 +11,7 @@ import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
-/** Minecraft backend entry point for MetalCraft's direct Metal renderer. */
+/** Minecraft backend entry point for Metal Mod's direct Metal renderer. */
 public final class MetalBackend implements GpuBackend {
 	@Override
 	public String getName() {
@@ -43,14 +43,14 @@ public final class MetalBackend implements GpuBackend {
 			throw failure("Direct Metal is unavailable on this platform or has been disabled", null);
 		}
 		if (!MetalNative.load()) {
-			throw failure("MetalCraft could not load its direct Metal bridge", MetalNative.loadFailure().orElse(null));
+			throw failure("Metal Mod could not load its direct Metal bridge", MetalNative.loadFailure().orElse(null));
 		}
 		MetalDevice metal = MetalNative.openDefaultDevice().orElseThrow(() -> failure("Metal did not provide a default device", null));
 		try {
 			return new GpuDevice(new MetalGpuDevice(metal, defaultShaderSource), criticalShaderLoader);
 		} catch (RuntimeException error) {
 			metal.close();
-			throw failure("MetalCraft could not create its Blaze3D device adapter", error);
+			throw failure("Metal Mod could not create its Blaze3D device adapter", error);
 		}
 	}
 
@@ -60,13 +60,13 @@ public final class MetalBackend implements GpuBackend {
 			return failure("Direct Metal is unavailable on this platform or has been disabled", null);
 		}
 		if (!MetalNative.load()) {
-			return failure("MetalCraft could not load its direct Metal bridge", MetalNative.loadFailure().orElse(null));
+			return failure("Metal Mod could not load its direct Metal bridge", MetalNative.loadFailure().orElse(null));
 		}
 
 		try (MetalDevice ignored = MetalNative.openDefaultDevice().orElse(null)) {
 			return ignored == null ? failure("Metal did not provide a default device", null) : null;
 		} catch (RuntimeException error) {
-			return failure("MetalCraft could not open the default Metal device", error);
+			return failure("Metal Mod could not open the default Metal device", error);
 		}
 	}
 

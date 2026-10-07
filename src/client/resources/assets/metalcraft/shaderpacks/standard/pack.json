@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "name": "MetalCraft Standard",
+  "name": "Metal Mod Standard",
   "includes": ["shared/options.metal", "shared/shadows.metal", "shared/lighting.metal", "shared/local_lights.metal", "shared/water.metal", "shared/underwater.metal", "shared/sky.metal", "shared/wind.metal"],
   "targets": {
     "gbuffer_albedo": {

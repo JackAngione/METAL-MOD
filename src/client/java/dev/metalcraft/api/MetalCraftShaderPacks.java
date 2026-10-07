@@ -4,7 +4,7 @@ import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.util.List;
 import java.util.Optional;
 
-/** Public discovery and selection surface for MetalCraft shader packs. */
+/** Public discovery and selection surface for Metal Mod shader packs. */
 public final class MetalCraftShaderPacks {
 	private MetalCraftShaderPacks() {
 	}
@@ -31,7 +31,7 @@ public final class MetalCraftShaderPacks {
 	private static ShaderPackRuntime runtime() {
 		ShaderPackRuntime runtime = ShaderPackRuntime.active();
 		if (runtime == null) {
-			throw new IllegalStateException("MetalCraft shader packs are not available");
+			throw new IllegalStateException("Metal Mod shader packs are not available");
 		}
 		return runtime;
 	}

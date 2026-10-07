@@ -146,9 +146,9 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		}
 		var dispatcher = levelRenderer.sectionRenderDispatcher();
 		if (dispatcher == null) {
-			this.device.encodeNativePass(this.resources.depthPass(), "MetalCraft shader: shadow_terrain", pass -> {});
+			this.device.encodeNativePass(this.resources.depthPass(), "Metal Mod shader: shadow_terrain", pass -> {});
 			if (this.distantResources != null) this.device.encodeNativePass(this.distantResources.depthPass(),
-				"MetalCraft shader: shadow_distant", pass -> {});
+				"Metal Mod shader: shadow_distant", pass -> {});
 			return;
 		}
 		var session = this.device.linearWorldSession();
@@ -222,11 +222,11 @@ public final class WorldTerrainShadows implements AutoCloseable {
 					if (caster.distantMask() != 0) distantDraws.add(shadowDraw.withCascadeMask(caster.distantMask()));
 				}
 			}
-			this.device.encodeNativePass(this.resources.depthPass(), "MetalCraft shader: shadow_terrain", pass ->
+			this.device.encodeNativePass(this.resources.depthPass(), "Metal Mod shader: shadow_terrain", pass ->
 				this.renderer.encode(pass, this.frame, draws, this.device.nativeTextureView(atlas), this.device.nativeSampler(sampler),
 					inputs == null ? 0 : session.windAnimationSeconds()));
 			if (this.distantResources != null && this.distantFrame != null) {
-				this.device.encodeNativePass(this.distantResources.depthPass(), "MetalCraft shader: shadow_distant", pass ->
+				this.device.encodeNativePass(this.distantResources.depthPass(), "Metal Mod shader: shadow_distant", pass ->
 					this.renderer.encode(pass, this.distantFrame, distantDraws, this.device.nativeTextureView(atlas),
 						this.device.nativeSampler(sampler), inputs == null ? 0 : session.windAnimationSeconds()));
 			}

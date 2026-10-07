@@ -49,7 +49,7 @@ final class MetalGpuSurface implements GpuSurfaceBackend {
 			this.displaySyncEnabled = config.presentMode() != GpuSurface.PresentMode.IMMEDIATE
 				&& !MetalCraftConfig.unlockedFrameRate();
 			this.metal.setDisplaySyncEnabled(this.displaySyncEnabled);
-			LOGGER.info("MetalCraft surface configured: {}x{} presentMode={} displaySync={} unlockedFrameRate={}",
+			LOGGER.info("Metal Mod surface configured: {}x{} presentMode={} displaySync={} unlockedFrameRate={}",
 				config.width(), config.height(), config.presentMode(), this.displaySyncEnabled,
 				MetalCraftConfig.unlockedFrameRate());
 			MetalSurfaceProbe.configured(config.width(), config.height());

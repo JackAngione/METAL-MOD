@@ -14,7 +14,7 @@ import java.nio.file.Path;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 
-/** Persistent client-side settings owned by MetalCraft. */
+/** Persistent client-side settings owned by Metal Mod. */
 public final class MetalCraftConfig {
 	private static final Logger LOGGER = LogUtils.getLogger();
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -41,7 +41,7 @@ public final class MetalCraftConfig {
 		save();
 	}
 
-	/** Whether MetalCraft removes Minecraft's frame limit and forces the layer to present unsynced. */
+	/** Whether Metal Mod removes Minecraft's frame limit and forces the layer to present unsynced. */
 	public static synchronized boolean unlockedFrameRate() {
 		return data.unlockedFrameRate;
 	}
@@ -112,7 +112,7 @@ public final class MetalCraftConfig {
 			loaded.lodDetail = LodSettings.clampDetail(readInteger(json.get("lodDetail"), LodSettings.DEFAULT_DETAIL));
 			return loaded;
 		} catch (IOException | RuntimeException error) {
-			LOGGER.warn("Could not read MetalCraft settings from {}", PATH, error);
+			LOGGER.warn("Could not read Metal Mod settings from {}", PATH, error);
 			return new Data();
 		}
 	}
@@ -147,7 +147,7 @@ public final class MetalCraftConfig {
 				Files.move(temporary, PATH, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 			}
 		} catch (IOException error) {
-			LOGGER.warn("Could not save MetalCraft settings to {}", PATH, error);
+			LOGGER.warn("Could not save Metal Mod settings to {}", PATH, error);
 		} finally {
 			if (temporary != null) {
 				try { Files.deleteIfExists(temporary); }

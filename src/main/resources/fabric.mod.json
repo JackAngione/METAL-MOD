@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "metalcraft",
   "version": "${version}",
-  "name": "MetalCraft",
+  "name": "Metal Mod",
   "description": "Adds a direct Apple Metal backend for Minecraft on Apple silicon and provides a shader extension API.",
   "authors": [
-    "MetalCraft contributors"
+    "Metal Mod contributors"
   ],
   "license": "MIT",
   "environment": "client",
