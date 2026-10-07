@@ -10,6 +10,7 @@
     "FramerateLimitBypassMixin",
     "GametestHandoffMixin",
     "GameRendererWorldGradeMixin",
+    "HudVignetteMixin",
     "GpuDeviceAccessor",
     "LevelRendererAccessor",
     "LevelRendererFabulousPromotionMixin",

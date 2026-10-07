@@ -44,7 +44,7 @@ final class MetalColorGradingGameTest {
         var original = context.computeOnClient(c -> new ClientSettings(ShaderPackRuntime.active().selectedPackId(),
             MetalCraftConfig.halfResolution(), MetalCraftConfig.lodEnabled(), c.options.renderDistance().get(),
             c.options.simulationDistance().get(), c.options.bobView().get(), c.options.cloudStatus().get(),
-            c.gui.hud.isHidden(), c.getWindow().getScreenWidth(), c.getWindow().getScreenHeight(), c.getWindow().isFullscreen()));
+            c.gui.hud.isHidden(), c.options.vignette().get(), c.getWindow().getScreenWidth(), c.getWindow().getScreenHeight(), c.getWindow().isFullscreen()));
         Map<String, Object> saved = new LinkedHashMap<>();
         try {
             context.runOnClient(c -> {
@@ -101,6 +101,7 @@ final class MetalColorGradingGameTest {
             context.waitFor(c -> c.gameRenderer.mainRenderTarget().getColorTextureView().getWidth(0) == 3840
                 && c.gameRenderer.mainRenderTarget().getColorTextureView().getHeight(0) == 2160, 200);
             Object executor = context.computeOnClient(c -> ShaderPackRuntime.active().executor().orElseThrow());
+            verifyVignette(context, executor);
             verifyMenu(context, executor);
             context.runOnClient(c -> c.gui.setScreen(null));
             context.waitTicks(4);
@@ -149,6 +150,7 @@ final class MetalColorGradingGameTest {
                 c.options.simulationDistance().set(original.simulation());
                 c.options.bobView().set(original.bob());
                 c.options.cloudStatus().set(original.clouds());
+                c.options.vignette().set(original.vignette());
                 if (c.gui.hud.isHidden() != original.hudHidden()) c.gui.hud.toggle();
                 if (c.level != null) c.level.disconnect(Component.literal("Color grading test complete"));
                 c.disconnect(new TitleScreen(), false);
@@ -161,6 +163,64 @@ final class MetalColorGradingGameTest {
             });
             context.setScreen(TitleScreen::new);
         }
+    }
+
+    /** Real HUD composition must not multiply the ACES result by the vanilla corner mask. */
+    private static void verifyVignette(ClientGameTestContext context, Object executor) {
+        context.getInput().lookAt(135, -60);
+        context.runOnClient(c -> { if (c.gui.hud.isHidden()) c.gui.hud.toggle(); });
+        try {
+            for (String tone : List.of("none", "reinhard", "aces")) {
+                set(context, "tonemap", tone);
+                context.runOnClient(c -> c.options.vignette().set(false));
+                Path off = capture(context, tone + "-vignette-off", executor);
+                context.runOnClient(c -> {
+                    c.options.vignette().set(true);
+                    // Exercise the strongest ordinary vignette, independent of local daylight.
+                    c.gui.hud.vignetteBrightness = 1.0F;
+                });
+                Path on = capture(context, tone + "-vignette-on", executor);
+                double difference = cornerDifference(off, on);
+                System.out.println("Tone map vignette " + tone + ": bottomCornerMeanRgbDifference=" + difference);
+                if (tone.equals("aces")) check(difference < 0.5, "ACES corner darkening remains: " + difference);
+                else check(difference > 5, "vanilla vignette still works for " + tone + ": " + difference);
+            }
+            int warning = context.computeOnClient(c -> c.getSingleplayerServer().overworld().getWorldBorder().getWarningBlocks());
+            try {
+                command(context, "worldborder warning distance 60000000");
+                context.waitTicks(4);
+                Path borderOn = capture(context, "aces-border-warning", executor);
+                context.runOnClient(c -> c.options.vignette().set(false));
+                Path borderOff = capture(context, "aces-border-warning-off", executor);
+                double difference = cornerDifference(borderOff, borderOn);
+                check(difference > 5, "ACES preserves the world-border warning: " + difference);
+                System.out.println("Tone map world-border warning: bottomCornerMeanRgbDifference=" + difference);
+            } finally {
+                command(context, "worldborder warning distance " + warning);
+            }
+            context.runOnClient(c -> c.options.vignette().set(true));
+            sample(context, "aces-no-vignette-4k");
+        } finally {
+            context.runOnClient(c -> { if (!c.gui.hud.isHidden()) c.gui.hud.toggle(); neutral(ShaderPackRuntime.active()); });
+            context.getInput().lookAt(135, 25);
+        }
+    }
+
+    private static double cornerDifference(Path off, Path on) {
+        try (var a = NativeImage.read(Files.newInputStream(off)); var b = NativeImage.read(Files.newInputStream(on))) {
+            check(a.getWidth() == 3840 && a.getHeight() == 2160 && b.getWidth() == 3840 && b.getHeight() == 2160,
+                "vignette comparison requires actual 4K captures");
+            long difference = 0;
+            int samples = 0;
+            for (int y = 1800; y < 2100; y += 8) for (int side : new int[]{64, 3392}) for (int x = side; x < side + 384; x += 8) {
+                int ap = a.getPixel(x, y), bp = b.getPixel(x, y);
+                difference += Math.abs(net.minecraft.util.ARGB.red(ap) - net.minecraft.util.ARGB.red(bp))
+                    + Math.abs(net.minecraft.util.ARGB.green(ap) - net.minecraft.util.ARGB.green(bp))
+                    + Math.abs(net.minecraft.util.ARGB.blue(ap) - net.minecraft.util.ARGB.blue(bp));
+                samples += 3;
+            }
+            return difference / (double)samples;
+        } catch (IOException error) { throw new AssertionError(error); }
     }
 
     private static void verifyMenu(ClientGameTestContext context, Object executor) {
@@ -290,7 +350,7 @@ final class MetalColorGradingGameTest {
     }
     private static void check(boolean valid, String message) { if (!valid) throw new AssertionError(message); }
     private record ClientSettings(String pack, boolean half, boolean lod, int render, int simulation, boolean bob,
-        CloudStatus clouds, boolean hudHidden, int width, int height, boolean fullscreen) {}
+        CloudStatus clouds, boolean hudHidden, boolean vignette, int width, int height, boolean fullscreen) {}
 
     /** A fixed opaque overlay validates the GUI boundary while keeping natural terrain visible. */
     private static final class GuiSwatch extends Screen {
