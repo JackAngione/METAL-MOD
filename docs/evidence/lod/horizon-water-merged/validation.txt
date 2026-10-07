@@ -1,6 +1,0 @@
-MTL_DEBUG_LAYER=1 ./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true -PmetalLodHorizonExperimental=true -PmetalTestLodHorizon=64 --args='--graphicsBackend default'
-Passed in 4m35s on 2026-09-12; NORMAL seed 12345, 16/16 Default/Metal, M4 Max/64 GB/macOS 27.0.
-686912 distant world draws; 720735 loaded replacement draws; zero upload failures and zero charged GPU bytes after close.
-Final cache source includes partial-parent repair, bounded offscreen recapture and startup inventory invalidation fixes.
-The final merged run also verifies the magenta-chroma identity assertion described in ../water-identity-threshold/.
-Magenta water in identity captures is an intentional diagnostic mode.

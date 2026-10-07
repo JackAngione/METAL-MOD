@@ -1,6 +1,0 @@
-2026-09-12, Apple M4 Max/64 GB, macOS 27.0, Java 25.0.4
-NORMAL generated world, 16 render / 16 simulation, Default/Metal.
-MTL_DEBUG_LAYER=1
-./gradlew runClient -PmetalLifecycleTest -PmetalLodRenderTest=true --args=--graphicsBackend default
-Exit 0; 72.73 seconds.
-Full loaded-route assertions pass, zero upload failures and charged bytes on both closes. Inspected Standard terrain and half-resolution screenshots.

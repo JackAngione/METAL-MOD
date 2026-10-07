@@ -1,6 +1,0 @@
-{
-  "baseCommit": "67a10597225f17e0d5ad0c9585cb5f7e62d7d9cd",
-  "sourceSha256": "74133b618ea1bf590bc5aa00a6c8a1103f7a6bef7781e57f31e104aab03f3854",
-  "validation": "MTL_DEBUG_LAYER=1 ./gradlew build; final-build.log",
-  "scope": "Final source includes allocation-probe setup/teardown refinement after both focus-rejected attempts. Their invocation hashes and patches identify the earlier attempted source."
-}

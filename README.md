@@ -13,3 +13,7 @@ Desired client-side mod features are implemented natively with Metal.
 - \*In Progress\* Level-Of-Detail feature allowing for render distances up to 1024 chunks at significantlreduced performance cost
   
 (All testing is done on an M4 Max Mac Studio)
+
+## RUN / BUILD THE MOD
+Run the Dev Game: `./gradlew runClient` (from the project directory with JDK 25)  
+Build the mod JAR: `./gradlew build` the distributable JAR is in `build/libs/`

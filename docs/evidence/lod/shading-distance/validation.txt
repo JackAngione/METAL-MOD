@@ -1,8 +1,0 @@
-2026-09-12 P6 full-resolution reduced-lighting fallback.
-./gradlew build lodShadingBenchmark: PASS, 38s, no Metal debug layer for timing.
-MTL_DEBUG_LAYER=1 ./gradlew metalFrameMetricsSmoke lodMetalSmoke: PASS, 2s.
-MTL_DEBUG_LAYER=1 ./gradlew lodShadingBenchmark: PASS, 19s (correctness only).
-648 production differential fixtures: exact depth; max channel error 0.001953125 <=0.002.
-Full-resolution depth and coverage; no reduced target or multiresolution capability.
-Full debug build has pre-existing shaderTranslationSmoke texture-buffer/2D binding assertion. Reproduced with unchanged HEAD smoke source and HEAD native library, prepending that native resource to the smoke classpath. See retained baseline log.
-Original native source SHA256 565399a29a3d14ae932d49e817356d2787e22cb6f8818e2c6591779ab8560d5d

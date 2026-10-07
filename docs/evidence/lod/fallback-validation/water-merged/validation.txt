@@ -1,8 +1,0 @@
-2026-09-12, Apple M4 Max/64 GB, macOS 27.0, Java 25.0.4
-NORMAL generated world, 16 render / 16 simulation, Default/Metal.
-MTL_DEBUG_LAYER=1
-./gradlew runClient -PmetalLifecycleTest -PmetalWaterIdentityTest=true -PmetalLodHorizonExperimental=true -PmetalTestLod=true -PmetalTestLodHorizon=64 --args=--graphicsBackend default
-Exit 0; 278.60 seconds.
-Distant draws 636371; upload failures 0; charged GPU bytes after close 0.
-Full water suite assertions pass: depth/identity/HDR, hand/HUD, refraction, absorption, foam, underwater, reflections, resolution, resize and reload.
-Inspected 0027_metalcraft-water-w5-refraction-absorption.png.

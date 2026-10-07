@@ -1,7 +1,0 @@
-{
-  "baseCommit": "4ec1cdd84b9391c62c6585d40427a3d9c047af47",
-  "sha256": {
-    "src/client/java/dev/metalcraft/client/lod/LodDistantCache.java": "cf0a109dde8a1968cf02819a1966c38267017221481c684dd7d6422592471235",
-    "src/smoke/java/dev/metalcraft/client/lod/LodDistantSmoke.java": "505837aebabe3098cd23dee2c4a56ad1397963545ad8fdef1d1845079e1b9317"
-  }
-}

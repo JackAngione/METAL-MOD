@@ -1,5 +1,0 @@
-2026-09-12 benchmark readiness investigation.
-The receive contract now checks all 1057 chunks in the rounded server tracking footprint, then drains the light and render queues.
-The first successful probe inherited fullscreen; its actual dimensions are 3840x2160 despite a 1080p request, so this is not 1080p evidence.
-The early-visible-failure windowed run had only 444 visible sections (minimum 600), and was rejected. Warming a complete pan before capture fixes that readiness omission.
-Final qualification explicitly records window/fullscreen, scene/drawable dimensions and readiness.

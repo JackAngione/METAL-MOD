@@ -1,9 +1,0 @@
-Starting pre-LOD native-none-half-false-lod-false attempt=1
-Discarded interrupted process capture pre-LOD native-none-half-false-lod-false
-Starting pre-LOD native-none-half-false-lod-false attempt=2
-Discarded interrupted process capture pre-LOD native-none-half-false-lod-false
-Starting pre-LOD native-none-half-false-lod-false attempt=3
-Qualified pre-LOD native-none-half-false-lod-false
-Starting current native-none-half-false-lod-false attempt=1
-Qualified current native-none-half-false-lod-false
-Disabled comparison captures complete
