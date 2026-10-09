@@ -249,6 +249,22 @@ tasks.register('lodTerrainSmoke', JavaExec) {
 }
 tasks.named('check') { dependsOn tasks.named('lodTerrainSmoke') }
 
+tasks.register('lodBuildQueueSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.lod.LodBuildQueueSmoke'
+    maxHeapSize = '256m'
+}
+tasks.named('check') { dependsOn tasks.named('lodBuildQueueSmoke') }
+
+tasks.register('lodGeneratorSmoke', JavaExec) {
+    dependsOn tasks.named('compileShaderSmokeJava')
+    classpath = sourceSets.shaderSmoke.runtimeClasspath
+    mainClass = 'dev.metalcraft.client.lod.LodGeneratorSmoke'
+    maxHeapSize = '1G'
+}
+tasks.named('check') { dependsOn tasks.named('lodGeneratorSmoke') }
+
 // Distant terrain sampling and meshing throughput; timings are reported, never a build gate.
 tasks.register('lodTerrainBenchmark', JavaExec) {
     dependsOn tasks.named('compileShaderSmokeJava')
