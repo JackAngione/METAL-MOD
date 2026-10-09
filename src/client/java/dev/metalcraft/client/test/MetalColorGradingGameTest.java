@@ -1,5 +1,9 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.command;
+import static dev.metalcraft.client.test.MetalGameTestSupport.press;
+import static dev.metalcraft.client.test.MetalGameTestSupport.widgets;
+
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
@@ -18,13 +22,8 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.CloudStatus;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
-import net.minecraft.client.gui.components.AbstractWidget;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.events.ContainerEventHandler;
-import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.network.chat.Component;
@@ -251,25 +250,6 @@ final class MetalColorGradingGameTest {
             .equals(Component.translatable("metalcraft.options.shaders.title").getString()), "Back returns to Shader Packs"));
     }
 
-    private static List<AbstractWidget> widgets(ContainerEventHandler parent) {
-        var found = new java.util.ArrayList<AbstractWidget>();
-        for (GuiEventListener child : parent.children()) {
-            if (child instanceof AbstractWidget widget) found.add(widget);
-            if (child instanceof ContainerEventHandler container) found.addAll(widgets(container));
-        }
-        return found;
-    }
-
-    private static void press(ClientGameTestContext context, String label) {
-        context.runOnClient(c -> {
-            Button button = (Button)widgets(c.gui.screen()).stream().filter(widget -> widget instanceof Button
-                && widget.getMessage().getString().startsWith(label)).findFirst()
-                .orElseThrow(() -> new AssertionError("Button not found: " + label));
-            check(button.active, "Button is enabled: " + label);
-            button.onPress(new KeyEvent(GLFW.GLFW_KEY_ENTER, 0, 0));
-        });
-    }
-
     private static void neutral(ShaderPackRuntime runtime) {
         for (var option : runtime.options()) if (GRADING.contains(option.id())) runtime.setOption(option.id(), option.defaultValue());
     }
@@ -342,11 +322,6 @@ final class MetalColorGradingGameTest {
     private static int redBlue(int pixel) { return net.minecraft.util.ARGB.red(pixel) - net.minecraft.util.ARGB.blue(pixel); }
     private static boolean equal(Object a, Object b) {
         return a instanceof Number an && b instanceof Number bn ? an.doubleValue() == bn.doubleValue() : a.equals(b);
-    }
-    private static void command(ClientGameTestContext context, String text) {
-        var done = context.computeOnClient(c -> c.getSingleplayerServer().submit(() -> c.getSingleplayerServer()
-            .getCommands().performPrefixedCommand(c.getSingleplayerServer().createCommandSourceStack(), text)));
-        context.waitFor(c -> done.isDone()); done.join();
     }
     private static void check(boolean valid, String message) { if (!valid) throw new AssertionError(message); }
     private record ClientSettings(String pack, boolean half, boolean lod, int render, int simulation, boolean bob,

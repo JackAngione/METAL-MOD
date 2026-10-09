@@ -237,20 +237,7 @@ final class MetalShaderFrameExecutor implements ShaderFrameExecutor, AutoCloseab
 	}
 
 	private void packOptions(final ByteBuffer bytes) {
-		bytes.clear();
-		while (bytes.hasRemaining()) {
-			bytes.put((byte)0);
-		}
-		bytes.rewind();
-		for (ShaderPack.Option option : this.uniformOptions) {
-			Object value = this.optionValue.apply(option.id());
-			switch (option.type()) {
-				case BOOL -> bytes.putInt(Boolean.TRUE.equals(value) ? 1 : 0);
-				case INT -> bytes.putInt(((Number)value).intValue());
-				case FLOAT -> bytes.putFloat(((Number)value).floatValue());
-				case ENUM -> bytes.putInt(option.values().indexOf(value));
-			}
-		}
+		ShaderOptionUniforms.write(bytes, this.uniformOptions, this.optionValue);
 	}
 
 	private void encodeFullscreen(
