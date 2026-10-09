@@ -22,7 +22,7 @@
   "metalcraft.lod.native_distance": "Native distance: %s chunks",
   "metalcraft.lod.native_distance.tooltip": "Radius of ordinary, full-quality chunks (entities, block entities, caves and exact blocks). Beyond it, distant terrain is drawn. Smaller values are faster; has no effect when the render distance is not larger.",
   "metalcraft.lod.detail": "Distant detail: %s",
-  "metalcraft.lod.detail.tooltip": "How slowly distant terrain loses detail. Each step pushes every detail level about 1.5x farther away, adding geometry, memory and build time. 5 keeps a distant cell to roughly six pixels at 1080p. Nearby distant terrain is drawn with real block textures and shading, like ordinary chunks, out to 256 blocks at 5, 320 at 6, 384 at 7 and 512 at 8 (64 at 3, 128 at 4, none below).",
+  "metalcraft.lod.detail.tooltip": "How slowly distant terrain loses detail. Higher settings add geometry, memory and build time. 5 keeps a distant cell to roughly six pixels at 1080p. 8 preserves block-sized terrain out to 1536 blocks and keeps distant cells to roughly two pixels at 4K. Nearby distant terrain uses real block textures and shading out to 256 blocks at 5, 320 at 6, 384 at 7 and 1024 at 8 (64 at 3, 128 at 4, none below). Texture distance may shrink to fit the GPU memory budget.",
   "metalcraft.lod.detail.1": "1 — Lowest",
   "metalcraft.lod.detail.2": "2 — Very low",
   "metalcraft.lod.detail.3": "3 — Low",

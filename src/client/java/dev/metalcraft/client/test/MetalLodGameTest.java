@@ -3,9 +3,13 @@ package dev.metalcraft.client.test;
 import com.google.gson.GsonBuilder;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
+import dev.metalcraft.client.MetalCraftRenderResolution;
+import dev.metalcraft.client.mixin.WindowFramebufferAccessor;
+import org.lwjgl.glfw.GLFW;
 import dev.metalcraft.client.gui.MetalCraftLodOptionsScreen;
 import dev.metalcraft.client.lod.LodStats;
 import dev.metalcraft.client.lod.LodSystem;
+import dev.metalcraft.client.metal.MetalSurfaceProbe;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -218,21 +222,32 @@ final class MetalLodGameTest {
     }
 
     /**
-     * Captures only ({@code -PmetalLodTest=visual}): a low view across the native boundary at the
-     * lowest, default and highest detail, for judging how distant terrain looks next to native.
+     * Brief 4K captures and timings ({@code -PmetalLodTest=visual}) across the native boundary
+     * at the requested detail steps, followed by the same view with native terrain only.
      */
     static void visual(ClientGameTestContext context) {
         int savedRender = context.computeOnClient(c -> c.options.renderDistance().get());
         int savedSimulation = context.computeOnClient(c -> c.options.simulationDistance().get());
         boolean savedLod = MetalCraftConfig.lodEnabled(), savedFog = MetalCraftConfig.clearDistanceFog();
+        boolean savedHalf = MetalCraftConfig.halfResolution();
+        boolean savedVsync = context.computeOnClient(c -> c.options.enableVsync().get());
+        int savedFpsLimit = context.computeOnClient(c -> c.options.framerateLimit().get());
+        int[] savedWindow = context.computeOnClient(c -> new int[]{c.getWindow().getScreenWidth(), c.getWindow().getScreenHeight()});
+        boolean savedFullscreen = context.computeOnClient(c -> c.getWindow().isFullscreen());
+        Map<String, Object> report = new LinkedHashMap<>();
         int savedNative = MetalCraftConfig.lodNativeDistance(), savedDetail = MetalCraftConfig.lodDetail();
         String savedPack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
         int nativeDistance = Integer.getInteger("metalcraft.lodVisualNative", 8);
-        int[] details = java.util.Arrays.stream(System.getProperty("metalcraft.lodVisualDetails", "8").split(","))
+        int[] details = java.util.Arrays.stream(System.getProperty("metalcraft.lodVisualDetails", "7,8").split(","))
             .mapToInt(Integer::parseInt).toArray();
         try {
             context.runOnClient(c -> {
-                c.options.renderDistance().set(Integer.getInteger("metalcraft.lodVisualRender", 64));
+                check("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()), "Metal backend");
+                MetalCraftConfig.setHalfResolution(false);
+                c.options.enableVsync().set(false);
+                c.options.framerateLimit().set(net.minecraft.client.Options.UNLIMITED_FRAMERATE_CUTOFF);
+                if (c.getWindow().isFullscreen()) c.getWindow().toggleFullScreen();
+                c.options.renderDistance().set(RENDER);
                 c.options.simulationDistance().set(SIMULATION);
                 MetalCraftConfig.setLodEnabled(true);
                 MetalCraftConfig.setLodNativeDistance(nativeDistance);
@@ -240,8 +255,24 @@ final class MetalLodGameTest {
                 MetalCraftConfig.setClearDistanceFog(true);
                 ShaderPackRuntime.active().selectPack(ShaderPackRuntime.NONE_ID);
             });
-            context.getInput().resizeWindow(1920, 1080);
+            float scale = context.computeOnClient(c -> {
+                float[] x = new float[1], y = new float[1];
+                GLFW.glfwGetWindowContentScale(c.getWindow().handle(), x, y);
+                return Math.max(1F, x[0]);
+            });
+            context.getInput().resizeWindow(Math.round(3840 / scale), Math.round(2160 / scale));
+            context.waitTicks(5);
+            context.runOnClient(c -> {
+                var framebuffer = (WindowFramebufferAccessor)(Object)c.getWindow();
+                framebuffer.metalcraft$setFramebufferWidth(3840);
+                framebuffer.metalcraft$setFramebufferHeight(2160);
+                c.framebufferSizeChanged();
+            });
             try (World world = World.open(context)) {
+                check(!world.computeOnServer(server -> server.overworld().isFlat()), "standard world");
+                report.put("world", world.name);
+                context.waitFor(c -> c.gameRenderer.mainRenderTarget().getColorTextureView().getWidth(0) == 3840
+                    && c.gameRenderer.mainRenderTarget().getColorTextureView().getHeight(0) == 2160, 200);
                 world.command("gamemode spectator @a");
                 world.command("time set noon");
                 world.command("weather clear");
@@ -257,6 +288,9 @@ final class MetalLodGameTest {
                     context.runOnClient(c -> MetalCraftConfig.setLodDetail(detail));
                     settle(context, 2400);
                     context.waitTicks(20);
+                    report.put("detail" + detail + "Dimensions", context.computeOnClient(c -> visualDimensions("detail-" + detail)));
+                    report.put("detail" + detail + "Stats", LodSystem.stats());
+                    report.put("detail" + detail + "Timing", measure(context, "lod-visual-detail-" + detail));
                     System.out.println("Distant terrain visual detail " + detail + ": " + json(LodSystem.stats()));
                     context.takeScreenshot("lod-visual-detail-" + detail);
                 }
@@ -266,17 +300,47 @@ final class MetalLodGameTest {
                 context.waitTicks(40);
                 context.takeScreenshot("lod-visual-native");
             }
+            write(report);
         } finally {
             context.runOnClient(c -> {
                 c.options.renderDistance().set(savedRender);
                 c.options.simulationDistance().set(savedSimulation);
+                MetalCraftConfig.setHalfResolution(savedHalf);
+                c.options.enableVsync().set(savedVsync);
+                c.options.framerateLimit().set(savedFpsLimit);
                 MetalCraftConfig.setLodEnabled(savedLod);
                 MetalCraftConfig.setLodNativeDistance(savedNative);
                 MetalCraftConfig.setLodDetail(savedDetail);
                 MetalCraftConfig.setClearDistanceFog(savedFog);
                 ShaderPackRuntime.active().selectPack(savedPack);
             });
+            context.getInput().resizeWindow(savedWindow[0], savedWindow[1]);
+            context.runOnClient(c -> {
+                if (c.getWindow().isFullscreen() != savedFullscreen) c.getWindow().toggleFullScreen();
+                MetalCraftRenderResolution.apply(c);
+            });
         }
+    }
+
+    private static Map<String, Object> visualDimensions(String phase) {
+        var c = net.minecraft.client.Minecraft.getInstance();
+        var target = c.gameRenderer.mainRenderTarget().getColorTextureView();
+        int[] drawable = MetalSurfaceProbe.drawableSize();
+        check(target.getWidth(0) == 3840 && target.getHeight(0) == 2160, "actual LOD world target is 4K");
+        check(!MetalCraftConfig.halfResolution() && c.options.renderDistance().get() == RENDER
+            && c.options.simulationDistance().get() == SIMULATION, "full-resolution 128/16 LOD testing");
+        check(drawable[0] > 0 && drawable[1] > 0, "drawable dimensions available");
+        System.out.println("LOD visual " + phase + ": worldTarget=" + target.getWidth(0) + "x" + target.getHeight(0)
+            + ", presentationFramebuffer=" + c.getWindow().getWidth() + "x" + c.getWindow().getHeight()
+            + ", windowPoints=" + c.getWindow().getScreenWidth() + "x" + c.getWindow().getScreenHeight()
+            + ", drawable=" + drawable[0] + "x" + drawable[1]);
+        return Map.of("backend", RenderSystem.getDevice().getDeviceInfo().backendName(),
+            "worldTarget", new int[]{target.getWidth(0), target.getHeight(0)},
+            "presentationFramebuffer", new int[]{c.getWindow().getWidth(), c.getWindow().getHeight()},
+            "windowPoints", new int[]{c.getWindow().getScreenWidth(), c.getWindow().getScreenHeight()},
+            "drawable", drawable, "renderDistance", c.options.renderDistance().get(),
+            "simulationDistance", c.options.simulationDistance().get(), "nativeDistance", MetalCraftConfig.lodNativeDistance(),
+            "vsync", c.options.enableVsync().get(), "fpsLimit", c.options.framerateLimit().get());
     }
 
     /** Seconds until every wanted node is built and uploaded. */
