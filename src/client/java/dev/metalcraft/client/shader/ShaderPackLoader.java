@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
-import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
@@ -243,25 +242,7 @@ public final class ShaderPackLoader {
 				.filter(entry -> !entry.isDirectory())
 				.map(ZipEntry::getName)
 				.toList());
-			ZipEntry manifestEntry = zip.getEntry(prefix + "pack.json");
-			ShaderPack.Manifest manifest;
-			try (Reader reader = new InputStreamReader(zip.getInputStream(manifestEntry), StandardCharsets.UTF_8)) {
-				manifest = ShaderManifestParser.parse(id, reader);
-			}
-
-			Map<String, String> sources = new TreeMap<>();
-			Enumeration<? extends ZipEntry> entries = zip.entries();
-			while (entries.hasMoreElements()) {
-				ZipEntry entry = entries.nextElement();
-				String logicalPath = logicalSourcePath(prefix, entry.getName(), entry.isDirectory());
-				if (logicalPath == null) {
-					continue;
-				}
-				try (InputStream input = zip.getInputStream(entry)) {
-					putSource(sources, logicalPath, readText(input, id + "/" + logicalPath));
-				}
-			}
-			return new ShaderPack(id, manifest, sources);
+			return loadArchive(id, zip, prefix, zip.getEntry(prefix + "pack.json"));
 		}
 	}
 
@@ -270,29 +251,38 @@ public final class ShaderPackLoader {
 		connection.setUseCaches(false);
 		String prefix = root + "/";
 		try (JarFile jar = connection.getJarFile()) {
-			JarEntry manifestEntry = jar.getJarEntry(prefix + "pack.json");
+			ZipEntry manifestEntry = jar.getJarEntry(prefix + "pack.json");
 			if (manifestEntry == null) {
 				throw new LoadException("Bundled shader pack '" + id + "' has no pack.json");
 			}
-			ShaderPack.Manifest manifest;
-			try (Reader reader = new InputStreamReader(jar.getInputStream(manifestEntry), StandardCharsets.UTF_8)) {
-				manifest = ShaderManifestParser.parse(id, reader);
-			}
-
-			Map<String, String> sources = new TreeMap<>();
-			Enumeration<JarEntry> entries = jar.entries();
-			while (entries.hasMoreElements()) {
-				JarEntry entry = entries.nextElement();
-				String logicalPath = logicalSourcePath(prefix, entry.getName(), entry.isDirectory());
-				if (logicalPath == null) {
-					continue;
-				}
-				try (InputStream input = jar.getInputStream(entry)) {
-					putSource(sources, logicalPath, readText(input, id + "/" + logicalPath));
-				}
-			}
-			return new ShaderPack(id, manifest, sources);
+			return loadArchive(id, jar, prefix, manifestEntry);
 		}
+	}
+
+	private static ShaderPack loadArchive(
+		final String id,
+		final ZipFile archive,
+		final String prefix,
+		final ZipEntry manifestEntry
+	) throws IOException {
+		ShaderPack.Manifest manifest;
+		try (Reader reader = new InputStreamReader(archive.getInputStream(manifestEntry), StandardCharsets.UTF_8)) {
+			manifest = ShaderManifestParser.parse(id, reader);
+		}
+
+		Map<String, String> sources = new TreeMap<>();
+		Enumeration<? extends ZipEntry> entries = archive.entries();
+		while (entries.hasMoreElements()) {
+			ZipEntry entry = entries.nextElement();
+			String logicalPath = logicalSourcePath(prefix, entry.getName(), entry.isDirectory());
+			if (logicalPath == null) {
+				continue;
+			}
+			try (InputStream input = archive.getInputStream(entry)) {
+				putSource(sources, logicalPath, readText(input, id + "/" + logicalPath));
+			}
+		}
+		return new ShaderPack(id, manifest, sources);
 	}
 
 	private static String findPackPrefix(final String id, final List<String> entryNames) throws LoadException {

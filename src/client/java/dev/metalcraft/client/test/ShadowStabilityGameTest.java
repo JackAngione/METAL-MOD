@@ -1,5 +1,9 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.command;
+import static dev.metalcraft.client.test.MetalGameTestSupport.copySaveFiles;
+import static dev.metalcraft.client.test.MetalGameTestSupport.server;
+
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
@@ -9,15 +13,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.CloudStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.gamerules.GameRules;
@@ -268,31 +269,13 @@ final class ShadowStabilityGameTest {
         if (Files.isRegularFile(target.resolve("level.dat"))) return target.getFileName().toString();
         Path source = saves.resolve(sourceName).normalize();
         check(source.getParent().equals(saves) && Files.isRegularFile(source.resolve("level.dat")), "existing standard save is available: " + source);
-        try (var paths = Files.walk(source)) {
-            for (Path path : paths.toList()) {
-                if (path.getFileName().toString().equals("session.lock")) continue;
-                Path destination = target.resolve(source.relativize(path));
-                if (Files.isDirectory(path)) Files.createDirectories(destination);
-                else Files.copy(path, destination);
-            }
+        try {
+            copySaveFiles(source, target);
         } catch (java.io.IOException error) {
             throw new AssertionError("Could not copy disposable test world", error);
         }
         System.out.println("Shadow stability disposable save copy: " + target + "; source retained: " + source);
         return target.getFileName().toString();
-    }
-
-    private static void server(ClientGameTestContext context, Consumer<MinecraftServer> action) {
-        CompletableFuture<?> done = context.computeOnClient(c -> {
-            var server = c.getSingleplayerServer();
-            return server.submit(() -> action.accept(server));
-        });
-        context.waitFor(c -> done.isDone());
-        done.join();
-    }
-
-    private static void command(ClientGameTestContext context, String command) {
-        server(context, s -> s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), command));
     }
 
     private static void check(boolean valid, String message) {

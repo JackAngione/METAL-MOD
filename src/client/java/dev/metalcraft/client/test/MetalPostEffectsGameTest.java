@@ -1,5 +1,9 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.copySaveFiles;
+import static dev.metalcraft.client.test.MetalGameTestSupport.press;
+import static dev.metalcraft.client.test.MetalGameTestSupport.widgets;
+
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
@@ -20,13 +24,8 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.CloudStatus;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
-import net.minecraft.client.gui.components.AbstractWidget;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.events.ContainerEventHandler;
-import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.core.BlockPos;
@@ -258,22 +257,6 @@ final class MetalPostEffectsGameTest {
             .equals(Component.translatable("metalcraft.options.shaders.title").getString()), "Back returns to Shader Packs"));
     }
 
-    private static List<AbstractWidget> widgets(ContainerEventHandler parent) {
-        var found = new java.util.ArrayList<AbstractWidget>();
-        for (GuiEventListener child : parent.children()) {
-            if (child instanceof AbstractWidget widget) found.add(widget);
-            if (child instanceof ContainerEventHandler container) found.addAll(widgets(container));
-        }
-        return found;
-    }
-    private static void press(ClientGameTestContext context, String label) {
-        context.runOnClient(c -> {
-            Button button = (Button)widgets(c.gui.screen()).stream().filter(w -> w instanceof Button
-                && w.getMessage().getString().startsWith(label)).findFirst().orElseThrow(() -> new AssertionError("Button not found: " + label));
-            check(button.active, "Button is enabled: " + label);
-            button.onPress(new KeyEvent(GLFW.GLFW_KEY_ENTER, 0, 0));
-        });
-    }
     private static void set(ClientGameTestContext context, String id, int tier) {
         context.runOnClient(c -> ShaderPackRuntime.active().setOption(id, tier));
     }
@@ -441,13 +424,8 @@ final class MetalPostEffectsGameTest {
         Path source = saves.resolve(sourceName).normalize();
         check(source.getParent().equals(saves) && Files.isRegularFile(source.resolve("level.dat")), "existing standard save is available: " + source);
         Path target = saves.resolve("MetalCraft Post Effects " + UUID.randomUUID().toString().substring(0, 8));
-        try (var paths = Files.walk(source)) {
-            for (Path path : paths.toList()) {
-                if (path.getFileName().toString().equals("session.lock")) continue;
-                Path destination = target.resolve(source.relativize(path));
-                if (Files.isDirectory(path)) Files.createDirectories(destination);
-                else Files.copy(path, destination);
-            }
+        try {
+            copySaveFiles(source, target);
         } catch (IOException error) { throw new AssertionError("Could not copy disposable test world", error); }
         System.out.println("Post-effects disposable save copy: " + target + "; source retained: " + source);
         return target.getFileName().toString();

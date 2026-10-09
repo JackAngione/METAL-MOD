@@ -1,0 +1,85 @@
+sourceSets {
+	shaderSmoke {
+		java.srcDir 'src/smoke/java'
+		compileClasspath += sourceSets.client.output + configurations.clientCompileClasspath
+		runtimeClasspath += output + compileClasspath + configurations.clientRuntimeClasspath
+	}
+}
+
+def registerSmokeTask = { String taskName, String mainClassName, Closure configureTask ->
+	def smokeTask = tasks.register(taskName, JavaExec) {
+		dependsOn tasks.named('compileShaderSmokeJava')
+		classpath = sourceSets.shaderSmoke.runtimeClasspath
+		mainClass = mainClassName
+	}
+	smokeTask.configure(configureTask)
+	smokeTask
+}
+
+def registerMetalSmokeTask = { String taskName, String mainClassName, Closure configureTask ->
+	def smokeTask = registerSmokeTask(taskName, mainClassName, configureTask)
+	smokeTask.configure {
+		onlyIf { isAppleSiliconBuild }
+	}
+	smokeTask
+}
+
+registerMetalSmokeTask('shaderTranslationSmoke', 'dev.metalcraft.client.metal.MetalShaderTranslationSmoke') {
+	dependsOn tasks.named('clientClasses')
+	systemProperty 'metalcraft.passMerging', providers.gradleProperty('metalPassMerging').getOrElse('true')
+}
+
+// Focused production Metal readback checks for optional camera post effects.
+registerMetalSmokeTask('postEffectsSmoke', 'dev.metalcraft.client.metal.PostEffectsSmoke') {
+	dependsOn tasks.named('clientClasses')
+}
+
+// Paired GPU cost probe for zero-weight water bands; timings are not a build gate.
+registerMetalSmokeTask('waterFilteringBenchmark', 'dev.metalcraft.client.metal.WaterFilteringSmoke') {
+	dependsOn tasks.named('processClientResources')
+}
+
+// Original-vs-production cloud output and paired Metal GPU timing (not a timing gate).
+registerMetalSmokeTask('cloudPerformanceBenchmark', 'dev.metalcraft.client.metal.CloudPerformanceSmoke') {
+	dependsOn tasks.named('clientClasses')
+}
+
+registerMetalSmokeTask('metalFrameMetricsSmoke', 'dev.metalcraft.client.metal.MetalGpuFrameCaptureSmoke') {
+	dependsOn tasks.named('processClientResources')
+}
+
+// Distant terrain: cell packing, surface parity with vanilla noise, mesh coverage and layout.
+registerSmokeTask('lodTerrainSmoke', 'dev.metalcraft.client.lod.LodTerrainSmoke') {
+	args 'quick'
+	maxHeapSize = '2G'
+}
+
+// Distant terrain sampling and meshing throughput; timings are reported, never a build gate.
+registerSmokeTask('lodTerrainBenchmark', 'dev.metalcraft.client.lod.LodTerrainSmoke') {
+	maxHeapSize = '2G'
+}
+
+// Native distance correctness without generating or rendering a 256-chunk world.
+registerSmokeTask('nativeChunkDistanceSmoke', 'dev.metalcraft.client.chunk.NativeChunkDistanceSmoke') {
+	maxHeapSize = '1G'
+}
+
+registerSmokeTask('sectionStorageSmoke', 'dev.metalcraft.client.chunk.SectionStorageSmoke') {
+	maxHeapSize = '256m'
+}
+
+registerSmokeTask('lightSectionSnapshotsSmoke', 'dev.metalcraft.client.chunk.LightSectionSnapshotsSmoke') {
+	maxHeapSize = '512m'
+}
+
+// Real Metal readback checks for local emission and block-shape occlusion.
+registerMetalSmokeTask('localLightingSmoke', 'dev.metalcraft.client.shader.world.LocalLightingSmoke') {
+	dependsOn tasks.named('processClientResources')
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('shaderTranslationSmoke'), tasks.named('metalFrameMetricsSmoke'),
+		tasks.named('lodTerrainSmoke'), tasks.named('nativeChunkDistanceSmoke'),
+		tasks.named('sectionStorageSmoke'), tasks.named('lightSectionSnapshotsSmoke'),
+		tasks.named('localLightingSmoke')
+}
