@@ -25,8 +25,8 @@ public final class SectionStorageSmoke {
         public void setSectionNode(long next) { node=next; resets++; }
     }
     public static void main(String[] args) throws Exception {
-        oracle(); dirtyStateOracle(); concurrentCreation(); sparseTable(); measure();
-        System.out.println("Section storage: native indices, movement/teleport recycling, all bounds, cleanup, concurrent creation, sparse graph parity and allocation checks passed");
+        oracle(); stripMovementOracle(); dirtyStateOracle(); concurrentCreation(); sparseTable(); measure();
+        System.out.println("Section storage: native indices, movement/teleport recycling, outgoing-strip parity, all bounds, cleanup, concurrent creation, sparse graph parity and allocation checks passed");
     }
     private static void dirtyStateOracle() throws Exception {
         var ctor=SectionUpdateTracker.SectionDirtyState.class.getDeclaredConstructor(boolean.class,boolean.class,long.class);
@@ -99,6 +99,41 @@ public final class SectionStorageSmoke {
             for(var f:futures) check(f.get()==first,"concurrent identity");
         }
         check(created.get()==1 && lazy.residentEntries()==1,"single creation");
+    }
+    private static void stripMovementOracle() {
+        int radius=8, height=4, width=radius*2+1;
+        var nativeStorage=new RotatingSectionStorage<>(radius,-1,2,FACTORY);
+        var lazy=new LazySectionStorage<>(radius,-1,2,FACTORY);
+        var center=SectionPos.of(-17,0,17);
+        nativeStorage.repositionCenter(center);lazy.repositionCenter(center);
+        var resident=new Value[lazy.size()];var expected=new Value[lazy.size()];
+        for(int z=center.z()-radius;z<=center.z()+radius;z++)
+            for(int x=center.x()-radius;x<=center.x()+radius;x++)for(int y=-1;y<=2;y++) {
+                var value=lazy.getValue(x,y,z);resident[value.index]=value;
+                expected[value.index]=nativeStorage.getValue(x,y,z);
+            }
+        var random=new Random(73513);
+        for(int step=0;step<120;step++) {
+            int dx=step==0?1:random.nextInt(11)-5, dz=step==0?0:random.nextInt(11)-5;
+            if(step%19==18) { dx=width*3;dz=-width*2; }
+            if(step%11==10) { dx=0;dz=0; }
+            var next=SectionPos.of(center.x()+dx,random.nextInt(20)-10,center.z()+dz);
+            var nativeResets=new int[resident.length];var lazyResets=new int[resident.length];
+            for(int i=0;i<resident.length;i++) { nativeResets[i]=expected[i].resets;lazyResets[i]=resident[i].resets; }
+            long before=lazy.repositionVisits();
+            check(nativeStorage.repositionCenter(next)==lazy.repositionCenter(next),"strip move result");
+            for(int i=0;i<resident.length;i++) {
+                check(resident[i].node==expected[i].node && lazy.getValue(resident[i].node)==resident[i],"strip node/index/identity parity");
+                check(resident[i].resets-lazyResets[i]==expected[i].resets-nativeResets[i],"strip native reset parity");
+            }
+            if(Math.abs(dx)<width && Math.abs(dz)<width) {
+                long outgoing=(long)height*(width*(Math.abs(dx)+Math.abs(dz))-Math.abs(dx)*Math.abs(dz));
+                check(lazy.repositionVisits()-before==outgoing,"only outgoing strip residents visited");
+            }
+            if(step==0) System.out.printf("Dense storage one-section move: resident=%d visited=%d (%.1fx fewer visits)%n",
+                    resident.length,lazy.repositionVisits()-before,(double)resident.length/(lazy.repositionVisits()-before));
+            center=next;
+        }
     }
     private static void sparseTable() {
         int size=257*257*24;

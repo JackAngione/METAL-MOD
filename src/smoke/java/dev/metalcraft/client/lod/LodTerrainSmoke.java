@@ -132,6 +132,43 @@ public final class LodTerrainSmoke {
         try (LodMesh mesh = mesher.mesh(flat, 3, false, 0, 0)) {
             check(mesh.solidQuads == 1 + 4 * 1, "flat node is one top plus one skirt run per edge, was " + mesh.solidQuads);
         }
+        // Full-width masks, disjoint rectangles, holes and all native chunk group sizes.
+        LodTile floating = new LodTile();
+        java.util.Arrays.fill(floating.cells, LodCell.pack(70, 24, 75, 0x127FB2, 7));
+        floating.fluidColors = new int[LodTile.STRIDE * LodTile.STRIDE];
+        java.util.Arrays.fill(floating.fluidColors, 0xA12B83C4);
+        for (int level = 0; level <= 6; level++) {
+            for (boolean split : new boolean[]{false, true}) {
+                if (split && level > LodSession.SPLIT_LEVEL) continue;
+                try (LodMesh mesh = mesher.mesh(floating, level, split, 32, 64)) {
+                    verify(mesh, floating, level, split);
+                    check(mesh.solidQuads == 6 * mesh.groupsPerSide * mesh.groupsPerSide,
+                        "floating node merges its top, bottom and four walls in each group");
+                    check(mesh.fluidQuads == mesh.groupsPerSide * mesh.groupsPerSide,
+                        "fluid node merges each full group");
+                    verifyColors(mesh, floating, level);
+                    if (!split && level == 3) {
+                        System.out.printf("Floating level-3 mesh: %d solid quads, %d vertex bytes%n", mesh.solidQuads, mesh.bytes());
+                    }
+                }
+            }
+        }
+        Random holes = new Random(73);
+        for (int j = -1; j <= LodTile.CELLS; j++) for (int i = -1; i <= LodTile.CELLS; i++) {
+            int index = LodTile.index(i, j);
+            floating.cells[index] = holes.nextInt(7) == 0 ? LodCell.EMPTY
+                : LodCell.pack(70 + (i / 3 + j / 5) % 3, j < 16 ? 24 : 25, 75, 0x127FB2, Math.floorMod(i / 8, 3));
+            floating.fluidColors[index] = (i & 8) == 0 ? 0xA12B83C4 : 0xBADD4411;
+        }
+        for (int level = 0; level <= LodSession.SPLIT_LEVEL; level++) {
+            try (LodMesh mesh = mesher.mesh(floating, level, true, 32, 64)) {
+                verify(mesh, floating, level, true);
+                verifyColors(mesh, floating, level);
+            }
+        }
+        try (LodMesh mesh = mesher.meshTextured(floating, colors, biomes)) {
+            verify(mesh, floating, 0, true);
+        }
         System.out.println("Mesh coverage and layout passed");
     }
 
@@ -172,6 +209,7 @@ public final class LodTerrainSmoke {
         check(buffer.remaining() == (mesh.solidQuads + mesh.fluidQuads) * 4 * LodMesh.VERTEX_BYTES, "vertex byte count");
         int[] coverage = new int[LodTile.CELLS * LodTile.CELLS];
         int[] fluidCoverage = new int[LodTile.CELLS * LodTile.CELLS];
+        int[] bottomCoverage = new int[LodTile.CELLS * LodTile.CELLS];
         for (int quad = 0; quad < mesh.solidQuads + mesh.fluidQuads; quad++) {
             float[] x = new float[4], y = new float[4], z = new float[4];
             for (int vertex = 0; vertex < 4; vertex++) {
@@ -185,18 +223,32 @@ public final class LodTerrainSmoke {
             boolean horizontal = y[0] == y[1] && y[1] == y[2] && y[2] == y[3];
             if (!horizontal) continue;
             // Upward faces wind (x0,z0),(x0,z1),(x1,z1),(x1,z0), possibly starting at another corner; downward faces reverse it.
-            if (!upward(new float[][]{{x[0], y[0], z[0]}, {x[1], y[1], z[1]}, {x[2], y[2], z[2]}})) continue;
+            boolean top = upward(new float[][]{{x[0], y[0], z[0]}, {x[1], y[1], z[1]}, {x[2], y[2], z[2]}});
+            check(top || quad < mesh.solidQuads, "fluid winding faces upward");
             int i0 = Math.round(Math.min(x[0], x[2]) / cell), i1 = Math.round(Math.max(x[0], x[2]) / cell);
             int j0 = Math.round(Math.min(z[0], z[2]) / cell), j1 = Math.round(Math.max(z[0], z[2]) / cell);
             for (int j = j0; j < j1; j++) for (int i = i0; i < i1; i++) {
-                if (quad < mesh.solidQuads) coverage[i + j * LodTile.CELLS]++;
-                else fluidCoverage[i + j * LodTile.CELLS]++;
+                long value = tile.cell(i, j);
+                if (quad >= mesh.solidQuads) {
+                    fluidCoverage[i + j * LodTile.CELLS]++;
+                    check(y[0] == LodCell.fluidTop(value), "fluid quad keeps its height");
+                } else if (top) {
+                    coverage[i + j * LodTile.CELLS]++;
+                    check(y[0] == LodCell.top(value), "top quad keeps its height");
+                } else {
+                    bottomCoverage[i + j * LodTile.CELLS]++;
+                    check(y[0] == LodCell.bottom(value), "bottom quad keeps its height");
+                }
+                check(buffer.getShort(quad * 4 * LodMesh.VERTEX_BYTES + 24)
+                    == (quad >= mesh.solidQuads ? 0 : LodCell.blockLight(value) << 4), "horizontal quad keeps its block light");
             }
         }
         for (int j = 0; j < LodTile.CELLS; j++) for (int i = 0; i < LodTile.CELLS; i++) {
             long value = tile.cell(i, j);
             check(coverage[i + j * LodTile.CELLS] == (LodCell.hasTerrain(value) ? 1 : 0), "top coverage at " + i + "," + j);
             check(fluidCoverage[i + j * LodTile.CELLS] == (LodCell.hasFluid(value) ? 1 : 0), "fluid coverage at " + i + "," + j);
+            check(bottomCoverage[i + j * LodTile.CELLS] == (LodCell.hasTerrain(value) && LodCell.bottom(value) > OVERWORLD.getMinY() ? 1 : 0),
+                "bottom coverage at " + i + "," + j);
         }
         int groups = mesh.groupsPerSide * mesh.groupsPerSide;
         check(mesh.groupsPerSide == (split ? LodTile.CELLS * cell / 16 : 1), "group count");
@@ -207,6 +259,52 @@ public final class LodTerrainSmoke {
             fluid += mesh.fluidRanges[2 * group + 1];
         }
         check(solid == mesh.solidQuads && fluid == mesh.fluidQuads, "groups cover every quad");
+    }
+
+    /** Packed native-order writes must preserve exact RGBA bytes and atlas texels. */
+    private static void verifyColors(LodMesh mesh, LodTile tile, int level) {
+        var vertices = mesh.vertices().duplicate().order(java.nio.ByteOrder.nativeOrder());
+        int cell = 1 << level;
+        for (int quad = 0; quad < mesh.solidQuads; quad++) {
+            int base = quad * 4 * LodMesh.VERTEX_BYTES;
+            float height = vertices.getFloat(base + 4);
+            if (height != vertices.getFloat(base + LodMesh.VERTEX_BYTES + 4)
+                || height != vertices.getFloat(base + 2 * LodMesh.VERTEX_BYTES + 4)
+                || height != vertices.getFloat(base + 3 * LodMesh.VERTEX_BYTES + 4)) continue;
+            // All colored horizontal faces keep the atlas mapping, including merged undersides.
+            for (int vertex = 0; vertex < 4; vertex++) {
+                int offset = base + vertex * LodMesh.VERTEX_BYTES;
+                check(vertices.getFloat(offset + 16) == (32 + vertices.getFloat(offset) / cell) / LodAtlas.SIZE
+                    && vertices.getFloat(offset + 20) == (64 + vertices.getFloat(offset + 8) / cell) / LodAtlas.SIZE,
+                    "merged horizontal UVs preserve the affine colour atlas mapping");
+            }
+        }
+        for (int quad = mesh.solidQuads; quad < mesh.solidQuads + mesh.fluidQuads; quad++) {
+            int base = quad * 4 * LodMesh.VERTEX_BYTES;
+            // Every vertex of a merged fluid rectangle has the same source colour.
+            int color = (vertices.get(base + 15) & 255) << 24 | (vertices.get(base + 12) & 255) << 16
+                | (vertices.get(base + 13) & 255) << 8 | vertices.get(base + 14) & 255;
+            int opposite = base + 2 * LodMesh.VERTEX_BYTES;
+            int i0 = Math.round(Math.min(vertices.getFloat(base), vertices.getFloat(opposite)) / cell);
+            int i1 = Math.round(Math.max(vertices.getFloat(base), vertices.getFloat(opposite)) / cell);
+            int j0 = Math.round(Math.min(vertices.getFloat(base + 8), vertices.getFloat(opposite + 8)) / cell);
+            int j1 = Math.round(Math.max(vertices.getFloat(base + 8), vertices.getFloat(opposite + 8)) / cell);
+            for (int j = j0; j < j1; j++) for (int i = i0; i < i1; i++) {
+                check(color == tile.fluidColor(i, j), "fluid merge and RGBA byte order preserve each source colour");
+            }
+            for (int vertex = 1; vertex < 4; vertex++) {
+                check(vertices.getInt(base + vertex * LodMesh.VERTEX_BYTES + 12) == vertices.getInt(base + 12), "uniform fluid vertex colour");
+            }
+        }
+        var texels = mesh.colors();
+        check(texels != null && texels.remaining() == LodTile.CELLS * LodTile.CELLS * 4, "colour atlas size");
+        for (int j = 0; j < LodTile.CELLS; j++) for (int i = 0; i < LodTile.CELLS; i++) {
+            long value = tile.cell(i, j);
+            int rgb = LodCell.rgb(value), base = (i + j * LodTile.CELLS) * 4;
+            check((texels.get(base) & 255) == (rgb >> 16 & 255) && (texels.get(base + 1) & 255) == (rgb >> 8 & 255)
+                && (texels.get(base + 2) & 255) == (rgb & 255) && (texels.get(base + 3) & 255) == (LodCell.hasTerrain(value) ? 255 : 0),
+                "colour atlas RGBA byte order");
+        }
     }
 
     private static void throughput(LodGenerator generator) throws Exception {

@@ -54,21 +54,55 @@ public final class LazySectionStorage<T extends RotatingSectionStorage.Value> ex
         if (positioned && next.equals(center)) return false;
         int lowX = next.x()-radius, lowZ = next.z()-radius;
         int highX = next.x()+radius, highZ = next.z()+radius;
-        values.forEach(value -> {
-            repositionVisits++;
-            long previous = value.getSectionNode();
-            int x = SectionPos.x(previous), z = SectionPos.z(previous);
-            if (x >= lowX && x <= highX && z >= lowZ && z <= highZ) return;
-            int movedX = lowX + Math.floorMod(x-lowX,width);
-            int movedZ = lowZ + Math.floorMod(z-lowZ,width);
-            if (x != movedX || z != movedZ) {
-                // Native recycling cancels tasks/releases meshes and resets dirty state.
-                // Never replace an existing slot object: visibility nodes keep references.
-                value.setSectionNode(SectionPos.asLong(movedX,SectionPos.y(previous),movedZ));
-            }
-        });
+        long dx = (long)next.x()-center.x(), dz = (long)next.z()-center.z();
+        long movedColumns = (long)width*width
+                - Math.max(0,width-Math.abs(dx))*Math.max(0,width-Math.abs(dz));
+        if (positioned && Math.abs(dx) < width && Math.abs(dz) < width
+                && movedColumns*height < values.entries()) {
+            // A normal camera move only recycles the outgoing horizontal strips.
+            // Compare logical strip size with occupancy so sparse worlds still use
+            // the cheaper resident scan, and teleports keep the general path.
+            int oldLowX = center.x()-radius, oldLowZ = center.z()-radius;
+            int oldHighX = center.x()+radius, oldHighZ = center.z()+radius;
+            int fromX = dx > 0 ? oldLowX : highX+1;
+            int toX = dx > 0 ? lowX : oldHighX+1;
+            relocateColumns(fromX,toX,oldLowZ,oldHighZ+1,lowX,highX,lowZ,highZ);
+            int fromZ = dz > 0 ? oldLowZ : highZ+1;
+            int toZ = dz > 0 ? lowZ : oldHighZ+1;
+            // Exclude the x strip already handled, preserving one reset per slot.
+            relocateColumns(Math.max(oldLowX,lowX),Math.min(oldHighX,highX)+1,
+                    fromZ,toZ,lowX,highX,lowZ,highZ);
+        } else {
+            values.forEach(value -> relocate(value,lowX,highX,lowZ,highZ));
+        }
         center = next; positioned = true;
         return true;
+    }
+    private void relocateColumns(int fromX, int toX, int fromZ, int toZ,
+            int lowX, int highX, int lowZ, int highZ) {
+        if (fromX >= toX || fromZ >= toZ) return;
+        for (int z = fromZ; z < toZ; z++) {
+            int row = Math.floorMod(z,width)*height;
+            for (int y = 0; y < height; y++) {
+                int rowIndex = (row+y)*width, slotX = Math.floorMod(fromX,width);
+                for (int x = fromX; x < toX; x++) {
+                    T value = values.get(rowIndex+slotX);
+                    if (value != null) relocate(value,lowX,highX,lowZ,highZ);
+                    if (++slotX == width) slotX = 0;
+                }
+            }
+        }
+    }
+    private void relocate(T value, int lowX, int highX, int lowZ, int highZ) {
+        repositionVisits++;
+        long previous = value.getSectionNode();
+        int x = SectionPos.x(previous), z = SectionPos.z(previous);
+        if (x >= lowX && x <= highX && z >= lowZ && z <= highZ) return;
+        int movedX = lowX + Math.floorMod(x-lowX,width);
+        int movedZ = lowZ + Math.floorMod(z-lowZ,width);
+        // Native recycling cancels tasks/releases meshes and resets dirty state.
+        // Never replace an existing slot object: visibility nodes keep references.
+        value.setSectionNode(SectionPos.asLong(movedX,SectionPos.y(previous),movedZ));
     }
     /** Iteration is for reset/cleanup. An absent entry has no mesh or tasks to release. */
     @Override public synchronized Iterator<T> iterator() { return snapshot().iterator(); }
