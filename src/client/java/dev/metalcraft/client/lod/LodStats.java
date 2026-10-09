@@ -14,6 +14,9 @@ public final class LodStats {
     public boolean updating;
     public int capturedChunks;
     public long gpuBytes;
+    /** Effective texture radius after memory-budget reductions, in blocks. */
+    public double textureDistance;
+    public int atlasSize;
     /** Vertex bytes of the nodes drawn this frame, and of the textured ones among them. */
     public long drawnBytes;
     public long texturedBytes;
@@ -35,6 +38,8 @@ public final class LodStats {
         copy.updating = this.updating;
         copy.capturedChunks = this.capturedChunks;
         copy.gpuBytes = this.gpuBytes;
+        copy.textureDistance = this.textureDistance;
+        copy.atlasSize = this.atlasSize;
         copy.drawnBytes = this.drawnBytes;
         copy.texturedBytes = this.texturedBytes;
         copy.builds = this.builds;
