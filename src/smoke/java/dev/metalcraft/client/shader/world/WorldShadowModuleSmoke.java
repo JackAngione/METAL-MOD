@@ -23,6 +23,8 @@ public final class WorldShadowModuleSmoke {
 
 	public static void run(final MetalDevice device) {
 		ShadowFrameReuseSmoke.run();
+		DistantShadowReuseSmoke.run();
+		checkDistantGuard(device);
 		String contract;
 		try (var input = WorldShadowModuleSmoke.class.getResourceAsStream(
 			"/assets/metalcraft/shaderpacks/standard/shared/shadows.metal")) {
@@ -41,6 +43,31 @@ public final class WorldShadowModuleSmoke {
 		TerrainShadowRendererSmoke.run(device, contract);
 		ShadowSunMotionSmoke.run(device, contract);
 		System.out.println("Shadow resources: 1–4 cascades, named bindings, reconstruction and immutable uploads passed");
+	}
+
+	private static void checkDistantGuard(MetalDevice device) {
+		var settings = new ShadowCascades.Settings(1, 512, 86.4F, 2048, 0, 48);
+		var capture = new Vector3d(30_000_000, 80, -30_000_000);
+		for (float fov : new float[]{1.2F, 2.0944F}) for (float aspect : new float[]{.5F, 16F / 9, 32F / 9}) {
+		var inverse = new Matrix4f().perspective(fov, aspect, .05F, 4096, true).invert();
+		try (var module = new WorldShadowModule(device, settings);
+			 var stored = module.prepareFrame(capture, new Quaternionf(), fov, aspect,
+				 new Vector3f(1, 2, 3).normalize(), inverse, true)) {
+			for (int turn = 0; turn < 4; turn++) {
+				var rotation = turn < 2 ? new Quaternionf().rotateY(turn == 0 ? .174F : -.174F)
+					: new Quaternionf().rotateX(turn == 2 ? .174F : -.174F);
+				var current = new Vector3d(capture).add(turn < 2 ? 2 : 0, turn >= 2 ? 2 : 0, 0);
+				try (var frame = module.reprojectFrame(stored, capture, current, rotation, inverse)) {
+					for (float depth : new float[]{96, 2048}) for (int x : new int[]{-1, 1}) for (int y : new int[]{-1, 1}) {
+						var point = rotation.transform(new Vector3f(x * depth * (float)Math.tan(fov / 2) * aspect,
+							y * depth * (float)Math.tan(fov / 2), -depth));
+						if (!frame.intersects(point.x, point.y, point.z, point.x, point.y, point.z))
+							throw new AssertionError("Cached coarse volume lost frustum corner during bounded motion");
+					}
+				}
+			}
+		}
+		}
 	}
 
 	/** Project fixed receivers with Minecraft's walking bob, then reconstruct with production MSL. */
@@ -119,7 +146,7 @@ public final class WorldShadowModuleSmoke {
 		for (int i = 0; i < count; i++) {
 			Vector4f expected = cascades.get(i).cameraRelativeToShadow().transform(point, new Vector4f());
 			checks.append("ok = ok && all(abs(f.cameraRelativeToShadow[").append(i)
-				.append("] * float4(2,3,-7,1) - ").append(vector(expected)).append(") < 0.0001);\n");
+				.append("] * float4(1.5,3,-7,1) - ").append(vector(expected)).append(") < 0.0001);\n");
 			checks.append("ok = ok && abs(f.cascadeFar[").append(i).append("] - ")
 				.append(cascades.get(i).far()).append(") < 0.0001;\n");
 		}
@@ -148,6 +175,10 @@ public final class WorldShadowModuleSmoke {
 			 var first = module.prepareFrame(camera, rotation, fov, 1.5F, sun, inverse);
 			 // Upload a different frame before submitting the first: shared-buffer reuse would fail.
 			 var second = module.prepareFrame(camera, rotation, fov, 1.5F, new Vector3f(0,1,0), inverse);
+			 var rebased = module.reprojectFrame(first, camera, new Vector3d(camera).add(.5, 0, 0), rotation, inverse);
+			 // A later camera upload must not mutate the earlier reprojection's uniforms.
+			 var later = module.reprojectFrame(first, camera, new Vector3d(camera).add(1, 0, 0),
+				 new Quaternionf().rotateY(.2F), new Matrix4f(inverse).scale(2));
 			 var queue = device.createCommandQueue();
 			 var color = device.createTexture(new MetalTexture.Descriptor(MetalTexture.Format.RGBA8_UNORM, 4, 4, 1));
 			 var pipeline = device.createRenderPipeline(new MetalRenderPipeline.Descriptor(
@@ -162,11 +193,13 @@ public final class WorldShadowModuleSmoke {
 				try (var pass = commands.beginRenderPass(new MetalRenderPass.Descriptor(
 					MetalRenderPass.ColorAttachment.clear(color, 0, 0, 0, 1)))) {
 					pass.setPipeline(pipeline);
-					first.bindUniforms(pass, 3, MetalRenderPass.STAGE_FRAGMENT);
-					first.bindDepth(pass, 5);
+					rebased.bindUniforms(pass, 3, MetalRenderPass.STAGE_FRAGMENT);
+					rebased.bindDepth(pass, 5);
 					pass.draw(MetalRenderPass.Primitive.TRIANGLE, 0, 3, 1, 0);
 				}
 				first.close();
+				rebased.close();
+				later.close();
 				module.close(); // Encoded buffers, views, texture and sampler must survive this.
 				commands.commitAndWait();
 			}

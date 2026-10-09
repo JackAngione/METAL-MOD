@@ -83,6 +83,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			BaselineLightingBenchmark.run(context);
 			return;
 		}
+		if (Boolean.getBoolean("metalcraft.realtimeShadowDistanceTest")) {
+			RealtimeShadowDistanceGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.shaderDistanceTest")) {
 			MetalShaderDistanceGameTest.run(context);
 			return;

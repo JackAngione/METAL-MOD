@@ -25,6 +25,7 @@ import net.minecraft.client.gui.layouts.LayoutSettings;
 import net.minecraft.client.gui.layouts.LinearLayout;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 
@@ -256,6 +257,8 @@ public final class MetalCraftOptionsScreen extends Screen {
 	private static final class ShaderOptionSlider extends AbstractSliderButton {
 		private final ShaderPackRuntime runtime;
 		private final ShaderPack.Option option;
+		private boolean previewingPointer;
+		private Object pendingValue;
 
 		private ShaderOptionSlider(final ShaderPackRuntime runtime, final ShaderPack.Option option, final int width) {
 			super(0, 0, width, 20, optionMessage(runtime, option), normalizedValue(runtime, option));
@@ -275,7 +278,9 @@ public final class MetalCraftOptionsScreen extends Screen {
 
 		@Override
 		protected void updateMessage() {
-			this.setMessage(optionMessage(this.runtime, this.option));
+			this.setMessage(this.pendingValue != null
+				? shadowDistanceMessage(this.option, (Number)this.pendingValue)
+				: optionMessage(this.runtime, this.option));
 		}
 
 		@Override
@@ -292,6 +297,54 @@ public final class MetalCraftOptionsScreen extends Screen {
 		}
 
 		@Override
+		public void onClick(final MouseButtonEvent event, final boolean doubleClick) {
+			this.previewingPointer = isShadowDistanceOption(this.runtime, this.option);
+			try {
+				super.onClick(event, doubleClick);
+			} finally {
+				this.previewingPointer = false;
+			}
+		}
+
+		@Override
+		public void setFocused(final boolean focused) {
+			super.setFocused(focused);
+			if (!focused && this.pendingValue != null) {
+				this.pendingValue = null;
+				this.refreshValue();
+			}
+		}
+
+		@Override
+		protected void onDrag(final MouseButtonEvent event, final double dragX, final double dragY) {
+			// Distance changes rebuild shadow resources; preview while dragging and apply on release.
+			this.previewingPointer = isShadowDistanceOption(this.runtime, this.option);
+			try {
+				super.onDrag(event, dragX, dragY);
+			} finally {
+				this.previewingPointer = false;
+			}
+		}
+
+		@Override
+		public void onRelease(final MouseButtonEvent event) {
+			super.onRelease(event);
+			if (this.pendingValue != null) {
+				Object selected = this.pendingValue;
+				this.pendingValue = null;
+				this.applySelectedValue(selected);
+				this.refreshValue();
+			}
+		}
+
+		private void applySelectedValue(final Object selected) {
+			if (!isShadowDistanceOption(this.runtime, this.option)
+				|| ((Number)this.runtime.optionValue(this.option.id())).doubleValue() != ((Number)selected).doubleValue()) {
+				this.runtime.setOption(this.option.id(), selected);
+			}
+		}
+
+		@Override
 		protected void applyValue() {
 			double minimum = this.option.min().orElseThrow();
 			double maximum = this.option.max().orElseThrow();
@@ -299,8 +352,14 @@ public final class MetalCraftOptionsScreen extends Screen {
 			double step = this.option.step().orElse((maximum - minimum) / 100.0);
 			double stepped = Math.clamp(minimum + Math.round((raw - minimum) / step) * step, minimum, maximum);
 			Object value = this.option.type() == ShaderPack.OptionType.INT ? (int)Math.round(stepped) : stepped;
-			this.runtime.setOption(this.option.id(), value);
-			this.refreshValue();
+			if (this.previewingPointer) {
+				this.pendingValue = value;
+				this.value = (stepped - minimum) / (maximum - minimum);
+			} else {
+				this.pendingValue = null;
+				this.applySelectedValue(value);
+				this.refreshValue();
+			}
 		}
 	}
 
@@ -342,12 +401,22 @@ public final class MetalCraftOptionsScreen extends Screen {
 		}
 		Object value = runtime.optionValue(option.id());
 		if (isShadowDistanceOption(runtime, option)) {
-			return Component.translatable("metalcraft.shadows." + option.id(), ((Number)value).intValue());
+			return shadowDistanceMessage(option, (Number)value);
 		}
 		Component valueLabel = value instanceof Boolean bool
 			? Component.translatable("metalcraft.options.value." + bool)
 			: value instanceof String string ? Component.literal(humanize(string)) : Component.literal(value.toString());
 		return Component.literal(humanize(option.id()) + ": ").append(valueLabel);
+	}
+
+	private static Component shadowDistanceMessage(final ShaderPack.Option option, final Number value) {
+		if (option.id().equals("distant_shadow_distance") && value.intValue() == 0) {
+			return Component.translatable("metalcraft.shadows.distant_shadow_distance.off");
+		}
+		double chunks = value.doubleValue() / 16.0;
+		String label = chunks == Math.rint(chunks) ? Long.toString(Math.round(chunks))
+			: String.format(Locale.ROOT, "%.1f", chunks);
+		return Component.translatable("metalcraft.shadows." + option.id(), label);
 	}
 
 	private static String humanize(final String identifier) {
