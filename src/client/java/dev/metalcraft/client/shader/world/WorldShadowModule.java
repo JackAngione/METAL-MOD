@@ -68,13 +68,30 @@ public final class WorldShadowModule implements AutoCloseable {
 	public Frame prepareFrame(final Vector3dc cameraPosition, final Quaternionfc cameraRotation,
 		final float verticalFovRadians, final float aspect, final Vector3fc directionToSun,
 		final Matrix4fc inverseProjection) {
+		return this.prepareFrame(cameraPosition, cameraRotation, verticalFovRadians, aspect, directionToSun, inverseProjection, false);
+	}
+
+	public Frame prepareFrame(final Vector3dc cameraPosition, final Quaternionfc cameraRotation,
+		final float verticalFovRadians, final float aspect, final Vector3fc directionToSun,
+		final Matrix4fc inverseProjection, final boolean motionGuard) {
 		this.requireOpen();
 		if (!inverseProjection.isFinite() || !Float.isFinite(inverseProjection.determinant())
 			|| inverseProjection.determinant() == 0) {
 			throw new IllegalArgumentException("Invalid inverse camera projection");
 		}
-		List<ShadowCascades.Cascade> cascades = ShadowCascades.fit(this.settings, cameraPosition,
-			cameraRotation, verticalFovRadians, aspect, directionToSun, this.stabilization);
+		// Cover the bounded two-block movement and ten-degree turn while coarse depth is retained.
+		var fitSettings = motionGuard ? new ShadowCascades.Settings(this.settings.count(), this.settings.resolution(),
+			Math.max(0.01F, this.settings.near() - 4), this.settings.distance() + 4,
+			this.settings.splitWeight(), this.settings.casterExtension()) : this.settings;
+		float guardedFov = verticalFovRadians;
+		if (motionGuard) {
+			double horizontalHalf = Math.atan(Math.tan(verticalFovRadians * 0.5) * aspect);
+			guardedFov = (float)Math.min(3.05, Math.max(verticalFovRadians + 0.4,
+				2 * Math.atan(Math.tan(Math.min(1.525, horizontalHalf + 0.2)) / aspect)));
+		}
+		List<ShadowCascades.Cascade> cascades = ShadowCascades.fit(fitSettings, cameraPosition,
+			cameraRotation, guardedFov,
+			aspect, directionToSun, this.stabilization);
 		MetalBuffer buffer = this.depth.device().createBuffer(FRAME_BYTES, MetalBuffer.StorageMode.SHARED);
 		try (MetalBuffer.Mapping mapping = buffer.map()) {
 			ByteBuffer bytes = mapping.bytes();
@@ -95,6 +112,23 @@ public final class WorldShadowModule implements AutoCloseable {
 			buffer.close();
 			throw error;
 		}
+		return new Frame(buffer, cascades);
+	}
+
+	/** Rebind a stored depth map to the current camera without refitting its light volume. */
+	public Frame reprojectFrame(Frame captured, Vector3dc capturePosition, Vector3dc currentPosition,
+		Quaternionfc rotation, Matrix4fc inverseProjection) {
+		this.requireOpen();
+		var cascades = captured.cascades.stream().map(c -> new ShadowCascades.Cascade(c.near(), c.far(),
+			c.texelSize(), DistantShadowReuse.reproject(c.cameraRelativeToShadow(), capturePosition, currentPosition))).toList();
+		MetalBuffer buffer = this.depth.device().createBuffer(FRAME_BYTES, MetalBuffer.StorageMode.SHARED);
+		try (var source = captured.uniforms.map(); var target = buffer.map()) {
+			ByteBuffer bytes = target.bytes();
+			for (int i = 0; i < FRAME_BYTES; i++) bytes.put(i, source.bytes().get(i));
+			for (int i = 0; i < cascades.size(); i++) cascades.get(i).cameraRelativeToShadow().get(i * 64, bytes);
+			inverseProjection.get(256, bytes);
+			new org.joml.Matrix4f().rotation(new org.joml.Quaternionf(rotation).normalize()).get(320, bytes);
+		} catch (RuntimeException error) { buffer.close(); throw error; }
 		return new Frame(buffer, cascades);
 	}
 

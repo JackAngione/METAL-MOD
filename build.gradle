@@ -176,6 +176,9 @@ tasks.named('runClient') {
 		}
 		finalizedBy tasks.named('restoreSettingsAfterGametest')
 		systemProperty 'fabric.client.gametest', 'true'
+		systemProperty 'metalcraft.realtimeShadowDistanceTest', providers.gradleProperty('metalRealtimeShadowDistanceTest').getOrElse('false')
+		def realtimeShadowDistanceTestWorld = providers.gradleProperty('metalRealtimeShadowDistanceTestWorld')
+		if (realtimeShadowDistanceTestWorld.isPresent()) systemProperty 'metalcraft.realtimeShadowDistanceTestWorld', realtimeShadowDistanceTestWorld.get()
 		systemProperty 'metalcraft.waterIdentityTest', providers.gradleProperty('metalWaterIdentityTest').getOrElse('false')
 		systemProperty 'metalcraft.localLightingTest', providers.gradleProperty('metalLocalLightingTest').getOrElse('false')
 		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
