@@ -1,14 +1,15 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.command;
+import static dev.metalcraft.client.test.MetalGameTestSupport.press;
+import static dev.metalcraft.client.test.MetalGameTestSupport.server;
+import static dev.metalcraft.client.test.MetalGameTestSupport.widgets;
+
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.gui.MetalCraftOptionsScreen;
 import dev.metalcraft.client.shader.world.ShadowFrameReuse;
 import net.minecraft.client.gui.components.AbstractSliderButton;
-import net.minecraft.client.gui.components.AbstractWidget;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.events.ContainerEventHandler;
-import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.client.input.KeyEvent;
@@ -21,11 +22,6 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
-import net.minecraft.server.MinecraftServer;
 
 /** Bounded shadow comparison in a caller-supplied disposable copy of an existing NORMAL save. */
 final class RealtimeShadowDistanceGameTest {
@@ -234,38 +230,6 @@ final class RealtimeShadowDistanceGameTest {
                 + " linearWorld=" + MetalGpuDevices.current().lastWorldRenderWidth() + "x" + MetalGpuDevices.current().lastWorldRenderHeight()
                 + " shaderScene=" + runtime.frameWidth() + "x" + runtime.frameHeight()
                 + " drawable=" + drawable[0] + "x" + drawable[1]);
-        });
-    }
-
-    private static void server(ClientGameTestContext context, Consumer<MinecraftServer> action) {
-        CompletableFuture<?> done = context.computeOnClient(client -> {
-            var server = client.getSingleplayerServer();
-            return server.submit(() -> action.accept(server));
-        });
-        context.waitFor(client -> done.isDone());
-        done.join();
-    }
-
-    private static void command(ClientGameTestContext context, String command) {
-        server(context, server -> server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command));
-    }
-
-    private static List<AbstractWidget> widgets(ContainerEventHandler parent) {
-        var found = new ArrayList<AbstractWidget>();
-        for (GuiEventListener child : parent.children()) {
-            if (child instanceof AbstractWidget widget) found.add(widget);
-            if (child instanceof ContainerEventHandler container) found.addAll(widgets(container));
-        }
-        return found;
-    }
-
-    private static void press(ClientGameTestContext context, String label) {
-        context.runOnClient(client -> {
-            Button button = (Button)widgets(client.gui.screen()).stream().filter(widget -> widget instanceof Button
-                && widget.getMessage().getString().startsWith(label)).findFirst()
-                .orElseThrow(() -> new AssertionError("Button not found: " + label));
-            check(button.active, "Button is enabled: " + label);
-            button.onPress(new KeyEvent(GLFW.GLFW_KEY_ENTER, 0, 0));
         });
     }
 
