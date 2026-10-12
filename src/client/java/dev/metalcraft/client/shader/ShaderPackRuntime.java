@@ -202,8 +202,7 @@ public final class ShaderPackRuntime implements AutoCloseable {
 
 	public synchronized Object optionValue(final String id) {
 		this.requireOpen();
-		ShaderPack.Option option = this.option(id);
-		return this.settings.packValues(this.pack.id()).getOrDefault(id, option.defaultValue());
+		return this.optionValueUnchecked(id);
 	}
 
 	public synchronized List<ShaderPack.Option> options() {

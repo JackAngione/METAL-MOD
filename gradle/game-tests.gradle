@@ -1,0 +1,98 @@
+// Optional game-test and benchmark settings forwarded from -P to -D.
+def gameTestProperties = [
+	metalColorGradingTestWorld: 'metalcraft.colorGradingTestWorld',
+	metalPostEffectsTestWorld: 'metalcraft.postEffectsTestWorld',
+	metalLodTestWorld: 'metalcraft.lodTestWorld',
+	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
+	metalWaterDetailProbe: 'metalcraft.waterDetailProbe',
+	metalWaterW5Probe: 'metalcraft.waterW5Probe',
+	metalBenchmarkSeed: 'metalcraft.benchmarkSeed',
+	metalBenchmarkPitch: 'metalcraft.benchmarkPitch',
+	metalBenchmarkPack: 'metalcraft.benchmarkPack',
+	metalBenchmarkUnlocked: 'metalcraft.benchmarkUnlocked',
+	metalBenchmarkHalfResolution: 'metalcraft.benchmarkHalfResolution',
+	metalBenchmarkFullscreen: 'metalcraft.benchmarkFullscreen',
+	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
+	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',
+	metalBenchmarkResolution: 'metalcraft.benchmarkResolution',
+	metalBenchmarkPhaseTicks: 'metalcraft.benchmarkPhaseTicks',
+	metalBenchmarkMinimumFps: 'metalcraft.benchmarkMinimumFps',
+	metalBenchmarkMinimumOnePercentLow: 'metalcraft.benchmarkMinimumOnePercentLow',
+	metalBenchmarkMinimumVisibleSections: 'metalcraft.benchmarkMinimumVisibleSections',
+	metalBenchmarkRepeats: 'metalcraft.benchmarkRepeats',
+	// Distant-terrain visual captures (-PmetalLodTest=visual).
+	metalLodVisualNative: 'metalcraft.lodVisualNative',
+	metalLodVisualRender: 'metalcraft.lodVisualRender',
+	metalLodVisualDetails: 'metalcraft.lodVisualDetails',
+	metalLodVisualHeight: 'metalcraft.lodVisualHeight',
+	// The command-batching kill switch and its checked ABI, so a run can be compared against the
+	// per-command path back to back rather than across sessions.
+	metalCommandBatching: 'metalcraft.commandBatching',
+	metalCheckedCommands: 'metalcraft.checkedCommands',
+	// The pass-merging kill switch, for the same back-to-back comparison.
+	metalPassMerging: 'metalcraft.passMerging'
+]
+
+// Player files restored after a game-test run of runClient.
+def settingsProtectedFromGametests = ['options.txt', 'config/metalcraft.json', 'config/metalcraft-shaders.json']
+def gametestSettingsBackup = layout.buildDirectory.dir('gametest-settings-backup').get()
+
+tasks.register('restoreSettingsAfterGametest') {
+	doLast {
+		settingsProtectedFromGametests.each { name ->
+			def saved = gametestSettingsBackup.file(name).asFile
+			if (saved.exists()) copy { from saved; into file("run/${new File(name).parent ?: '.'}") }
+		}
+		delete gametestSettingsBackup
+	}
+}
+
+tasks.named('runClient') {
+	// Lets a benchmark vary the JVM it measures. Heap pressure shows up in the frame-time tail as
+	// collection pauses, so a run that cannot state its heap size cannot be compared with another.
+	def extraJvmArgs = providers.gradleProperty('metalJvmArgs')
+	if (extraJvmArgs.isPresent()) {
+		jvmArgs extraJvmArgs.get().split(' ').findAll { !it.isEmpty() }
+	}
+	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
+		// The game-test harness forces its own options (render distance 5, clouds off, music off)
+		// and tests change Metal Mod settings. Keep the player's files as they were before the run,
+		// even when the test fails or the game is stopped.
+		doFirst {
+			delete gametestSettingsBackup
+			settingsProtectedFromGametests.each { name ->
+				def source = file("run/${name}")
+				if (source.exists()) copy { from source; into gametestSettingsBackup.dir(new File(name).parent ?: '.') }
+			}
+		}
+		finalizedBy tasks.named('restoreSettingsAfterGametest')
+		systemProperty 'fabric.client.gametest', 'true'
+		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
+		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
+
+		def testFlags = [
+			metalWaterIdentityTest: 'metalcraft.waterIdentityTest',
+			metalLocalLightingTest: 'metalcraft.localLightingTest',
+			metalShadowVisibilityTest: 'metalcraft.shadowVisibilityTest',
+			metalSkyTest: 'metalcraft.skyTest',
+			metalSkyMotionTest: 'metalcraft.skyMotionTest',
+			metalColorGradingTest: 'metalcraft.colorGradingTest',
+			metalPostEffectsTest: 'metalcraft.postEffectsTest',
+			metalNativeChunkDistanceTest: 'metalcraft.nativeChunkDistanceTest',
+			metalLodTest: 'metalcraft.lodTest',
+			metalLifecycleBenchmark: 'metalcraft.lifecycleBenchmark',
+			metalShaderLifecycleTest: 'metalcraft.lifecycleShaders',
+			metalCreativeSearchTest: 'metalcraft.lifecycleCreativeSearch'
+		]
+		testFlags.each { gradleProperty, systemPropertyName ->
+			systemProperty systemPropertyName, providers.gradleProperty(gradleProperty).getOrElse('false')
+		}
+
+		gameTestProperties.each { gradleProperty, systemPropertyName ->
+			def value = providers.gradleProperty(gradleProperty)
+			if (value.isPresent()) {
+				systemProperty systemPropertyName, value.get()
+			}
+		}
+	}
+}

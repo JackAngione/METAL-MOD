@@ -1,5 +1,7 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.command;
+
 import com.google.gson.GsonBuilder;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
@@ -9,7 +11,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
-import net.minecraft.server.MinecraftServer;
 
 /** Short interleaved whole-frame local-light cost probe in the existing standard-world fixture. */
 final class LocalLightingBenchmark {
@@ -74,13 +75,5 @@ final class LocalLightingBenchmark {
     private static WorldLocalLighting.Profile profile() {
         var lights = ShaderPackRuntime.active().worldGeometry().localLighting();
         return lights == null ? null : lights.profile();
-    }
-    private static void command(ClientGameTestContext context, String command) {
-        var future = context.computeOnClient(c -> {
-            MinecraftServer server = c.getSingleplayerServer();
-            return server.submit(() -> server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command));
-        });
-        context.waitFor(c -> future.isDone());
-        future.join();
     }
 }
