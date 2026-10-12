@@ -2,6 +2,7 @@
 def gameTestProperties = [
 	metalColorGradingTestWorld: 'metalcraft.colorGradingTestWorld',
 	metalPostEffectsTestWorld: 'metalcraft.postEffectsTestWorld',
+	metalSettingsTestWorld: 'metalcraft.settingsTestWorld',
 	metalLodTestWorld: 'metalcraft.lodTestWorld',
 	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
 	metalWaterDetailProbe: 'metalcraft.waterDetailProbe',
@@ -76,6 +77,7 @@ tasks.named('runClient') {
 			metalShadowVisibilityTest: 'metalcraft.shadowVisibilityTest',
 			metalSkyTest: 'metalcraft.skyTest',
 			metalSkyMotionTest: 'metalcraft.skyMotionTest',
+			metalSettingsTest: 'metalcraft.settingsTest',
 			metalColorGradingTest: 'metalcraft.colorGradingTest',
 			metalPostEffectsTest: 'metalcraft.postEffectsTest',
 			metalNativeChunkDistanceTest: 'metalcraft.nativeChunkDistanceTest',
