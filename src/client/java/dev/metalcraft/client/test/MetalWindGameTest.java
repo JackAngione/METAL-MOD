@@ -1,5 +1,8 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.command;
+import static dev.metalcraft.client.test.MetalGameTestSupport.server;
+
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
@@ -9,13 +12,10 @@ import dev.metalcraft.client.shader.wind.WindMeshSource;
 import dev.metalcraft.client.shader.wind.WindVertexMetadata;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.CloudStatus;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
@@ -299,13 +299,6 @@ final class MetalWindGameTest {
             }
             return changed;
         }catch(java.io.IOException e){throw new AssertionError(e);}
-    }
-    private static void command(ClientGameTestContext context,String text) {
-        server(context,s -> s.getCommands().performPrefixedCommand(s.createCommandSourceStack(),text));
-    }
-    private static void server(ClientGameTestContext context,Consumer<MinecraftServer> action) {
-        CompletableFuture<?> done=context.computeOnClient(c -> {var s=c.getSingleplayerServer();return s.submit(() -> action.accept(s));});
-        context.waitFor(c -> done.isDone());done.join();
     }
     private static void check(boolean condition,String message){if(!condition)throw new AssertionError(message);}
 }

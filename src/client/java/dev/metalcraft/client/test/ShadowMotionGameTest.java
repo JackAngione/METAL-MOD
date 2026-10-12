@@ -1,5 +1,7 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.command;
+
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import java.nio.file.Files;
@@ -107,11 +109,5 @@ final class ShadowMotionGameTest {
             command(context, "forceload remove -100 -160 100 20");
             context.runOnClient(c -> c.options.cloudStatus().set(clouds));
         }
-    }
-    private static void command(ClientGameTestContext context, String command) {
-        CompletableFuture<?> done = context.computeOnClient(c -> c.getSingleplayerServer().submit(() ->
-            c.getSingleplayerServer().getCommands().performPrefixedCommand(c.getSingleplayerServer().createCommandSourceStack(), command)));
-        context.waitFor(c -> done.isDone());
-        done.join();
     }
 }

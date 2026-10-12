@@ -56,6 +56,8 @@ import dev.metalcraft.client.shader.ShaderGraphCompiler;
 import dev.metalcraft.client.shader.ShaderPack;
 import dev.metalcraft.client.shader.ShaderPackLoader;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
+import dev.metalcraft.client.shader.ShaderPackLoaderSmoke;
+import dev.metalcraft.client.shader.ShaderOptionUniformsSmoke;
 import dev.metalcraft.client.shader.WorldComposition;
 
 public final class MetalShaderTranslationSmoke {
@@ -244,6 +246,8 @@ public final class MetalShaderTranslationSmoke {
 	}
 
 	public static void main(final String[] arguments) {
+		ShaderPackLoaderSmoke.run();
+		ShaderOptionUniformsSmoke.run();
 		assertExtensionIsolation();
 		assertWorldGeometryRules();
 		assertTransientArenaSuballocation();
