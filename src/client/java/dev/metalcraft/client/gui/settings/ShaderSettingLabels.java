@@ -26,18 +26,21 @@ final class ShaderSettingLabels {
 	}
 
 	static Component optionMessage(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		return optionMessage(runtime, option, runtime.optionValue(option.id()));
+	}
+
+	/** The label for {@code value}, which may be a slider preview that has not been applied yet. */
+	static Component optionMessage(final ShaderPackRuntime runtime, final ShaderPack.Option option, final Object value) {
 		if (isStandardGradingOption(runtime, option)) {
-			return Component.translatable("metalcraft.grading." + option.id(), gradingValue(option.id(), runtime.optionValue(option.id())));
+			return Component.translatable("metalcraft.grading." + option.id(), gradingValue(option.id(), value));
 		}
 		if (isStandardWindOption(runtime, option)) {
-			Object value = runtime.optionValue(option.id());
 			Component label = value instanceof Number number
 				? Component.literal(Math.round(number.doubleValue() * 100) + "%")
 				: Component.translatable("metalcraft.options.value." + value);
 			return Component.translatable("metalcraft.wind." + option.id(), label);
 		}
 		if (isStandardWaterOption(runtime, option)) {
-			Object value = runtime.optionValue(option.id());
 			Component label = option.id().equals("water_detail")
 				? Component.translatable("metalcraft.water.detail." + ((Number)value).intValue())
 				: option.id().equals("water_detail_distance")
@@ -47,14 +50,24 @@ final class ShaderSettingLabels {
 				: Component.translatable("metalcraft.water.value." + value);
 			return Component.translatable("metalcraft.water." + option.id(), label);
 		}
-		Object value = runtime.optionValue(option.id());
 		if (isShadowDistanceOption(runtime, option)) {
-			return Component.translatable("metalcraft.shadows." + option.id(), ((Number)value).intValue());
+			return shadowDistanceMessage(option, (Number)value);
 		}
 		Component valueLabel = value instanceof Boolean bool
 			? Component.translatable("metalcraft.options.value." + bool)
 			: value instanceof String string ? Component.literal(humanize(string)) : Component.literal(value.toString());
 		return Component.literal(humanize(option.id()) + ": ").append(valueLabel);
+	}
+
+	/** Shadow ranges are stored in blocks and shown in chunks. */
+	private static Component shadowDistanceMessage(final ShaderPack.Option option, final Number value) {
+		if (option.id().equals("distant_shadow_distance") && value.intValue() == 0) {
+			return Component.translatable("metalcraft.shadows.distant_shadow_distance.off");
+		}
+		double chunks = value.doubleValue() / 16.0;
+		String label = chunks == Math.rint(chunks) ? Long.toString(Math.round(chunks))
+			: String.format(Locale.ROOT, "%.1f", chunks);
+		return Component.translatable("metalcraft.shadows." + option.id(), label);
 	}
 
 	static String humanize(final String identifier) {
