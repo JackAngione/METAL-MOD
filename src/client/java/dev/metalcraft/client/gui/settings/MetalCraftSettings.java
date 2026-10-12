@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.DoubleFunction;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
@@ -91,12 +92,15 @@ public final class MetalCraftSettings {
                         int index = option.values().indexOf(runtime.optionValue(option.id()));
                         runtime.setOption(option.id(), option.values().get((index + 1) % option.values().size()));
                     });
-                    case INT, FLOAT -> new Setting.Slider(option.min().orElseThrow(), option.max().orElseThrow(),
-                        option.step().orElse(option.type() == ShaderPack.OptionType.INT ? 1 : (option.max().orElseThrow() - option.min().orElseThrow()) / 100),
-                        () -> (Number)runtime.optionValue(option.id()), value -> {
-                            if (option.type() == ShaderPack.OptionType.INT) runtime.setOption(option.id(), (int)Math.round(value));
-                            else runtime.setOption(option.id(), value);
-                        });
+                    case INT, FLOAT -> {
+                        DoubleFunction<Object> typed = value -> option.type() == ShaderPack.OptionType.INT ? (Object)(int)Math.round(value) : value;
+                        yield new Setting.Slider(option.min().orElseThrow(), option.max().orElseThrow(),
+                            option.step().orElse(option.type() == ShaderPack.OptionType.INT ? 1 : (option.max().orElseThrow() - option.min().orElseThrow()) / 100),
+                            () -> (Number)runtime.optionValue(option.id()), value -> runtime.setOption(option.id(), typed.apply(value)),
+                            // Every recompile or reload rebuilds shader resources; drags apply once, on release.
+                            option.apply() == ShaderPack.ApplyMode.UNIFORM ? null
+                                : value -> ShaderSettingLabels.optionMessage(runtime, option, typed.apply(value)));
+                    }
                 };
                 Component group = ShaderSettingLabels.isStandardGradingOption(runtime, option)
                     ? text("metalcraft.grading.group." + ShaderSettingLabels.gradingGroup(option.id())) : ui("group.adjustments");

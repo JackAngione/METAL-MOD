@@ -3,6 +3,7 @@ def gameTestProperties = [
 	metalColorGradingTestWorld: 'metalcraft.colorGradingTestWorld',
 	metalPostEffectsTestWorld: 'metalcraft.postEffectsTestWorld',
 	metalSettingsTestWorld: 'metalcraft.settingsTestWorld',
+	metalRealtimeShadowDistanceTestWorld: 'metalcraft.realtimeShadowDistanceTestWorld',
 	metalLodTestWorld: 'metalcraft.lodTestWorld',
 	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
 	metalWaterDetailProbe: 'metalcraft.waterDetailProbe',
@@ -72,6 +73,7 @@ tasks.named('runClient') {
 		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
 
 		def testFlags = [
+			metalRealtimeShadowDistanceTest: 'metalcraft.realtimeShadowDistanceTest',
 			metalWaterIdentityTest: 'metalcraft.waterIdentityTest',
 			metalLocalLightingTest: 'metalcraft.localLightingTest',
 			metalShadowVisibilityTest: 'metalcraft.shadowVisibilityTest',

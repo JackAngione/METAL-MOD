@@ -12,6 +12,7 @@ import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import org.jspecify.annotations.Nullable;
 
 public final class SettingsWidgets {
     private SettingsWidgets() {}
@@ -141,6 +142,8 @@ public final class SettingsWidgets {
         private final Setting setting;
         private final Setting.Slider binding;
         private final Consumer<Component> failure;
+        private boolean pointer;
+        private @Nullable Double pending;
         SliderRow(Setting setting, Setting.Slider binding, int width, Consumer<Component> failure) {
             super(0, 0, width, 72, setting.message().get(), binding.normalized());
             this.setting = setting; this.binding = binding; this.failure = failure;
@@ -148,18 +151,46 @@ public final class SettingsWidgets {
         }
         @Override public void refresh() {
             active = setting.enabled().getAsBoolean();
-            value = binding.normalized();
+            // The screen refreshes every tick; keep a pointer preview where the user is dragging it.
+            if (pending == null) value = binding.normalized();
             updateMessage();
         }
-        @Override protected void updateMessage() { setMessage(setting.message().get()); }
+        @Override protected void updateMessage() {
+            setMessage(pending != null ? binding.preview().apply(pending) : setting.message().get());
+        }
         @Override protected void applyValue() {
-            attempt(() -> binding.save().accept(binding.snapped(value)), failure);
+            double selected = binding.snapped(value);
+            if (pointer && binding.preview() != null) {
+                pending = selected;
+                value = (selected - binding.minimum()) / (binding.maximum() - binding.minimum());
+            } else {
+                pending = null;
+                save(selected);
+            }
+        }
+        private void save(double selected) {
+            // Moving within one step selects the same value; saving it again could rebuild resources.
+            if (selected != binding.value().get().doubleValue()) attempt(() -> binding.save().accept(selected), failure);
             refresh();
         }
         @Override public void onClick(MouseButtonEvent event, boolean doubleClick) {
-            setValue((event.x() - getX() - 18) / (width - 36));
+            pointer = true;
+            try { setValue((event.x() - getX() - 18) / (width - 36)); }
+            finally { pointer = false; }
         }
         @Override protected void onDrag(MouseButtonEvent event, double dx, double dy) { onClick(event, false); }
+        @Override public void onRelease(MouseButtonEvent event) {
+            super.onRelease(event);
+            if (pending != null) {
+                double selected = pending;
+                pending = null;
+                save(selected);
+            }
+        }
+        @Override public void setFocused(boolean focused) {
+            super.setFocused(focused);
+            if (!focused && pending != null) { pending = null; refresh(); }
+        }
         @Override public boolean keyPressed(KeyEvent event) {
             if (active && canChangeValue && (event.isLeft() || event.isRight())) {
                 setValue(value + (event.isLeft() ? -1 : 1) * binding.step() / (binding.maximum() - binding.minimum()));
