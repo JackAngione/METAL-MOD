@@ -1,5 +1,7 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.command;
+
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.metal.MetalGpuDevices;
@@ -87,15 +89,6 @@ final class MetalShaderDistanceGameTest {
             context.waitFor(c -> c.level == null && server.isShutdown(), 1200);
             context.setScreen(TitleScreen::new);
         }
-    }
-
-    private static void command(ClientGameTestContext context, String command) {
-        var done = context.computeOnClient(c -> {
-            var server = c.getSingleplayerServer();
-            return server.submit(() -> server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command));
-        });
-        context.waitFor(c -> done.isDone());
-        done.join();
     }
 
     private static void check(boolean condition, String message) {

@@ -1,12 +1,13 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.press;
+import static dev.metalcraft.client.test.MetalGameTestSupport.widgets;
+
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
 import dev.metalcraft.client.gui.MetalCraftOptionsScreen;
 import dev.metalcraft.client.metal.MetalSurfaceProbe;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
-import java.util.ArrayList;
-import java.util.List;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractScrollArea;
@@ -170,16 +171,5 @@ final class MetalSettingsGameTest {
     }
     private static Button button(ContainerEventHandler parent, String label) { return (Button)widgets(parent).stream()
         .filter(w -> w instanceof Button && w.getMessage().getString().startsWith(label)).findFirst().orElseThrow(() -> new AssertionError("Missing button: " + label)); }
-    private static void press(ClientGameTestContext context, String label) { context.runOnClient(c -> {
-        Button b = button(c.gui.screen(), label); check(b.active, "enabled button: " + label); b.onPress(new KeyEvent(GLFW.GLFW_KEY_ENTER, 0, 0));
-    }); }
-    private static List<AbstractWidget> widgets(ContainerEventHandler parent) {
-        var widgets = new ArrayList<AbstractWidget>();
-        for (var child : parent.children()) {
-            if (child instanceof AbstractWidget widget) widgets.add(widget);
-            if (child instanceof ContainerEventHandler container) widgets.addAll(widgets(container));
-        }
-        return widgets;
-    }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
 }

@@ -32,6 +32,7 @@ final class WindSmoke {
         try {
             helpers(gpu.metal(), 1);
             helpers(gpu.metal(), 0);
+            WindShadowStabilitySmoke.run(gpu.metal());
             var runtime = gpu.shaderPackRuntime();
             runtime.selectPack(ShaderPackRuntime.BUILTIN_ID);
             runtime.setOption("wind_enabled", true);
