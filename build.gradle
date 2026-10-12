@@ -24,14 +24,6 @@ dependencies {
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 }
 
-sourceSets {
-	shaderSmoke {
-		java.srcDir 'src/smoke/java'
-		compileClasspath += sourceSets.client.output + configurations.clientCompileClasspath
-		runtimeClasspath += output + compileClasspath + configurations.clientRuntimeClasspath
-	}
-}
-
 processResources {
 	inputs.property 'version', project.version
 
@@ -40,13 +32,15 @@ processResources {
 	}
 }
 
-def isAppleSiliconBuild = System.getProperty('os.name').toLowerCase().contains('mac') &&
+ext.isAppleSiliconBuild = System.getProperty('os.name').toLowerCase().contains('mac') &&
 	['aarch64', 'arm64'].contains(System.getProperty('os.arch').toLowerCase())
 def metalNativeOutput = layout.buildDirectory.file('native/macos-arm64/libmetalcraft.dylib')
 
 tasks.register('compileMetalNative', Exec) {
 	onlyIf { isAppleSiliconBuild }
-	inputs.file('src/native/metalcraft.m')
+	inputs.files(fileTree('src/native') {
+		include '**/*.m', '**/*.h', '**/*.inc'
+	})
 	outputs.file(metalNativeOutput)
 
 	doFirst {
@@ -60,150 +54,6 @@ tasks.register('compileMetalNative', Exec) {
 		"-I${System.getProperty('java.home')}/include/darwin",
 		'-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-framework', 'AppKit',
 		'src/native/metalcraft.m', '-o', metalNativeOutput.get().asFile.absolutePath
-}
-
-tasks.register('shaderTranslationSmoke', JavaExec) {
-	dependsOn tasks.named('clientClasses')
-	dependsOn tasks.named('compileShaderSmokeJava')
-	onlyIf { isAppleSiliconBuild }
-	classpath = sourceSets.shaderSmoke.runtimeClasspath
-	mainClass = 'dev.metalcraft.client.metal.MetalShaderTranslationSmoke'
-	systemProperty 'metalcraft.passMerging', providers.gradleProperty('metalPassMerging').getOrElse('true')
-}
-
-tasks.named('check') {
-	dependsOn tasks.named('shaderTranslationSmoke')
-}
-
-// Focused production Metal readback checks for optional camera post effects.
-tasks.register('postEffectsSmoke', JavaExec) {
-	dependsOn tasks.named('clientClasses'), tasks.named('compileShaderSmokeJava')
-	onlyIf { isAppleSiliconBuild }
-	classpath = sourceSets.shaderSmoke.runtimeClasspath
-	mainClass = 'dev.metalcraft.client.metal.PostEffectsSmoke'
-}
-
-// Paired GPU cost probe for zero-weight water bands; timings are not a build gate.
-tasks.register('waterFilteringBenchmark', JavaExec) {
-	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
-	onlyIf { isAppleSiliconBuild }
-	classpath = sourceSets.shaderSmoke.runtimeClasspath
-	mainClass = 'dev.metalcraft.client.metal.WaterFilteringSmoke'
-}
-
-// Original-vs-production cloud output and paired Metal GPU timing (not a timing gate).
-tasks.register('cloudPerformanceBenchmark', JavaExec) {
-	dependsOn tasks.named('clientClasses'), tasks.named('compileShaderSmokeJava')
-	onlyIf { isAppleSiliconBuild }
-	classpath = sourceSets.shaderSmoke.runtimeClasspath
-	mainClass = 'dev.metalcraft.client.metal.CloudPerformanceSmoke'
-}
-
-tasks.register('metalFrameMetricsSmoke', JavaExec) {
-	dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
-	onlyIf { isAppleSiliconBuild }
-	classpath = sourceSets.shaderSmoke.runtimeClasspath
-	mainClass = 'dev.metalcraft.client.metal.MetalGpuFrameCaptureSmoke'
-}
-
-tasks.named('check') {
-	dependsOn tasks.named('metalFrameMetricsSmoke')
-}
-
-// Benchmark knobs, forwarded from -P<gradle property> to -D<system property>.
-def benchmarkProperties = [
-	metalWaterQualityBenchmark: 'metalcraft.waterQualityBenchmark',
-	metalWaterDetailProbe: 'metalcraft.waterDetailProbe',
-	metalWaterW5Probe: 'metalcraft.waterW5Probe',
-	metalBenchmarkSeed: 'metalcraft.benchmarkSeed',
-	metalBenchmarkPitch: 'metalcraft.benchmarkPitch',
-	metalBenchmarkPack: 'metalcraft.benchmarkPack',
-	metalBenchmarkUnlocked: 'metalcraft.benchmarkUnlocked',
-	metalBenchmarkHalfResolution: 'metalcraft.benchmarkHalfResolution',
-	metalBenchmarkFullscreen: 'metalcraft.benchmarkFullscreen',
-	metalBenchmarkRenderDistance: 'metalcraft.benchmarkRenderDistance',
-	metalBenchmarkSimulationDistance: 'metalcraft.benchmarkSimulationDistance',
-	metalBenchmarkResolution: 'metalcraft.benchmarkResolution',
-	metalBenchmarkPhaseTicks: 'metalcraft.benchmarkPhaseTicks',
-	metalBenchmarkMinimumFps: 'metalcraft.benchmarkMinimumFps',
-	metalBenchmarkMinimumOnePercentLow: 'metalcraft.benchmarkMinimumOnePercentLow',
-	metalBenchmarkMinimumVisibleSections: 'metalcraft.benchmarkMinimumVisibleSections',
-	metalBenchmarkRepeats: 'metalcraft.benchmarkRepeats',
-	// Distant-terrain visual captures (-PmetalLodTest=visual).
-	metalLodVisualNative: 'metalcraft.lodVisualNative',
-	metalLodVisualRender: 'metalcraft.lodVisualRender',
-	metalLodVisualDetails: 'metalcraft.lodVisualDetails',
-	metalLodVisualHeight: 'metalcraft.lodVisualHeight',
-	// The command-batching kill switch and its checked ABI, so a run can be compared against the
-	// per-command path back to back rather than across sessions.
-	metalCommandBatching: 'metalcraft.commandBatching',
-	metalCheckedCommands: 'metalcraft.checkedCommands',
-	// The pass-merging kill switch, for the same back-to-back comparison.
-	metalPassMerging: 'metalcraft.passMerging'
-]
-
-// Player files restored after a game-test run of runClient.
-def settingsProtectedFromGametests = ['options.txt', 'config/metalcraft.json', 'config/metalcraft-shaders.json']
-def gametestSettingsBackup = layout.buildDirectory.dir('gametest-settings-backup').get()
-
-tasks.register('restoreSettingsAfterGametest') {
-	doLast {
-		settingsProtectedFromGametests.each { name ->
-			def saved = gametestSettingsBackup.file(name).asFile
-			if (saved.exists()) copy { from saved; into file("run/${new File(name).parent ?: '.'}") }
-		}
-		delete gametestSettingsBackup
-	}
-}
-
-tasks.named('runClient') {
-	// Lets a benchmark vary the JVM it measures. Heap pressure shows up in the frame-time tail as
-	// collection pauses, so a run that cannot state its heap size cannot be compared with another.
-	def extraJvmArgs = providers.gradleProperty('metalJvmArgs')
-	if (extraJvmArgs.isPresent()) {
-		jvmArgs extraJvmArgs.get().split(' ').findAll { !it.isEmpty() }
-	}
-	if (providers.gradleProperty('metalLifecycleTest').isPresent()) {
-		// The game-test harness forces its own options (render distance 5, clouds off, music off)
-		// and tests change Metal Mod settings. Keep the player's files as they were before the run,
-		// even when the test fails or the game is stopped.
-		doFirst {
-			delete gametestSettingsBackup
-			settingsProtectedFromGametests.each { name ->
-				def source = file("run/${name}")
-				if (source.exists()) copy { from source; into gametestSettingsBackup.dir(new File(name).parent ?: '.') }
-			}
-		}
-		finalizedBy tasks.named('restoreSettingsAfterGametest')
-		systemProperty 'fabric.client.gametest', 'true'
-		systemProperty 'metalcraft.waterIdentityTest', providers.gradleProperty('metalWaterIdentityTest').getOrElse('false')
-		systemProperty 'metalcraft.localLightingTest', providers.gradleProperty('metalLocalLightingTest').getOrElse('false')
-		systemProperty 'metalcraft.shadowVisibilityTest', providers.gradleProperty('metalShadowVisibilityTest').getOrElse('false')
-		systemProperty 'metalcraft.skyTest', providers.gradleProperty('metalSkyTest').getOrElse('false')
-		systemProperty 'metalcraft.skyMotionTest', providers.gradleProperty('metalSkyMotionTest').getOrElse('false')
-		systemProperty 'metalcraft.colorGradingTest', providers.gradleProperty('metalColorGradingTest').getOrElse('false')
-		def colorGradingTestWorld = providers.gradleProperty('metalColorGradingTestWorld')
-		if (colorGradingTestWorld.isPresent()) systemProperty 'metalcraft.colorGradingTestWorld', colorGradingTestWorld.get()
-		systemProperty 'metalcraft.postEffectsTest', providers.gradleProperty('metalPostEffectsTest').getOrElse('false')
-		def postEffectsTestWorld = providers.gradleProperty('metalPostEffectsTestWorld')
-		if (postEffectsTestWorld.isPresent()) systemProperty 'metalcraft.postEffectsTestWorld', postEffectsTestWorld.get()
-		systemProperty 'fabric.client.gametest.modid', 'metalcraft'
-		systemProperty 'metalcraft.nativeChunkDistanceTest', providers.gradleProperty('metalNativeChunkDistanceTest').getOrElse('false')
-		systemProperty 'metalcraft.lodTest', providers.gradleProperty('metalLodTest').getOrElse('false')
-		def lodTestWorld = providers.gradleProperty('metalLodTestWorld')
-		if (lodTestWorld.isPresent()) systemProperty 'metalcraft.lodTestWorld', lodTestWorld.get()
-		systemProperty 'metalcraft.lifecycleExpectedBackend', providers.gradleProperty('metalLifecycleExpectedBackend').getOrElse('Metal')
-		systemProperty 'metalcraft.lifecycleBenchmark', providers.gradleProperty('metalLifecycleBenchmark').getOrElse('false')
-		systemProperty 'metalcraft.lifecycleShaders', providers.gradleProperty('metalShaderLifecycleTest').getOrElse('false')
-		systemProperty 'metalcraft.lifecycleCreativeSearch', providers.gradleProperty('metalCreativeSearchTest').getOrElse('false')
-
-		benchmarkProperties.each { gradleProperty, systemPropertyName ->
-			def value = providers.gradleProperty(gradleProperty)
-			if (value.isPresent()) {
-				systemProperty systemPropertyName, value.get()
-			}
-		}
-	}
 }
 
 processClientResources {
@@ -239,54 +89,5 @@ publishing {
 	}
 }
 
-// Distant terrain: cell packing, surface parity with vanilla noise, mesh coverage and layout.
-tasks.register('lodTerrainSmoke', JavaExec) {
-    dependsOn tasks.named('compileShaderSmokeJava')
-    classpath = sourceSets.shaderSmoke.runtimeClasspath
-    mainClass = 'dev.metalcraft.client.lod.LodTerrainSmoke'
-    args 'quick'
-    maxHeapSize = '2G'
-}
-tasks.named('check') { dependsOn tasks.named('lodTerrainSmoke') }
-
-// Distant terrain sampling and meshing throughput; timings are reported, never a build gate.
-tasks.register('lodTerrainBenchmark', JavaExec) {
-    dependsOn tasks.named('compileShaderSmokeJava')
-    classpath = sourceSets.shaderSmoke.runtimeClasspath
-    mainClass = 'dev.metalcraft.client.lod.LodTerrainSmoke'
-    maxHeapSize = '2G'
-}
-
-// Native distance correctness without generating or rendering a 256-chunk world.
-tasks.register('nativeChunkDistanceSmoke', JavaExec) {
-    dependsOn tasks.named('compileShaderSmokeJava')
-    classpath = sourceSets.shaderSmoke.runtimeClasspath
-    mainClass = 'dev.metalcraft.client.chunk.NativeChunkDistanceSmoke'
-    maxHeapSize = '1G'
-}
-tasks.named('check') { dependsOn tasks.named('nativeChunkDistanceSmoke') }
-
-tasks.register('sectionStorageSmoke', JavaExec) {
-    dependsOn tasks.named('compileShaderSmokeJava')
-    classpath = sourceSets.shaderSmoke.runtimeClasspath
-    mainClass = 'dev.metalcraft.client.chunk.SectionStorageSmoke'
-    maxHeapSize = '256m'
-}
-tasks.named('check') { dependsOn tasks.named('sectionStorageSmoke') }
-
-tasks.register('lightSectionSnapshotsSmoke', JavaExec) {
-    dependsOn tasks.named('compileShaderSmokeJava')
-    classpath = sourceSets.shaderSmoke.runtimeClasspath
-    mainClass = 'dev.metalcraft.client.chunk.LightSectionSnapshotsSmoke'
-    maxHeapSize = '512m'
-}
-tasks.named('check') { dependsOn tasks.named('lightSectionSnapshotsSmoke') }
-
-// Real Metal readback checks for local emission and block-shape occlusion.
-tasks.register('localLightingSmoke', JavaExec) {
-    dependsOn tasks.named('compileShaderSmokeJava'), tasks.named('processClientResources')
-    onlyIf { isAppleSiliconBuild }
-    classpath = sourceSets.shaderSmoke.runtimeClasspath
-    mainClass = 'dev.metalcraft.client.shader.world.LocalLightingSmoke'
-}
-tasks.named('check') { dependsOn tasks.named('localLightingSmoke') }
+apply from: 'gradle/verification.gradle'
+apply from: 'gradle/game-tests.gradle'

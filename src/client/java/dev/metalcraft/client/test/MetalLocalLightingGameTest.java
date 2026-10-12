@@ -1,18 +1,19 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.command;
+import static dev.metalcraft.client.test.MetalGameTestSupport.copySaveFiles;
+import static dev.metalcraft.client.test.MetalGameTestSupport.server;
+
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.metalcraft.client.shader.ShaderPackRuntime;
 import dev.metalcraft.client.shader.world.WorldLocalLighting;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.level.block.Blocks;
@@ -212,29 +213,13 @@ final class MetalLocalLightingGameTest {
         context.runOnClient(c -> c.gui.hud.getChat().clearMessages(true));
         return context.takeScreenshot("metalcraft-local-" + name);
     }
-    private static void command(ClientGameTestContext context, String command) {
-        server(context, s -> s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), command));
-    }
-    private static void server(ClientGameTestContext context, Consumer<MinecraftServer> action) {
-        CompletableFuture<?> done = context.computeOnClient(c -> {
-            var server = c.getSingleplayerServer();
-            return server.submit(() -> action.accept(server));
-        });
-        context.waitFor(c -> done.isDone());
-        done.join();
-    }
     private static String copySave() {
         String sourceName = System.getProperty("metalcraft.localLightingSave", "New World (1)");
         Path source = Path.of("saves", sourceName), target = Path.of("saves", "MetalCraft Local Light Test");
         if (!Files.isRegularFile(target.resolve("level.dat"))) {
             if (!Files.isRegularFile(source.resolve("level.dat"))) throw new AssertionError("Set metalcraft.localLightingSave to an existing standard save");
-            try (var paths = Files.walk(source)) {
-                for (Path path : paths.toList()) {
-                    if (path.getFileName().toString().equals("session.lock")) continue;
-                    Path destination = target.resolve(source.relativize(path));
-                    if (Files.isDirectory(path)) Files.createDirectories(destination);
-                    else Files.copy(path, destination);
-                }
+            try {
+                copySaveFiles(source, target);
             } catch (java.io.IOException error) { throw new AssertionError(error); }
         }
         return target.getFileName().toString();
