@@ -65,8 +65,8 @@ final class LodSession implements AutoCloseable {
     private final LodSavedChunks saved;
     private final LodMesher mesher;
     private final LodBlockColors colors;
-    private final LodAtlas atlas = new LodAtlas();
-    private final LodBiomes biomes = new LodBiomes();
+    private final LodAtlas atlas;
+    private final LodBiomes biomes;
     private final boolean floating;
     private final int seaLevel;
     final Map<Long, LodChunk> real = new ConcurrentHashMap<>();
@@ -76,7 +76,7 @@ final class LodSession implements AutoCloseable {
     private final ConcurrentLinkedQueue<Built> built = new ConcurrentLinkedQueue<>();
     private final List<Emit> emits = new ArrayList<>();
     private final LodBuildQueue<Node> requests;
-    private final long gpuBudget;
+    private long gpuBudget;
     private volatile boolean closed;
     private long frame;
     private long now;
@@ -103,7 +103,14 @@ final class LodSession implements AutoCloseable {
     private net.minecraft.client.renderer.culling.Frustum frustum;
     private final LodStats stats = new LodStats();
 
-    LodSession(ClientLevel level, ServerLevel server, LodBlockColors colors, Executor workers, int threads, long gpuBudget) {
+    LodSession(ClientLevel level, ServerLevel server, LodBlockColors colors, Executor workers, int threads, long gpuBudget, int atlasSize, @Nullable LodSession previous) {
+        this.biomes = previous == null ? new LodBiomes() : previous.biomes;
+        if (previous != null) {
+            this.real.putAll(previous.real);
+            this.dirtyChunks.addAll(previous.dirtyChunks);
+        }
+        this.atlas = new LodAtlas(atlasSize);
+        this.gpuBytes = (long)atlasSize * atlasSize * 4;
         this.level = level;
         this.colors = colors;
         this.workers = workers;
@@ -120,8 +127,12 @@ final class LodSession implements AutoCloseable {
             lighting.byFace(Direction.UP), lighting.byFace(Direction.DOWN), lighting.byFace(Direction.NORTH),
             lighting.byFace(Direction.SOUTH), lighting.byFace(Direction.WEST), lighting.byFace(Direction.EAST)
         };
-        this.mesher = new LodMesher(shade, LodAtlas.SIZE, LodAtlas.SIZE, LodAtlas.WHITE_UV, LodAtlas.WHITE_UV, level.getMinY());
+        this.mesher = new LodMesher(shade, this.atlas.size, this.atlas.size, this.atlas.whiteUv(), this.atlas.whiteUv(), level.getMinY());
     }
+
+    void setGpuBudget(long bytes) { this.gpuBudget = bytes; }
+
+    boolean atlasFits(int size) { return this.atlas.size >= size; }
 
     // ---- Real terrain ------------------------------------------------------------------------------
 
@@ -265,6 +276,8 @@ final class LodSession implements AutoCloseable {
         }
         this.stats.residentNodes = this.residentNodes;
         this.stats.gpuBytes = this.gpuBytes;
+        this.stats.textureDistance = this.textureDistance;
+        this.stats.atlasSize = this.atlas.size;
         this.stats.inFlight = this.inFlight;
         this.stats.pending = this.pending;
         this.stats.capturedChunks = this.real.size();
@@ -524,7 +537,7 @@ final class LodSession implements AutoCloseable {
                 if (emit.fluid.length == 0) continue;
                 fluidInfo[index] = infos.size();
             }
-            infos.add(new DynamicUniforms.ChunkSectionInfo(view, node.x * size, 0, node.z * size, 1.0F, LodAtlas.SIZE, LodAtlas.SIZE));
+            infos.add(new DynamicUniforms.ChunkSectionInfo(view, node.x * size, 0, node.z * size, 1.0F, this.atlas.size, this.atlas.size));
         }
         GpuBufferSlice[] uniforms = RenderSystem.getDynamicUniforms().writeChunkSections(infos.toArray(DynamicUniforms.ChunkSectionInfo[]::new));
         var layers = original.drawGroupsPerLayer();
@@ -639,7 +652,7 @@ final class LodSession implements AutoCloseable {
             // Nodes near the player look up saved copies of the chunks they had to generate.
             LodTile tile = this.sampler.sample(level, x, z, colors, level <= SPLIT_LEVEL, textured);
             LodMesh mesh = textured ? this.mesher.meshTextured(tile, colors, this.biomes)
-                : this.mesher.mesh(tile, level, level <= SPLIT_LEVEL, LodAtlas.slotX(slot), LodAtlas.slotY(slot));
+                : this.mesher.mesh(tile, level, level <= SPLIT_LEVEL, this.atlas.slotX(slot), this.atlas.slotY(slot));
             this.built.add(new Built(key, revision, mesh, slot, System.nanoTime() - started, false, tile.generatedChunks));
             // A session closed meanwhile never polls again; free the native mesh here instead.
             if (this.closed) this.drainClosed();

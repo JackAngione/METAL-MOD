@@ -32,6 +32,8 @@ public final class LodTerrainSmoke {
 
     public static void main(String[] args) throws Exception {
         packing();
+        atlasCapacity();
+        gpuBudgets();
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         var registries = VanillaRegistries.createLookup();
@@ -56,6 +58,69 @@ public final class LodTerrainSmoke {
         check(!LodCell.hasTerrain(LodCell.EMPTY) && !LodCell.hasFluid(LodCell.EMPTY), "empty cell");
         check(LodCell.hasFluid(LodCell.pack(40, -64, 63, 0, 0)) && !LodCell.hasFluid(LodCell.pack(70, -64, 63, 0, 0)), "fluid above terrain only");
         System.out.println("Cell packing passed");
+    }
+
+    private static void gpuBudgets() {
+        for (int detail = 1; detail < LodSettings.MAX_DETAIL; detail++) {
+            check(LodSystem.gpuBudget(0, detail) == 512L << 20, "ordinary fallback GPU budget");
+            check(LodSystem.gpuBudget(16L << 30, detail) == 1024L << 20, "ordinary working-set share");
+            check(LodSystem.gpuBudget(64L << 30, detail) == 1536L << 20, "ordinary GPU budget cap");
+        }
+        check(LodSystem.gpuBudget(0, 8) == 1024L << 20, "maximum fallback GPU budget");
+        check(LodSystem.gpuBudget(16L << 30, 8) == 2048L << 20, "maximum working-set share");
+        check(LodSystem.gpuBudget(64L << 30, 8) == 3072L << 20, "maximum GPU budget cap");
+        check(LodSystem.gpuBudget(1L << 30, 8) == 256L << 20, "maximum small-device lower bound");
+        System.out.println("Detail-dependent GPU budget bounds passed");
+    }
+
+    private static void atlasCapacity() {
+        int cases = 0;
+        for (int detail = 1; detail <= LodSettings.MAX_DETAIL; detail++) {
+            for (int render : new int[]{128, 256, 512, 1024}) for (int nativeDistance : new int[]{12, 256}) {
+                int size = LodAtlas.requiredSize(detail, render, nativeDistance);
+                check(size >= 2048 && size <= 8192 && (size & (size - 1)) == 0, "bounded power-of-two atlas");
+                long capacity = (long)(size / LodTile.CELLS) * (size / LodTile.CELLS) - 1;
+                for (double[] camera : new double[][]{{0, 0}, {15.99, 15.99}, {31.99, 31.99}, {2048, 2048}, {4095.99, 4095.99}, {1023, 2047}}) {
+                    double horizon = render * 16.0;
+                    int rootSize = LodTile.CELLS << LodSession.MAX_LEVEL;
+                    long nodes = 0;
+                    for (int x = (int)Math.floor((camera[0] - horizon) / rootSize); x <= Math.floor((camera[0] + horizon) / rootSize); x++) {
+                        for (int z = (int)Math.floor((camera[1] - horizon) / rootSize); z <= Math.floor((camera[1] + horizon) / rootSize); z++) {
+                            nodes += selectedNodes(LodSession.MAX_LEVEL, x, z, camera[0], camera[1], horizon,
+                                LodSettings.levelDistance(detail), nativeDistance);
+                        }
+                    }
+                    check(nodes + 256 < capacity, "atlas holds selection, fallback ancestors and replacements at detail " + detail + " render " + render);
+                    cases++;
+                }
+            }
+        }
+        System.out.println("Atlas capacity passed for " + cases + " camera/settings combinations");
+    }
+
+    private static long selectedNodes(int level, int x, int z, double cameraX, double cameraZ, double horizon,
+                                      int levelDistance, int nativeDistance) {
+        int size = LodTile.CELLS << level;
+        double minX = (double)x * size, minZ = (double)z * size;
+        double dx = Math.max(0, Math.max(minX - cameraX, cameraX - minX - size));
+        double dz = Math.max(0, Math.max(minZ - cameraZ, cameraZ - minZ - size));
+        double distance = Math.hypot(dx, dz);
+        if (distance > horizon) return 0;
+        double ratio = distance / levelDistance;
+        int desired = ratio < 2 ? 0 : Math.min(LodSession.MAX_LEVEL, 31 - Integer.numberOfLeadingZeros((int)ratio));
+        int chunks = size >> 4, chunkX = x * chunks, chunkZ = z * chunks;
+        int cameraChunkX = (int)Math.floor(cameraX / 16), cameraChunkZ = (int)Math.floor(cameraZ / 16);
+        int nearestX = Math.clamp(cameraChunkX, chunkX, chunkX + chunks - 1);
+        int nearestZ = Math.clamp(cameraChunkZ, chunkZ, chunkZ + chunks - 1);
+        long nativeDx = Math.max(0, Math.abs(nearestX - cameraChunkX) - 1);
+        long nativeDz = Math.max(0, Math.abs(nearestZ - cameraChunkZ) - 1);
+        boolean overlap = nativeDx * nativeDx + nativeDz * nativeDz < (long)nativeDistance * nativeDistance;
+        long nodes = 1;
+        if (level > 0 && (level > desired || overlap && level > LodSession.SPLIT_LEVEL)) {
+            for (int child = 0; child < 4; child++) nodes += selectedNodes(level - 1, 2 * x + (child & 1), 2 * z + (child >> 1),
+                cameraX, cameraZ, horizon, levelDistance, nativeDistance);
+        }
+        return nodes;
     }
 
     /** Corner and interpolated columns against vanilla's own noise-only surface for the same seed. */
@@ -94,6 +159,21 @@ public final class LodTerrainSmoke {
         LodBlockColors colors = LodBlockColors.uniform(0xFF7FB238);
         LodMesher mesher = new LodMesher(new float[]{1, 0.5F, 0.8F, 0.8F, 0.6F, 0.6F}, LodAtlas.SIZE, LodAtlas.SIZE,
             LodAtlas.WHITE_UV, LodAtlas.WHITE_UV, OVERWORLD.getMinY());
+        for (int atlasSize : new int[]{4096, 8192}) {
+            float white = (LodTile.CELLS / 2 + 0.5F) / atlasSize;
+            var largeMesher = new LodMesher(new float[]{1, 0.5F, 0.8F, 0.8F, 0.6F, 0.6F}, atlasSize, atlasSize, white, white, OVERWORLD.getMinY());
+            LodTile tile = sampler.sample(0, 3, -5, colors, false, false);
+            int slot = atlasSize - LodTile.CELLS;
+            try (LodMesh mesh = largeMesher.mesh(tile, 0, false, slot, slot)) {
+                verify(mesh, tile, 0, false);
+                var bytes = mesh.vertices().duplicate().order(java.nio.ByteOrder.nativeOrder());
+                for (int vertex = 0; vertex < mesh.solidQuads * 4; vertex++) {
+                    float u = bytes.getFloat(vertex * LodMesh.VERTEX_BYTES + 16);
+                    float v = bytes.getFloat(vertex * LodMesh.VERTEX_BYTES + 20);
+                    check(u >= slot / (float)atlasSize && u <= 1 && v >= slot / (float)atlasSize && v <= 1, "last enlarged-atlas slot UVs");
+                }
+            }
+        }
         for (int level = 0; level <= 6; level += 2) {
             LodTile tile = sampler.sample(level, 3, -5, colors, false, false);
             for (boolean split : new boolean[]{false, true}) {

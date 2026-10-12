@@ -23,15 +23,21 @@ final class LodAtlas implements AutoCloseable {
     static final int SLOTS = PER_ROW * PER_ROW;
     static final float WHITE_UV = (SLOT / 2 + 0.5F) / SIZE;
 
+    final int size;
+    private final int perRow;
+    private final int slots;
     private final GpuTexture texture;
     private final GpuTextureView view;
     final LodTextureBinding binding;
     private final IntArrayList free = new IntArrayList(SLOTS);
 
-    LodAtlas() {
+    LodAtlas(int size) {
+        this.size = size;
+        this.perRow = size / SLOT;
+        this.slots = this.perRow * this.perRow;
         var device = RenderSystem.getDevice();
         this.texture = device.createTexture("Metal Mod distant terrain colours",
-            GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, SIZE, SIZE, 1, 1);
+            GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, 1);
         this.view = device.createTextureView(this.texture);
         this.binding = new LodTextureBinding(this.view, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
         ByteBuffer white = MemoryUtil.memAlloc(SLOT * SLOT * 4);
@@ -42,12 +48,36 @@ final class LodAtlas implements AutoCloseable {
         } finally {
             MemoryUtil.memFree(white);
         }
-        for (int slot = SLOTS - 1; slot > 0; slot--) this.free.add(slot);
+        for (int slot = this.slots - 1; slot > 0; slot--) this.free.add(slot);
     }
 
-    static int slotX(int slot) { return slot % PER_ROW * SLOT; }
+    int slotX(int slot) { return slot % this.perRow * SLOT; }
 
-    static int slotY(int slot) { return slot / PER_ROW * SLOT; }
+    int slotY(int slot) { return slot / this.perRow * SLOT; }
+
+    float whiteUv() { return (SLOT / 2 + 0.5F) / this.size; }
+
+    static int requiredSize(int detail, int renderDistance, int nativeDistance) {
+        double horizon = renderDistance * 16.0;
+        double distance = LodSettings.levelDistance(detail);
+        long selected = 0;
+        for (int level = 0; level <= LodSession.MAX_LEVEL; level++) {
+            double width = SLOT * (1 << level);
+            double inner = level == 0 ? 0 : distance * (1 << level);
+            if (inner >= horizon) continue;
+            double outer = level == LodSession.MAX_LEVEL ? horizon : Math.min(horizon, distance * (1 << (level + 1)));
+            // A selected square lies outside the inner disk and within one diagonal of the outer disk.
+            selected += (long)Math.ceil(Math.PI * (Math.pow(outer + Math.sqrt(2) * width, 2) - inner * inner) / (width * width));
+        }
+        double nativeWidth = SLOT * (1 << LodSession.SPLIT_LEVEL);
+        double nativeRadius = Math.min(horizon, (nativeDistance + 2) * 16.0);
+        selected += (long)Math.ceil(Math.PI * Math.pow(nativeRadius + Math.sqrt(2) * nativeWidth, 2) / (nativeWidth * nativeWidth));
+        // Retain parent fallbacks and room for concurrent replacements while old nodes are evicted.
+        long required = selected * 4 / 3 + 256;
+        int size = SIZE;
+        while ((long)(size / SLOT) * (size / SLOT) - 1 < required && size < 8192) size *= 2;
+        return size;
+    }
 
     /** A free slot, or -1 when every slot is in use. */
     int allocate() { return this.free.isEmpty() ? -1 : this.free.removeInt(this.free.size() - 1); }

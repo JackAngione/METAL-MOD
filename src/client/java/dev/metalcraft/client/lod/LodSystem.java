@@ -106,6 +106,10 @@ public final class LodSystem {
     }
 
     private static void tick(Minecraft client) {
+        tick(client, null);
+    }
+
+    private static void tick(Minecraft client, @Nullable LodSession previous) {
         logStatus(client);
         var level = client.level;
         var server = client.getSingleplayerServer();
@@ -121,7 +125,8 @@ public final class LodSystem {
             if (serverLevel == null) return;
             LodBlockColors colors = LodBlockColors.current();
             if (colors == null) colors = LodBlockColors.rebuild(client);
-            session = new LodSession(level, serverLevel, colors, workers(), workerThreads, gpuBudget());
+            session = new LodSession(level, serverLevel, colors, workers(), workerThreads, gpuBudget(MetalCraftConfig.lodDetail()),
+                LodAtlas.requiredSize(MetalCraftConfig.lodDetail(), client.options.renderDistance().get(), MetalCraftConfig.lodNativeDistance()), previous);
         }
         session.tick();
     }
@@ -156,10 +161,16 @@ public final class LodSystem {
     }
 
     /** A bounded share of Metal's recommended working set; a cap, not an allocation. */
-    private static long gpuBudget() {
+    private static long gpuBudget(int detail) {
         MetalGpuDevice device = MetalGpuDevices.current();
         long workingSet = device == null ? 0 : device.metal().recommendedWorkingSetBytes();
-        return workingSet <= 0 ? 512L << 20 : Math.clamp(workingSet / 16, 256L << 20, 1536L << 20);
+        return gpuBudget(workingSet, detail);
+    }
+
+    static long gpuBudget(long workingSet, int detail) {
+        boolean maximum = LodSettings.clampDetail(detail) == LodSettings.MAX_DETAIL;
+        if (workingSet <= 0) return (maximum ? 1024L : 512L) << 20;
+        return Math.clamp(workingSet / (maximum ? 8 : 16), 256L << 20, (maximum ? 3072L : 1536L) << 20);
     }
 
     /** Discards distant terrain; it rebuilds on the next tick if still enabled. */
@@ -197,7 +208,16 @@ public final class LodSystem {
     public static void prepare(CameraRenderState camera) {
         LodSession current = session;
         if (current == null || !limitsNativeDistance()) return;
+        Minecraft client = Minecraft.getInstance();
+        int atlasSize = LodAtlas.requiredSize(MetalCraftConfig.lodDetail(), client.options.renderDistance().get(), MetalCraftConfig.lodNativeDistance());
+        if (!current.atlasFits(atlasSize)) {
+            reset();
+            tick(client, current);
+            current = session;
+            if (current == null) return;
+        }
         long started = MetalStallProbe.begin();
+        current.setGpuBudget(gpuBudget(MetalCraftConfig.lodDetail()));
         current.prepare(camera, MetalCraftConfig.lodNativeDistance(), Minecraft.getInstance().options.renderDistance().get(),
             MetalCraftConfig.lodDetail());
         MetalStallProbe.end(MetalStallProbe.Source.LOD_PREPARE, started, 0);
