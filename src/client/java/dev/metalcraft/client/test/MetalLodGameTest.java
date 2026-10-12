@@ -31,6 +31,103 @@ final class MetalLodGameTest {
 
     private MetalLodGameTest() { }
 
+    /** Bounded loading, movement and detail-handoff route in an existing standard-world copy. */
+    static void efficiency(ClientGameTestContext context) {
+        String name = System.getProperty("metalcraft.lodTestWorld");
+        check(name != null && !name.isBlank(), "Supply an existing standard-world copy via metalcraft.lodTestWorld");
+        int savedRender = context.computeOnClient(c -> c.options.renderDistance().get());
+        int savedSimulation = context.computeOnClient(c -> c.options.simulationDistance().get());
+        boolean savedVsync = context.computeOnClient(c -> c.options.enableVsync().get());
+        boolean savedHalf = MetalCraftConfig.halfResolution(), savedUnlocked = MetalCraftConfig.unlockedFrameRate();
+        boolean savedLod = MetalCraftConfig.lodEnabled(), savedFog = MetalCraftConfig.clearDistanceFog();
+        int savedNative = MetalCraftConfig.lodNativeDistance(), savedDetail = MetalCraftConfig.lodDetail();
+        String savedPack = context.computeOnClient(c -> ShaderPackRuntime.active().selectedPackId());
+        Map<String, Object> report = new LinkedHashMap<>();
+        try {
+            context.runOnClient(c -> {
+                check("Metal".equals(RenderSystem.getDevice().getDeviceInfo().backendName()), "default backend uses Metal");
+                check(World.available(c, name), "supplied existing world is available");
+                MetalCraftConfig.setHalfResolution(false);
+                MetalCraftConfig.setUnlockedFrameRate(true);
+                c.options.renderDistance().set(RENDER);
+                c.options.simulationDistance().set(SIMULATION);
+                c.options.enableVsync().set(false);
+                MetalCraftConfig.setLodEnabled(true);
+                MetalCraftConfig.setLodNativeDistance(NATIVE);
+                MetalCraftConfig.setLodDetail(DETAIL);
+                MetalCraftConfig.setClearDistanceFog(true);
+                ShaderPackRuntime.active().selectPack(ShaderPackRuntime.NONE_ID);
+                c.createWorldOpenFlows().openWorld(name, () -> { });
+            });
+            context.getInput().resizeWindow(3840, 2160);
+            context.waitFor(c -> c.level != null && c.player != null && c.getSingleplayerServer() != null, 1200);
+            try (World world = new World(context, null, name)) {
+                check(!world.computeOnServer(server -> server.overworld().isFlat()), "standard world required");
+                context.runOnClient(c -> c.options.broadcastOptions());
+                world.command("gamemode spectator @a");
+                world.command("time set noon");
+                world.command("weather clear");
+                int[] start = context.computeOnClient(c -> new int[]{c.player.getBlockX(), c.player.getBlockZ()});
+                world.command("tp @a " + start[0] + " 160 " + start[1] + " 135 12");
+                context.getInput().lookAt(135, 12);
+                context.waitFor(c -> LodSystem.active() && !c.levelRenderer.visibleSections().isEmpty(), 1200);
+                report.put("world", name);
+                report.put("settleSeconds", settle(context, 1200));
+                report.put("nativeSettleSeconds", nativeSettle(context));
+                report.put("environment", context.computeOnClient(c -> {
+                    var target = c.gameRenderer.mainRenderTarget().getColorTextureView();
+                    check(target.getWidth(0) == 3840 && target.getHeight(0) == 2160, "4K actual world render target");
+                    int[] drawable = dev.metalcraft.client.metal.MetalSurfaceProbe.drawableSize();
+                    check(drawable[0] > 0 && drawable[1] > 0, "drawable dimensions available");
+                    check(c.options.getEffectiveRenderDistance() == NATIVE, "native radius bounded");
+                    return Map.of("worldWidth", target.getWidth(0), "worldHeight", target.getHeight(0),
+                        "drawableWidth", drawable[0], "drawableHeight", drawable[1],
+                        "presentationWidth", c.getWindow().getWidth(), "presentationHeight", c.getWindow().getHeight(),
+                        "renderDistance", c.options.renderDistance().get(), "simulationDistance", c.options.simulationDistance().get(),
+                        "nativeDistance", c.options.getEffectiveRenderDistance(), "backend", RenderSystem.getDevice().getDeviceInfo().backendName());
+                }));
+                System.out.println("LOD efficiency environment: " + json(report.get("environment")));
+                report.put("settled", LodSystem.stats());
+                MetalBenchmarkEnvironment.focus(context);
+                report.put("stationary", measure(context, "lod-efficiency-128-4k"));
+                context.takeScreenshot("lod-efficiency-128-4k");
+                world.command("tp @a " + (start[0] + 64) + " 160 " + (start[1] + 32) + " 135 12");
+                report.put("moveSettleSeconds", settle(context, 1200));
+                report.put("moveNativeSettleSeconds", nativeSettle(context));
+                report.put("moved", LodSystem.stats());
+                context.runOnClient(c -> MetalCraftConfig.setLodDetail(HIGHEST_DETAIL));
+                report.put("detail8SettleSeconds", settle(context, 1200));
+                check(LodSystem.stats().texturedNodes > 0 && !LodSystem.stats().updating, "textured detail handoff completes");
+                report.put("detail8", LodSystem.stats());
+                context.takeScreenshot("lod-efficiency-detail8-4k");
+                context.runOnClient(c -> MetalCraftConfig.setLodDetail(DETAIL));
+                settle(context, 1200);
+                report.put("restored", LodSystem.stats());
+                context.runOnClient(c -> {
+                    c.options.renderDistance().set(SIMULATION);
+                    MetalCraftConfig.setLodEnabled(false);
+                });
+                context.waitFor(c -> !LodSystem.active() && LodSystem.stats().gpuBytes == 0, 200);
+                check(LodSystem.stats().gpuBytes == 0, "disable releases distant terrain resources");
+            }
+            write(report);
+            System.out.println("Distant terrain efficiency test passed: " + json(report));
+        } finally {
+            context.runOnClient(c -> {
+                c.options.renderDistance().set(savedRender);
+                c.options.simulationDistance().set(savedSimulation);
+                c.options.enableVsync().set(savedVsync);
+                MetalCraftConfig.setHalfResolution(savedHalf);
+                MetalCraftConfig.setUnlockedFrameRate(savedUnlocked);
+                MetalCraftConfig.setLodEnabled(savedLod);
+                MetalCraftConfig.setLodNativeDistance(savedNative);
+                MetalCraftConfig.setLodDetail(savedDetail);
+                MetalCraftConfig.setClearDistanceFog(savedFog);
+                ShaderPackRuntime.active().selectPack(savedPack);
+            });
+        }
+    }
+
     /** Regress the shadow/storage lock inversion during native distance changes and LOD handoff. */
     static void resize(ClientGameTestContext context) {
         int savedRender = context.computeOnClient(c -> c.options.renderDistance().get());
@@ -309,8 +406,12 @@ final class MetalLodGameTest {
     }
 
     private static Map<String, Object> measure(ClientGameTestContext context, String name) {
+        var presentation = context.computeOnClient(c -> new MetalBenchmarkEnvironment.Presentation());
         context.runOnClient(ignored -> MetalFrameMetrics.beginCapture(30));
-        context.waitTicks(100);
+        for (int tick = 0; tick < 100; tick++) {
+            context.waitTick();
+            context.runOnClient(c -> presentation.check());
+        }
         MetalFrameMetrics.Phase phase = context.computeOnClient(ignored -> MetalFrameMetrics.endCapture(name));
         // GPU time shows the cost of distant geometry even when the window's frame rate is paced.
         Double gpuP50 = phase.gpuFrame().p50Ms(), gpuP95 = phase.gpuFrame().p95Ms();

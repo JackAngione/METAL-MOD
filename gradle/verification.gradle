@@ -54,6 +54,16 @@ registerSmokeTask('lodTerrainSmoke', 'dev.metalcraft.client.lod.LodTerrainSmoke'
 	maxHeapSize = '2G'
 }
 
+// Distant terrain build scheduling: bounded selection keeps the previous stable priority order.
+registerSmokeTask('lodBuildQueueSmoke', 'dev.metalcraft.client.lod.LodBuildQueueSmoke') {
+	maxHeapSize = '256m'
+}
+
+// Distant terrain sampling: shared worker caches match vanilla surface and biome noise exactly.
+registerSmokeTask('lodGeneratorSmoke', 'dev.metalcraft.client.lod.LodGeneratorSmoke') {
+	maxHeapSize = '1G'
+}
+
 // Distant terrain sampling and meshing throughput; timings are reported, never a build gate.
 registerSmokeTask('lodTerrainBenchmark', 'dev.metalcraft.client.lod.LodTerrainSmoke') {
 	maxHeapSize = '2G'
@@ -79,7 +89,8 @@ registerMetalSmokeTask('localLightingSmoke', 'dev.metalcraft.client.shader.world
 
 tasks.named('check') {
 	dependsOn tasks.named('shaderTranslationSmoke'), tasks.named('metalFrameMetricsSmoke'),
-		tasks.named('lodTerrainSmoke'), tasks.named('nativeChunkDistanceSmoke'),
+		tasks.named('lodTerrainSmoke'), tasks.named('lodBuildQueueSmoke'), tasks.named('lodGeneratorSmoke'),
+		tasks.named('nativeChunkDistanceSmoke'),
 		tasks.named('sectionStorageSmoke'), tasks.named('lightSectionSnapshotsSmoke'),
 		tasks.named('localLightingSmoke')
 }

@@ -53,7 +53,7 @@ final class LodGenerator {
     private final int topCorner;
     private final DensityFunction density;
     private final @Nullable DensityFunction preliminary;
-    private final ThreadLocal<Sampler> samplers = ThreadLocal.withInitial(Sampler::new);
+    private final ThreadLocal<Sampler> samplers = ThreadLocal.withInitial(() -> new Sampler(this));
 
     LodGenerator(ChunkGenerator generator, RandomState random, LevelHeightAccessor heights, boolean floating) {
         this.generator = generator;
@@ -95,8 +95,10 @@ final class LodGenerator {
     int cellWidth() { return this.cellWidth; }
 
     Holder<Biome> biome(int x, int y, int z) {
-        return this.biomes.getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z), this.climate);
+        return this.biomes.getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z), this.climateSampler());
     }
+
+    Climate.Sampler climateSampler() { return this.samplers.get().climate; }
 
     /** Clears the calling thread's interpolation cache; call once per tile. */
     void beginTile() {
@@ -224,13 +226,16 @@ final class LodGenerator {
      * caches (their inputs do not depend on height); every other marker evaluates its input
      * directly, since a single corner is exactly what vanilla's interpolators sample.
      */
-    private final class Sampler {
+    // Worker threads outlive sessions. A cached value must not retain its generator and
+    // therefore its own ThreadLocal key, or an old world's graphs can never be collected.
+    private static final class Sampler {
         final DensityFunction density;
         final DensityFunction preliminary;
+        final Climate.Sampler climate;
         final Long2ObjectOpenHashMap<double[]> profiles = new Long2ObjectOpenHashMap<>();
         final Long2ObjectOpenHashMap<int[]> tops = new Long2ObjectOpenHashMap<>();
 
-        Sampler() {
+        Sampler(LodGenerator owner) {
             Map<DensityFunction, DensityFunction> mapped = new HashMap<>();
             DensityFunction.Visitor visitor = new DensityFunction.Visitor() {
                 @Override
@@ -238,8 +243,16 @@ final class LodGenerator {
                     return mapped.computeIfAbsent(function, Sampler::wrap);
                 }
             };
-            this.density = LodGenerator.this.density.mapAll(visitor);
-            this.preliminary = LodGenerator.this.preliminary == null ? DensityFunctions.zero() : LodGenerator.this.preliminary.mapAll(visitor);
+            this.density = owner.density.mapAll(visitor);
+            this.preliminary = owner.preliminary == null ? DensityFunctions.zero() : owner.preliminary.mapAll(visitor);
+            // RandomState's biome sampler strips cache markers. Map the router's
+            // climate branches with the same visitor instead, so their 2D inputs
+            // share this thread's column caches with the surface density graph.
+            // Climate samples quart corners, preserving FlatCache's exact inputs.
+            var router = owner.random.router();
+            this.climate = new Climate.Sampler(router.temperature().mapAll(visitor), router.vegetation().mapAll(visitor),
+                    router.continents().mapAll(visitor), router.erosion().mapAll(visitor), router.depth().mapAll(visitor),
+                    router.ridges().mapAll(visitor), owner.climate.spawnTarget());
         }
 
         private static DensityFunction wrap(DensityFunction function) {
