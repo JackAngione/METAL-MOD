@@ -56,6 +56,7 @@ final class LodSession implements AutoCloseable {
     private static final long TEXTURE_REDUCTION_INTERVAL_NANOS = 15_000_000_000L;
     /** Real chunks kept for distant models (about 5 KiB each). */
     private static final int MAX_CAPTURED = 32768;
+    private static final int[] NO_RANGES = new int[0];
 
     final ClientLevel level;
     private final Executor workers;
@@ -64,8 +65,8 @@ final class LodSession implements AutoCloseable {
     private final LodSavedChunks saved;
     private final LodMesher mesher;
     private final LodBlockColors colors;
-    private final LodAtlas atlas = new LodAtlas();
-    private final LodBiomes biomes = new LodBiomes();
+    private final LodAtlas atlas;
+    private final LodBiomes biomes;
     private final boolean floating;
     private final int seaLevel;
     final Map<Long, LodChunk> real = new ConcurrentHashMap<>();
@@ -74,13 +75,14 @@ final class LodSession implements AutoCloseable {
     private final Long2ObjectOpenHashMap<Node> nodes = new Long2ObjectOpenHashMap<>();
     private final ConcurrentLinkedQueue<Built> built = new ConcurrentLinkedQueue<>();
     private final List<Emit> emits = new ArrayList<>();
-    private final List<Node> requests = new ArrayList<>();
-    private final long gpuBudget;
+    private final LodBuildQueue<Node> requests;
+    private long gpuBudget;
     private volatile boolean closed;
     private long frame;
     private long now;
     private long ticks;
     private int inFlight;
+    private int pending, residentNodes;
     private long gpuBytes;
     private int maxQuadsPerDraw;
     // Frame inputs, set by prepare().
@@ -101,11 +103,19 @@ final class LodSession implements AutoCloseable {
     private net.minecraft.client.renderer.culling.Frustum frustum;
     private final LodStats stats = new LodStats();
 
-    LodSession(ClientLevel level, ServerLevel server, LodBlockColors colors, Executor workers, int threads, long gpuBudget) {
+    LodSession(ClientLevel level, ServerLevel server, LodBlockColors colors, Executor workers, int threads, long gpuBudget, int atlasSize, @Nullable LodSession previous) {
+        this.biomes = previous == null ? new LodBiomes() : previous.biomes;
+        if (previous != null) {
+            this.real.putAll(previous.real);
+            this.dirtyChunks.addAll(previous.dirtyChunks);
+        }
+        this.atlas = new LodAtlas(atlasSize);
+        this.gpuBytes = (long)atlasSize * atlasSize * 4;
         this.level = level;
         this.colors = colors;
         this.workers = workers;
         this.maxInFlight = Math.max(2, threads * 2);
+        this.requests = new LodBuildQueue<>(this.maxInFlight);
         this.gpuBudget = gpuBudget;
         LodGenerator generator = LodGenerator.create(server);
         this.floating = generator.floating;
@@ -117,8 +127,12 @@ final class LodSession implements AutoCloseable {
             lighting.byFace(Direction.UP), lighting.byFace(Direction.DOWN), lighting.byFace(Direction.NORTH),
             lighting.byFace(Direction.SOUTH), lighting.byFace(Direction.WEST), lighting.byFace(Direction.EAST)
         };
-        this.mesher = new LodMesher(shade, LodAtlas.SIZE, LodAtlas.SIZE, LodAtlas.WHITE_UV, LodAtlas.WHITE_UV, level.getMinY());
+        this.mesher = new LodMesher(shade, this.atlas.size, this.atlas.size, this.atlas.whiteUv(), this.atlas.whiteUv(), level.getMinY());
     }
+
+    void setGpuBudget(long bytes) { this.gpuBudget = bytes; }
+
+    boolean atlasFits(int size) { return this.atlas.size >= size; }
 
     // ---- Real terrain ------------------------------------------------------------------------------
 
@@ -239,7 +253,8 @@ final class LodSession implements AutoCloseable {
         this.upload();
         this.readSaved();
         this.emits.clear();
-        this.requests.clear();
+        this.pending = 0;
+        this.requests.reset(this.maxInFlight - this.inFlight);
         int rootSize = LodTile.CELLS << MAX_LEVEL;
         int minX = Math.floorDiv((int)Math.floor(this.cameraX - this.horizon), rootSize);
         int maxX = Math.floorDiv((int)Math.ceil(this.cameraX + this.horizon), rootSize);
@@ -248,7 +263,7 @@ final class LodSession implements AutoCloseable {
         for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) this.visit(MAX_LEVEL, x, z);
         this.schedule();
         this.evict();
-        if (this.updating && this.requests.isEmpty() && this.inFlight == 0) this.finishUpdate();
+        if (this.updating && this.pending == 0 && this.inFlight == 0) this.finishUpdate();
         this.stats.updating = this.updating;
         this.stats.drawnNodes = this.emits.size();
         this.stats.texturedNodes = 0;
@@ -259,10 +274,12 @@ final class LodSession implements AutoCloseable {
             this.stats.texturedNodes++;
             this.stats.texturedBytes += emit.node.bytes;
         }
-        this.stats.residentNodes = this.countResident();
+        this.stats.residentNodes = this.residentNodes;
         this.stats.gpuBytes = this.gpuBytes;
+        this.stats.textureDistance = this.textureDistance;
+        this.stats.atlasSize = this.atlas.size;
         this.stats.inFlight = this.inFlight;
-        this.stats.pending = this.requests.size();
+        this.stats.pending = this.pending;
         this.stats.capturedChunks = this.real.size();
     }
 
@@ -468,8 +485,8 @@ final class LodSession implements AutoCloseable {
         if (!this.frustum.isVisible(new AABB(minX, node.minY, minZ, minX + size, node.maxY + 1, minZ + size))) return;
         int[] solid, fluid;
         if (!overlap || node.groups == 1) {
-            solid = new int[]{0, node.solidQuads};
-            fluid = new int[]{0, node.fluidQuads};
+            solid = node.allSolid;
+            fluid = node.allFluid;
         } else {
             int chunkX0 = node.x * size >> 4, chunkZ0 = node.z * size >> 4;
             boolean[] included = new boolean[node.groups * node.groups];
@@ -520,7 +537,7 @@ final class LodSession implements AutoCloseable {
                 if (emit.fluid.length == 0) continue;
                 fluidInfo[index] = infos.size();
             }
-            infos.add(new DynamicUniforms.ChunkSectionInfo(view, node.x * size, 0, node.z * size, 1.0F, LodAtlas.SIZE, LodAtlas.SIZE));
+            infos.add(new DynamicUniforms.ChunkSectionInfo(view, node.x * size, 0, node.z * size, 1.0F, this.atlas.size, this.atlas.size));
         }
         GpuBufferSlice[] uniforms = RenderSystem.getDynamicUniforms().writeChunkSections(infos.toArray(DynamicUniforms.ChunkSectionInfo[]::new));
         var layers = original.drawGroupsPerLayer();
@@ -591,16 +608,15 @@ final class LodSession implements AutoCloseable {
         node.lastUsedAt = this.now;
         if (node.building || node.failedAt != 0 && this.now - node.failedAt < RETRY_FAILED_NANOS) return;
         // Coarse and near nodes first: large nodes give the whole horizon quickly, then refine.
-        node.priority = distance / size;
-        this.requests.add(node);
+        this.pending++;
+        this.requests.offer(node, distance / size);
     }
 
     private void schedule() {
-        if (this.requests.isEmpty() || this.inFlight >= this.maxInFlight) return;
-        this.requests.sort(Comparator.comparingDouble(node -> node.priority));
+        if (this.pending == 0 || this.inFlight >= this.maxInFlight) return;
         LodBlockColors colors = this.colors;
-        for (Node node : this.requests) {
-            if (this.inFlight >= this.maxInFlight) break;
+        Node node;
+        while (this.inFlight < this.maxInFlight && (node = this.requests.poll()) != null) {
             if (node.building) continue;
             // Textured nodes take their colours from block textures and need no colour-atlas slot.
             int slot = node.textured ? 0 : this.atlas.allocate();
@@ -636,7 +652,7 @@ final class LodSession implements AutoCloseable {
             // Nodes near the player look up saved copies of the chunks they had to generate.
             LodTile tile = this.sampler.sample(level, x, z, colors, level <= SPLIT_LEVEL, textured);
             LodMesh mesh = textured ? this.mesher.meshTextured(tile, colors, this.biomes)
-                : this.mesher.mesh(tile, level, level <= SPLIT_LEVEL, LodAtlas.slotX(slot), LodAtlas.slotY(slot));
+                : this.mesher.mesh(tile, level, level <= SPLIT_LEVEL, this.atlas.slotX(slot), this.atlas.slotY(slot));
             this.built.add(new Built(key, revision, mesh, slot, System.nanoTime() - started, false, tile.generatedChunks));
             // A session closed meanwhile never polls again; free the native mesh here instead.
             if (this.closed) this.drainClosed();
@@ -673,12 +689,15 @@ final class LodSession implements AutoCloseable {
                 node.bytes = mesh.bytes();
                 node.solidQuads = mesh.solidQuads;
                 node.fluidQuads = mesh.fluidQuads;
+                node.allSolid = mesh.solidQuads == 0 ? NO_RANGES : new int[]{0, mesh.solidQuads};
+                node.allFluid = mesh.fluidQuads == 0 ? NO_RANGES : new int[]{0, mesh.fluidQuads};
                 node.solidRanges = mesh.solidRanges;
                 node.fluidRanges = mesh.fluidRanges;
                 node.groups = mesh.groupsPerSide;
                 node.minY = mesh.minY;
                 node.maxY = mesh.maxY;
                 node.resident = true;
+                this.residentNodes++;
                 node.building = false;
                 node.builtRevision = result.revision;
                 node.builtAt = this.now;
@@ -692,6 +711,7 @@ final class LodSession implements AutoCloseable {
     }
 
     private void release(Node node) {
+        if (node.resident) this.residentNodes--;
         if (node.vertices != null) node.vertices.close();
         node.vertices = null;
         if (node.slot > 0) this.atlas.release(node.slot);
@@ -727,12 +747,6 @@ final class LodSession implements AutoCloseable {
         }
     }
 
-    private int countResident() {
-        int count = 0;
-        for (Node node : this.nodes.values()) if (node.resident) count++;
-        return count;
-    }
-
     LodStats stats() { return this.stats; }
 
     @Override
@@ -765,10 +779,10 @@ final class LodSession implements AutoCloseable {
         long bytes;
         int solidQuads, fluidQuads, groups = 1;
         int[] solidRanges = {0, 0}, fluidRanges = {0, 0};
+        int[] allSolid = NO_RANGES, allFluid = NO_RANGES;
         int minY, maxY;
         int revision, builtRevision = -1;
         long builtAt, lastUsed, lastUsedAt, failedAt;
-        double priority;
 
         Node(long key, int level, int x, int z) {
             this.key = key;

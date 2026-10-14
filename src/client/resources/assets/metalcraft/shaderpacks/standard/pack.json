@@ -103,26 +103,6 @@
       "apply": "recompile"
     },
     {
-      "id": "shadow_cascades",
-      "category": "shadows",
-      "type": "int",
-      "min": 1,
-      "max": 4,
-      "step": 1,
-      "default": 4,
-      "apply": "recompile"
-    },
-    {
-      "id": "shadow_resolution",
-      "category": "shadows",
-      "type": "int",
-      "min": 256,
-      "max": 4096,
-      "step": 256,
-      "default": 1024,
-      "apply": "recompile"
-    },
-    {
       "id": "shadow_distance",
       "category": "shadows",
       "type": "int",
@@ -140,6 +120,26 @@
       "max": 512,
       "step": 32,
       "default": 256,
+      "apply": "recompile"
+    },
+    {
+      "id": "shadow_cascades",
+      "category": "shadows",
+      "type": "int",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "default": 4,
+      "apply": "recompile"
+    },
+    {
+      "id": "shadow_resolution",
+      "category": "shadows",
+      "type": "int",
+      "min": 256,
+      "max": 4096,
+      "step": 256,
+      "default": 1024,
       "apply": "recompile"
     },
     {

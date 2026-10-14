@@ -1,5 +1,8 @@
 package dev.metalcraft.client.test;
 
+import static dev.metalcraft.client.test.MetalGameTestSupport.copySaveFiles;
+import static dev.metalcraft.client.test.MetalGameTestSupport.press;
+
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.metalcraft.client.MetalCraftConfig;
@@ -14,10 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.client.CloudStatus;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.events.ContainerEventHandler;
 import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.network.PlayerChunkSender;
@@ -27,7 +27,6 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
-import org.lwjgl.glfw.GLFW;
 
 /** Short, paired material/toggle captures in a disposable copy of an existing standard save. */
 final class MetalReflectionsGameTest {
@@ -225,37 +224,14 @@ final class MetalReflectionsGameTest {
             return count;
         } catch (java.io.IOException error) { throw new AssertionError(error); }
     }
-    private static Button find(ContainerEventHandler parent, String prefix) {
-        for (var child : parent.children()) {
-            if (child instanceof Button button && button.getMessage().getString().startsWith(prefix)) return button;
-            if (child instanceof ContainerEventHandler container) {
-                Button nested = find(container, prefix);
-                if (nested != null) return nested;
-            }
-        }
-        return null;
-    }
-    private static void press(ClientGameTestContext context, String label) {
-        context.runOnClient(c -> {
-            Button button = find(c.gui.screen(), label);
-            check(button != null && button.active, "button is available: " + label);
-            button.onPress(new KeyEvent(GLFW.GLFW_KEY_ENTER, 0, 0));
-        });
-    }
     private static String copySave(String source) {
         Path saves = Path.of("saves").toAbsolutePath().normalize();
         Path input = saves.resolve(source);
         check(Files.isRegularFile(input.resolve("level.dat")), "existing save found");
         String name = "Reflection Test " + java.util.UUID.randomUUID().toString().substring(0, 8);
         Path output = saves.resolve(name);
-        try (var paths = Files.walk(input)) {
-            for (Path path : paths.toList()) {
-                if (path.getFileName().toString().equals("session.lock")) continue;
-                Path destination = output.resolve(input.relativize(path));
-                if (Files.isDirectory(path)) Files.createDirectories(destination);
-                else Files.copy(path, destination);
-            }
-        } catch (java.io.IOException error) { throw new AssertionError(error); }
+        try { copySaveFiles(input, output); }
+        catch (java.io.IOException error) { throw new AssertionError(error); }
         return name;
     }
     private static void check(boolean valid, String message) { if (!valid) throw new AssertionError(message); }

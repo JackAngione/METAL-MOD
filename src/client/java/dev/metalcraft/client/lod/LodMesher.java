@@ -20,6 +20,7 @@ import org.lwjgl.system.MemoryUtil;
 final class LodMesher {
     /** Vertex colour for each face direction (up, down, north, south, west, east) as brightness. */
     private final float[] shade;
+    private final int[] grays = new int[6];
     private final int atlasWidth;
     private final int atlasHeight;
     private final float whiteU;
@@ -28,6 +29,10 @@ final class LodMesher {
 
     LodMesher(float[] shade, int atlasWidth, int atlasHeight, float whiteU, float whiteV, int worldMinY) {
         this.shade = shade.clone();
+        for (int face = 0; face < this.grays.length; face++) {
+            int level = Math.round(this.shade[face] * 255);
+            this.grays[face] = 0xFF000000 | level << 16 | level << 8 | level;
+        }
         this.atlasWidth = atlasWidth;
         this.atlasHeight = atlasHeight;
         this.whiteU = whiteU;
@@ -64,6 +69,7 @@ final class LodMesher {
         int groups = LodTile.CELLS / groupCells;
         int[] solidRanges = new int[groups * groups * 2];
         int[] fluidRanges = new int[groups * groups * 2];
+        ByteBuffer colors = null;
         try {
             for (int gz = 0; gz < groups; gz++) for (int gx = 0; gx < groups; gx++) {
                 int group = gx + gz * groups;
@@ -78,7 +84,6 @@ final class LodMesher {
                 writer.fluid(gx * groupCells, gz * groupCells, groupCells);
                 fluidRanges[2 * group + 1] = writer.quads - solid - fluidRanges[2 * group];
             }
-            ByteBuffer colors = null;
             if (colored) {
                 colors = MemoryUtil.memAlloc(LodTile.CELLS * LodTile.CELLS * 4);
                 for (int j = 0; j < LodTile.CELLS; j++) for (int i = 0; i < LodTile.CELLS; i++) {
@@ -93,6 +98,7 @@ final class LodMesher {
                 writer.quads == 0 ? 0 : writer.minY, writer.quads == 0 ? 0 : writer.maxY);
         } catch (RuntimeException | Error failure) {
             writer.release();
+            if (colors != null) MemoryUtil.memFree(colors);
             throw failure;
         }
     }
@@ -104,7 +110,9 @@ final class LodMesher {
         private final int cell;
         private final int slotX;
         private final int slotY;
-        private final boolean[] used = new boolean[LodTile.CELLS * LodTile.CELLS];
+        // One bit per cell: marking a merged rectangle touches one integer per row.
+        private final int[] used = new int[LodTile.CELLS];
+        private static final boolean LITTLE_ENDIAN = ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN;
         private ByteBuffer buffer = MemoryUtil.memAlloc(64 * 4 * LodMesh.VERTEX_BYTES).order(ByteOrder.nativeOrder());
         int quads;
         int minY = Integer.MAX_VALUE;
@@ -125,45 +133,52 @@ final class LodMesher {
         }
 
         private void tops(int i0, int j0, int size) {
-            java.util.Arrays.fill(this.used, false);
-            for (int j = j0; j < j0 + size; j++) for (int i = i0; i < i0 + size; i++) {
-                if (this.used[i + j * LodTile.CELLS]) continue;
-                long value = this.tile.cell(i, j);
-                if (!LodCell.hasTerrain(value)) continue;
-                int top = LodCell.top(value), light = LodCell.blockLight(value);
-                int width = 1;
-                while (i + width < i0 + size && !this.used[i + width + j * LodTile.CELLS] && sameTop(this.tile.cell(i + width, j), top, light)) width++;
-                int depth = 1;
-                rows:
-                while (j + depth < j0 + size) {
-                    for (int k = 0; k < width; k++) {
-                        if (this.used[i + k + (j + depth) * LodTile.CELLS] || !sameTop(this.tile.cell(i + k, j + depth), top, light)) break rows;
-                    }
-                    depth++;
-                }
-                for (int dz = 0; dz < depth; dz++) java.util.Arrays.fill(this.used, i + (j + dz) * LodTile.CELLS, i + width + (j + dz) * LodTile.CELLS, true);
-                float x0 = i * this.cell, x1 = (i + width) * this.cell, z0 = j * this.cell, z1 = (j + depth) * this.cell;
-                float u0 = this.u(i), u1 = this.u(i + width), v0 = this.v(j), v1 = this.v(j + depth);
-                int color = this.gray(0);
-                this.quad(x0, top, z0, u0, v0, x0, top, z1, u0, v1, x1, top, z1, u1, v1, x1, top, z0, u1, v0, color, light);
-            }
-        }
-
-        private static boolean sameTop(long value, int top, int light) {
-            return LodCell.hasTerrain(value) && LodCell.top(value) == top && LodCell.blockLight(value) == light;
+            this.horizontal(i0, j0, size, true);
         }
 
         private void bottoms(int i0, int j0, int size) {
+            this.horizontal(i0, j0, size, false);
+        }
+
+        /** Height, light and atlas coordinates remain identical across merged horizontal faces. */
+        private void horizontal(int i0, int j0, int size, boolean topFace) {
+            java.util.Arrays.fill(this.used, j0, j0 + size, 0);
+            int color = this.gray(topFace ? 0 : 1);
             for (int j = j0; j < j0 + size; j++) for (int i = i0; i < i0 + size; i++) {
+                if ((this.used[j] & 1 << i) != 0) continue;
                 long value = this.tile.cell(i, j);
                 if (!LodCell.hasTerrain(value)) continue;
-                int bottom = LodCell.bottom(value);
-                if (bottom <= this.mesher.worldMinY) continue;
-                float x0 = i * this.cell, x1 = (i + 1) * this.cell, z0 = j * this.cell, z1 = (j + 1) * this.cell;
-                float u0 = this.u(i), u1 = this.u(i + 1), v0 = this.v(j), v1 = this.v(j + 1);
-                this.quad(x0, bottom, z1, u0, v1, x0, bottom, z0, u0, v0, x1, bottom, z0, u1, v0, x1, bottom, z1, u1, v1,
-                    this.gray(1), LodCell.blockLight(value));
+                int height = topFace ? LodCell.top(value) : LodCell.bottom(value);
+                if (!topFace && height <= this.mesher.worldMinY) continue;
+                int light = LodCell.blockLight(value);
+                int width = 1;
+                while (i + width < i0 + size && (this.used[j] & 1 << (i + width)) == 0
+                    && sameHeight(this.tile.cell(i + width, j), height, light, topFace)) width++;
+                // A long shift handles a rectangle spanning all 32 columns.
+                int mask = (int)((1L << width) - 1) << i;
+                int depth = 1;
+                rows:
+                while (j + depth < j0 + size) {
+                    if ((this.used[j + depth] & mask) != 0) break;
+                    for (int k = 0; k < width; k++) {
+                        if (!sameHeight(this.tile.cell(i + k, j + depth), height, light, topFace)) break rows;
+                    }
+                    depth++;
+                }
+                for (int dz = 0; dz < depth; dz++) this.used[j + dz] |= mask;
+                float x0 = i * this.cell, x1 = (i + width) * this.cell, z0 = j * this.cell, z1 = (j + depth) * this.cell;
+                float u0 = this.u(i), u1 = this.u(i + width), v0 = this.v(j), v1 = this.v(j + depth);
+                if (topFace) {
+                    this.quad(x0, height, z0, u0, v0, x0, height, z1, u0, v1, x1, height, z1, u1, v1, x1, height, z0, u1, v0, color, light);
+                } else {
+                    this.quad(x0, height, z1, u0, v1, x0, height, z0, u0, v0, x1, height, z0, u1, v0, x1, height, z1, u1, v1, color, light);
+                }
             }
+        }
+
+        private static boolean sameHeight(long value, int height, int light, boolean topFace) {
+            return LodCell.hasTerrain(value) && (topFace ? LodCell.top(value) : LodCell.bottom(value)) == height
+                && LodCell.blockLight(value) == light;
         }
 
         /** Side 0 north (-z), 1 south (+z), 2 west (-x), 3 east (+x). Runs merge along the edge. */
@@ -236,23 +251,25 @@ final class LodMesher {
         }
 
         void fluid(int i0, int j0, int size) {
-            java.util.Arrays.fill(this.used, false);
+            java.util.Arrays.fill(this.used, j0, j0 + size, 0);
             for (int j = j0; j < j0 + size; j++) for (int i = i0; i < i0 + size; i++) {
-                if (this.used[i + j * LodTile.CELLS]) continue;
+                if ((this.used[j] & 1 << i) != 0) continue;
                 long value = this.tile.cell(i, j);
                 if (!LodCell.hasFluid(value)) continue;
                 int top = LodCell.fluidTop(value), color = this.tile.fluidColor(i, j);
                 int width = 1;
-                while (i + width < i0 + size && !this.used[i + width + j * LodTile.CELLS] && this.sameFluid(i + width, j, top, color)) width++;
+                while (i + width < i0 + size && (this.used[j] & 1 << (i + width)) == 0 && this.sameFluid(i + width, j, top, color)) width++;
+                int mask = (int)((1L << width) - 1) << i;
                 int depth = 1;
                 rows:
                 while (j + depth < j0 + size) {
+                    if ((this.used[j + depth] & mask) != 0) break;
                     for (int k = 0; k < width; k++) {
-                        if (this.used[i + k + (j + depth) * LodTile.CELLS] || !this.sameFluid(i + k, j + depth, top, color)) break rows;
+                        if (!this.sameFluid(i + k, j + depth, top, color)) break rows;
                     }
                     depth++;
                 }
-                for (int dz = 0; dz < depth; dz++) java.util.Arrays.fill(this.used, i + (j + dz) * LodTile.CELLS, i + width + (j + dz) * LodTile.CELLS, true);
+                for (int dz = 0; dz < depth; dz++) this.used[j + dz] |= mask;
                 float x0 = i * this.cell, x1 = (i + width) * this.cell, z0 = j * this.cell, z1 = (j + depth) * this.cell;
                 float u = this.mesher.whiteU, v = this.mesher.whiteV;
                 this.quad(x0, top, z0, u, v, x0, top, z1, u, v, x1, top, z1, u, v, x1, top, z0, u, v, color, 0);
@@ -271,8 +288,7 @@ final class LodMesher {
 
         /** Opaque grey vertex colour for a face direction's cardinal shading. */
         private int gray(int face) {
-            int level = Math.round(this.mesher.shade[face] * 255);
-            return 0xFF000000 | level << 16 | level << 8 | level;
+            return this.mesher.grays[face];
         }
 
         private void quad(float x0, float y0, float z0, float u0, float v0, float x1, float y1, float z1, float u1, float v1,
@@ -309,9 +325,10 @@ final class LodMesher {
 
         private void vertex(float x, float y, float z, float u, float v, int argb, int light) {
             this.buffer.putFloat(x).putFloat(y).putFloat(z);
-            this.buffer.put((byte)(argb >> 16)).put((byte)(argb >> 8)).put((byte)argb).put((byte)(argb >>> 24));
+            int rgba = argb << 8 | argb >>> 24;
+            this.buffer.putInt(LITTLE_ENDIAN ? Integer.reverseBytes(rgba) : rgba);
             this.buffer.putFloat(u).putFloat(v);
-            this.buffer.putShort((short)(light << 4)).putShort((short)240);
+            this.buffer.putInt(LITTLE_ENDIAN ? 240 << 16 | light << 4 : light << 20 | 240);
         }
 
         ByteBuffer finish() {
@@ -532,8 +549,14 @@ final class LodMesher {
             this.position(1, i, bottom, j);
             this.position(2, i + 1, bottom, j);
             this.position(3, i + 1, bottom, j + 1);
-            float[] uvs = {u0, v1, u0, v0, u1, v0, u1, v1};
-            System.arraycopy(uvs, 0, this.uv, 0, 8);
+            this.uv[0] = u0;
+            this.uv[1] = v1;
+            this.uv[2] = u0;
+            this.uv[3] = v0;
+            this.uv[4] = u1;
+            this.uv[5] = v0;
+            this.uv[6] = u1;
+            this.uv[7] = v1;
             java.util.Arrays.fill(this.brightness, this.shade[1]);
             int tint = surface == 0 ? WHITE
                 : this.colors.sideTint(state, this.biomes.biome(LodSurface.biome(surface)), this.tile.originX + i, this.tile.originZ + j);

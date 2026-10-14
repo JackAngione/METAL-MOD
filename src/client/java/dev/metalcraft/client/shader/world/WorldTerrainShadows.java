@@ -33,6 +33,8 @@ public final class WorldTerrainShadows implements AutoCloseable {
 	private @Nullable WorldShadowModule.Frame distantFrame;
 	private @Nullable WorldShadowModule.Frame cachedFrame, cachedDistantFrame;
 	private final ShadowFrameReuse frameReuse = new ShadowFrameReuse();
+	private final DistantShadowReuse distantReuse = new DistantShadowReuse();
+	private long distantUpdatedFrames, distantReusedFrames;
 	private int cachedDrawCount;
 	private long reusedFrames, updatedFrames;
 	private @Nullable Object casterSectionsOwner;
@@ -118,17 +120,30 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		long tick = world == null ? Long.MIN_VALUE : world.getGameTime();
 		long dayTime = world == null ? Long.MIN_VALUE : world.getOverworldClockTime();
 		long meshRevision = ShadowFrameReuse.meshRevision();
-		if (this.cachedFrame != null && this.frameReuse.matches(world, sections, atlas, sampler,
+		if (this.cachedFrame != null && (this.distantResources == null || this.cachedDistantFrame != null
+			&& this.distantReuse.matches(world, sections, atlas, sampler, tick, dayTime, meshRevision,
+				new Vector3d(camera.pos.x, camera.pos.y, camera.pos.z), camera.orientation, camera.projectionMatrix,
+				sky.sunAngle, System.nanoTime())) && this.frameReuse.matches(world, sections, atlas, sampler,
 			tick, dayTime, meshRevision, camera.pos.x, camera.pos.y, camera.pos.z,
 			camera.orientation, camera.projectionMatrix, sky.sunAngle, this.windEnabled)) {
 			this.frame = this.cachedFrame;
-			this.distantFrame = this.cachedDistantFrame;
+			if (this.distantResources != null) {
+				this.distantFrame = this.distantResources.reprojectFrame(this.cachedDistantFrame,
+					this.distantReuse.capturePosition(), new Vector3d(camera.pos.x, camera.pos.y, camera.pos.z),
+					camera.orientation, new Matrix4f(camera.projectionMatrix).invert());
+				this.distantReusedFrames++; this.distantReuse.reused();
+			}
 			this.lastDrawCount = this.cachedDrawCount;
 			this.reusedFrames++;
 			this.renderedFrames++;
 			return;
 		}
-		this.invalidateCachedFrames();
+		this.invalidateDetailedFrame();
+		long now = System.nanoTime();
+		var cameraPosition = new Vector3d(camera.pos.x, camera.pos.y, camera.pos.z);
+		boolean updateDistant = this.distantResources != null && (this.cachedDistantFrame == null
+			|| !this.distantReuse.matches(world, sections, atlas, sampler, tick, dayTime, meshRevision,
+				cameraPosition, camera.orientation, camera.projectionMatrix, sky.sunAngle, now));
 		var projection = camera.projectionMatrix;
 		float fov = 2 * (float)Math.atan(1.0 / Math.abs(projection.m11()));
 		float aspect = Math.abs(projection.m11() / projection.m00());
@@ -138,16 +153,24 @@ public final class WorldTerrainShadows implements AutoCloseable {
 			camera.orientation, fov, aspect,
 			new Vector3f(-(float)Math.sin(sky.sunAngle) * celestialSign, (float)Math.cos(sky.sunAngle) * celestialSign, 0),
 			new Matrix4f(projection).invert());
-		if (this.distantResources != null) {
+		if (updateDistant) {
+			if (this.cachedDistantFrame != null) this.cachedDistantFrame.close();
+			this.cachedDistantFrame = null;
 			this.distantFrame = this.distantResources.prepareFrame(new Vector3d(camera.pos.x, camera.pos.y, camera.pos.z),
 				camera.orientation, fov, aspect,
 				new Vector3f(-(float)Math.sin(sky.sunAngle) * celestialSign, (float)Math.cos(sky.sunAngle) * celestialSign, 0),
-				new Matrix4f(projection).invert());
+				new Matrix4f(projection).invert(), true);
+		}
+		if (this.distantResources != null && !updateDistant) {
+			this.distantFrame = this.distantResources.reprojectFrame(this.cachedDistantFrame,
+				this.distantReuse.capturePosition(), cameraPosition, camera.orientation, new Matrix4f(projection).invert());
+			this.distantReuse.reused();
+			this.distantReusedFrames++;
 		}
 		var dispatcher = levelRenderer.sectionRenderDispatcher();
 		if (dispatcher == null) {
 			this.device.encodeNativePass(this.resources.depthPass(), "Metal Mod shader: shadow_terrain", pass -> {});
-			if (this.distantResources != null) this.device.encodeNativePass(this.distantResources.depthPass(),
+			if (updateDistant) this.device.encodeNativePass(this.distantResources.depthPass(),
 				"Metal Mod shader: shadow_distant", pass -> {});
 			return;
 		}
@@ -178,7 +201,7 @@ public final class WorldTerrainShadows implements AutoCloseable {
 				int mask = this.frame.cascadeMask((float)(box.minX - camera.pos.x - 1), (float)(box.minY - camera.pos.y - 1),
 					(float)(box.minZ - camera.pos.z - 1), (float)(box.maxX - camera.pos.x + 1),
 					(float)(box.maxY - camera.pos.y + 1), (float)(box.maxZ - camera.pos.z + 1));
-				int distantMask = this.distantFrame == null ? 0 : this.distantFrame.cascadeMask(
+				int distantMask = !updateDistant || this.distantFrame == null ? 0 : this.distantFrame.cascadeMask(
 					(float)(box.minX - camera.pos.x - 1), (float)(box.minY - camera.pos.y - 1),
 					(float)(box.minZ - camera.pos.z - 1), (float)(box.maxX - camera.pos.x + 1),
 					(float)(box.maxY - camera.pos.y + 1), (float)(box.maxZ - camera.pos.z + 1));
@@ -209,7 +232,7 @@ public final class WorldTerrainShadows implements AutoCloseable {
 					if (slice == null || draw.hasCustomIndexBuffer() && slice.indexBuffer() == null) continue;
 					var indices = draw.hasCustomIndexBuffer() ? slice.indexBuffer() : sharedIndices;
 					IndexType type = draw.hasCustomIndexBuffer() ? draw.indexType() : sequential.type();
-					var wind = this.windEnabled && inputs != null && mesh instanceof dev.metalcraft.client.shader.wind.WindMeshSource source
+					var wind = caster.mask() != 0 && this.windEnabled && inputs != null && mesh instanceof dev.metalcraft.client.shader.wind.WindMeshSource source
 						? source.metalcraft$windMesh(layer) : null;
 					var shadowDraw = new TerrainShadowRenderer.Draw(layer, this.device.nativeBuffer(slice.vertexBuffer()),
 						slice.vertexBufferOffset(), this.device.nativeBuffer(indices),
@@ -219,13 +242,16 @@ public final class WorldTerrainShadows implements AutoCloseable {
 						(float)(origin.getY() - camera.pos.y), (float)(origin.getZ() - camera.pos.z), caster.mask(),
 						wind == null ? null : wind.upload(this.device.metal()), origin.getX(), origin.getY(), origin.getZ());
 					if (caster.mask() != 0) draws.add(shadowDraw);
-					if (caster.distantMask() != 0) distantDraws.add(shadowDraw.withCascadeMask(caster.distantMask()));
+					if (caster.distantMask() != 0) distantDraws.add(new TerrainShadowRenderer.Draw(layer, shadowDraw.vertices(), shadowDraw.vertexOffset(),
+						shadowDraw.indices(), shadowDraw.indexOffset(), shadowDraw.indexType(), shadowDraw.indexCount(),
+						shadowDraw.relativeX(), shadowDraw.relativeY(), shadowDraw.relativeZ(), caster.distantMask(), null,
+						shadowDraw.originX(), shadowDraw.originY(), shadowDraw.originZ()));
 				}
 			}
 			this.device.encodeNativePass(this.resources.depthPass(), "Metal Mod shader: shadow_terrain", pass ->
 				this.renderer.encode(pass, this.frame, draws, this.device.nativeTextureView(atlas), this.device.nativeSampler(sampler),
 					inputs == null ? 0 : session.windAnimationSeconds()));
-			if (this.distantResources != null && this.distantFrame != null) {
+			if (updateDistant && this.distantFrame != null) {
 				this.device.encodeNativePass(this.distantResources.depthPass(), "Metal Mod shader: shadow_distant", pass ->
 					this.renderer.encode(pass, this.distantFrame, distantDraws, this.device.nativeTextureView(atlas),
 						this.device.nativeSampler(sampler), inputs == null ? 0 : session.windAnimationSeconds()));
@@ -233,10 +259,16 @@ public final class WorldTerrainShadows implements AutoCloseable {
 			this.lastDrawCount = draws.size() + distantDraws.size();
 			this.renderedFrames++;
 			this.updatedFrames++;
+			if (updateDistant) this.distantUpdatedFrames++;
 			// If a worker published/recycled a mesh during collection, draw again next frame.
 			if (meshRevision == ShadowFrameReuse.meshRevision()) {
 				this.cachedFrame = this.frame;
-				this.cachedDistantFrame = this.distantFrame;
+				if (updateDistant) {
+					this.cachedDistantFrame = this.distantFrame;
+					this.distantReuse.store(world, sections, atlas, sampler, tick, dayTime, meshRevision,
+						cameraPosition, camera.orientation, camera.projectionMatrix, sky.sunAngle, now);
+
+				}
 				this.cachedDrawCount = this.lastDrawCount;
 				this.frameReuse.store(world, sections, atlas, sampler, tick, dayTime, meshRevision,
 					camera.pos.x, camera.pos.y, camera.pos.z, camera.orientation, camera.projectionMatrix, sky.sunAngle);
@@ -250,6 +282,8 @@ public final class WorldTerrainShadows implements AutoCloseable {
 	public int lastDrawCount() { return this.lastDrawCount; }
 	public WorldShadowModule.@Nullable Frame currentFrame() { return this.frame; }
 	public WorldShadowModule.@Nullable Frame currentDistantFrame() { return this.distantFrame; }
+	public long distantUpdatedFrames() { return this.distantUpdatedFrames; }
+	public long distantReusedFrames() { return this.distantReusedFrames; }
 	public long reusedFrames() { return this.reusedFrames; }
 	public long updatedFrames() { return this.updatedFrames; }
 	public int cachedCasterSections() { return this.populatedSections.size(); }
@@ -271,9 +305,15 @@ public final class WorldTerrainShadows implements AutoCloseable {
 		this.cachedDrawCount = this.lastDrawCount = 0;
 	}
 
-	private void invalidateCachedFrames() {
+	private void invalidateDetailedFrame() {
 		this.frameReuse.invalidate();
 		if (this.cachedFrame != null) this.cachedFrame.close();
+		this.cachedFrame = null;
+	}
+
+	private void invalidateCachedFrames() {
+		this.invalidateDetailedFrame();
+		this.distantReuse.invalidate();
 		if (this.cachedDistantFrame != null) this.cachedDistantFrame.close();
 		this.cachedFrame = this.cachedDistantFrame = null;
 	}

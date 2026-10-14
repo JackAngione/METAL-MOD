@@ -71,6 +71,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 	}
 
 	private void runConfiguredTest(final ClientGameTestContext context) {
+		if (Boolean.getBoolean("metalcraft.settingsTest")) {
+			MetalSettingsGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.reflectionsTest")) {
 			MetalReflectionsGameTest.run(context);
 			return;
@@ -87,6 +91,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			BaselineLightingBenchmark.run(context);
 			return;
 		}
+		if (Boolean.getBoolean("metalcraft.realtimeShadowDistanceTest")) {
+			RealtimeShadowDistanceGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.shaderDistanceTest")) {
 			MetalShaderDistanceGameTest.run(context);
 			return;
@@ -101,6 +109,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 		}
 		if (Boolean.getBoolean("metalcraft.coreIntegrationTest")) {
 			MetalCoreIntegrationGameTest.run(context);
+			return;
+		}
+		if ("efficiency".equals(System.getProperty("metalcraft.lodTest"))) {
+			MetalLodGameTest.efficiency(context);
 			return;
 		}
 		if ("resize".equals(System.getProperty("metalcraft.lodTest"))) {

@@ -82,9 +82,13 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	private boolean lastWorldHadOpaqueWaterInputs;
 	private boolean lastWorldFabulous;
 	private int lastWorldWaterDraws;
+	private int lastWorldRenderWidth;
+	private int lastWorldRenderHeight;
 	private int lastWorldOpaqueWaterWidth;
 	private int lastWorldOpaqueWaterHeight;
 	public int lastWorldWaterDraws() { return this.lastWorldWaterDraws; }
+	public int lastWorldRenderWidth() { return this.lastWorldRenderWidth; }
+	public int lastWorldRenderHeight() { return this.lastWorldRenderHeight; }
 	public int lastWorldOpaqueWaterWidth() { return this.lastWorldOpaqueWaterWidth; }
 	public int lastWorldOpaqueWaterHeight() { return this.lastWorldOpaqueWaterHeight; }
 	public boolean lastWorldFabulous() { return this.lastWorldFabulous; }
@@ -205,6 +209,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		this.lastWorldHadOpaqueWaterInputs = false;
 		this.lastWorldFabulous = false;
 		this.lastWorldWaterDraws = 0;
+		this.lastWorldRenderWidth = 0;
+		this.lastWorldRenderHeight = 0;
 		this.lastWorldOpaqueWaterWidth = 0;
 		this.lastWorldOpaqueWaterHeight = 0;
 		if (knownPipelines == null || knownPost == null) {
@@ -303,6 +309,8 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 	void endLinearWorld(final MetalLinearWorldSession session) {
 		if (this.linearWorldSession != session) return;
 		this.lastWorldWaterDraws = session.isPoisoned() ? 0 : session.waterDraws();
+		this.lastWorldRenderWidth = session.isPoisoned() ? 0 : session.token().hdrColor().getWidth(0);
+		this.lastWorldRenderHeight = session.isPoisoned() ? 0 : session.token().hdrColor().getHeight(0);
 		this.lastWorldFabulous = !session.isPoisoned() && session.token().fabulous();
 		java.util.Optional<MetalOpaqueSnapshotOwner.Snapshot> snapshot = session.isPoisoned()
 			|| this.opaqueSnapshots == null ? java.util.Optional.empty() : this.opaqueSnapshots.current();
