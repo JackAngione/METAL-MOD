@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 /** GPU fixtures for Standard's bounded, single-frame water screen-space reflections. */
 final class WaterReflectionSmoke {
-	private static final int RESULT_COUNT = 11;
+	private static final int RESULT_COUNT = 17;
 	private static final int FLOAT4_BYTES = 4 * Float.BYTES;
 	private static final float EPSILON = 2.0e-5F;
 
@@ -26,7 +26,7 @@ final class WaterReflectionSmoke {
 			runExtent(device, queue, helpers, 9, 5);
 		}
 		System.out.println("Water reflection GPU: disabled/baseline identity, hit refinement, misses, "
-			+ "off-screen and foreground rejection, even/odd extents, bounded confidence and cave sun gating passed");
+			+ "off-screen and foreground rejection, even/odd extents, stable planar confidence, dielectric Fresnel, transparent energy/coverage, master toggle and cave sun gating passed");
 	}
 
 	private static void runExtent(final MetalDevice device, final MetalCommandQueue queue,
@@ -44,15 +44,17 @@ final class WaterReflectionSmoke {
 			clearDepth.upload(queue, 0, depths(width, height, 0.0F));
 			thinDepth.upload(queue, 0, depths(width, height, 1.0F / 1.5F)); // foreground plane
 			for (int quality = 0; quality <= 3; quality++) {
-				runTier(device, queue, colorView, hitView, clearView, thinView, helpers, quality);
+				runTier(device, queue, colorView, hitView, clearView, thinView, helpers, quality, true);
+				runTier(device, queue, colorView, hitView, clearView, thinView, helpers, quality, false);
 			}
 		}
 	}
 
 	private static void runTier(final MetalDevice device, final MetalCommandQueue queue,
 		final MetalTextureView color, final MetalTextureView hitDepth, final MetalTextureView clearDepth,
-		final MetalTextureView thinDepth, final String helpers, final int quality) {
-		String source = "#define MC_OPTION_WATER_REFLECTION_QUALITY " + quality
+		final MetalTextureView thinDepth, final String helpers, final int quality, final boolean enabled) {
+		String source = "#define MC_OPTION_REFLECTIONS_ENABLED " + (enabled ? 1 : 0)
+			+ "\n#define MC_OPTION_WATER_REFLECTION_QUALITY " + quality
 			+ "\n#include <metal_stdlib>\nusing namespace metal;\n" + helpers + """
 			kernel void water_reflection_fixture(device float4 *out [[buffer(0)]],
 			    texture2d<float> color [[texture(0)]], depth2d<float> hitDepth [[texture(1)]],
@@ -108,6 +110,27 @@ final class WaterReflectionSmoke {
 			        0.5, extent, inverseProjection) - float3(0,1,-2), 0);
 			    out[10] = float4(mc_water_ssr_view_from_device_depth(extent * float2(0.5,0.25),
 			        0.5, extent, inverseProjection) - float3(0,-1,-2), 0);
+                out[11] = float4(mc_dielectric_fresnel(1, 1.333), mc_dielectric_fresnel(1, 1.5),
+                    mc_dielectric_fresnel(1, 1.31), mc_dielectric_fresnel(0, 1.5));
+                McWaterSsrHit fixedHit = {float3(0.8, 0.4, 0.2), 1.0, float3(0), 0.0};
+                out[12] = mc_transparent_reflection(float4(base, 0.2), float3(0,0,1), float3(0,0,1),
+                    0.06, 1.5, 0, float4(0), float4(0), fixedHit);
+                out[13] = mc_transparent_reflection(float4(base, 0), float3(0,0,1), float3(0,0,1),
+                    0.06, 1.5, 0, float4(0), float4(0), fixedHit);
+                out[14] = mc_transparent_reflection(float4(base, 0.2), normal, float3(0,0,1),
+                    0.06, 1.5, 0, float4(0), float4(0), clear) - float4(base, 0.2);
+                out[15] = float4(mc_water_configured_reflection_with_ssr(base, float3(0,0,1), float3(0,0,1),
+                    0.08, 1, float4(0), environment, fixedHit) - base, 0);
+                float minimumConfidence = 1, maximumConfidence = 0;
+                for (uint sample = 0; sample < 64; sample++) {
+                    McWaterSsrHit planar = mc_water_screen_space_reflection(float3(0, 0, -2 - float(sample) / 64), normal,
+                        projection, inverseProjection, color, hitDepth);
+                    minimumConfidence = min(minimumConfidence, planar.confidence);
+                    maximumConfidence = max(maximumConfidence, planar.confidence);
+                }
+                out[16] = float4(minimumConfidence, maximumConfidence, 0, 0);
+
+
 			}
 			""";
 		try (MetalComputePipeline pipeline = device.createComputePipeline(
@@ -128,20 +151,42 @@ final class WaterReflectionSmoke {
 			}
 			try (MetalBuffer.Mapping mapping = results.map()) {
 				ByteBuffer bytes = mapping.bytes().order(ByteOrder.nativeOrder());
-				if (quality <= 1) {
+				if (!enabled || quality <= 1) {
 					for (int result = 0; result <= 4; result++) assertZero(bytes, result, "quality " + quality);
 				} else {
 					assertHit(bytes, 0, "quality " + quality + " retained positive refinement endpoint");
 					for (int result = 1; result <= 4; result++) assertZero(bytes, result, "quality " + quality);
 				}
 				assertZero(bytes, 5, "quality " + quality + " miss composition");
+                near(get(bytes, 16, 0), enabled && quality > 1 ? 1 : 0, "flat reflector minimum confidence");
+                near(get(bytes, 16, 1), enabled && quality > 1 ? 1 : 0, "flat reflector maximum confidence");
+                float[] iors = {1.333F, 1.5F, 1.31F};
+                for (int channel = 0; channel < 3; channel++) {
+                    float f = (iors[channel] - 1) / (iors[channel] + 1);
+                    near(get(bytes, 11, channel), f * f, "material Fresnel");
+                }
+                near(get(bytes, 11, 3), 1, "grazing Fresnel");
+                boolean reflecting = enabled && quality > 0;
+                float[] base = {0.10F, 0.12F, 0.14F}, radiance = {0.8F, 0.4F, 0.2F};
+                for (int channel = 0; channel < 3; channel++) {
+                    near(get(bytes, 12, channel), reflecting
+                        ? (base[channel] * 0.2F * 0.96F + radiance[channel] * 0.04F) / 0.232F
+                        : base[channel], "glass energy with partial coverage");
+                    near(get(bytes, 13, channel), reflecting ? radiance[channel] : base[channel], "clear glass reflection");
+                }
+                near(get(bytes, 12, 3), reflecting ? 0.232F : 0.2F, "glass coverage");
+                near(get(bytes, 13, 3), reflecting ? 0.04F : 0, "clear glass coverage");
+                assertZeroRgb(bytes, 14, "unlit cave glass identity");
+                if (!reflecting) assertZero(bytes, 15, "master toggle disables water reflection");
+                else if (get(bytes, 15, 0) <= EPSILON) throw new AssertionError("Master toggle did not enable water reflection");
+
 				assertZeroRgb(bytes, 6, "quality " + quality + " cave sun gating");
 				for (int result = 7; result <= 10; result++) {
 					assertZeroRgb(bytes, result, "off-center raster coordinates " + result);
 					if (get(bytes, result, 3) != 0) throw new AssertionError("Off-center projection rejected");
 				}
 				float caveSsrDelta = get(bytes, 6, 3);
-				if (quality > 1 && (!Float.isFinite(caveSsrDelta) || caveSsrDelta <= EPSILON)) {
+				if (enabled && quality > 1 && (!Float.isFinite(caveSsrDelta) || caveSsrDelta <= EPSILON)) {
 					throw new AssertionError("quality " + quality + " did not compose a nonzero cave SSR hit");
 				}
 			}
@@ -201,6 +246,11 @@ final class WaterReflectionSmoke {
 			}
 		}
 	}
+
+    private static void near(float actual, float expected, String label) {
+        if (!Float.isFinite(actual) || Math.abs(actual - expected) > EPSILON)
+            throw new AssertionError(label + ": expected " + expected + ", got " + actual);
+    }
 
 	private static float get(final ByteBuffer bytes, final int result, final int channel) {
 		return bytes.getFloat(result * FLOAT4_BYTES + channel * Float.BYTES);

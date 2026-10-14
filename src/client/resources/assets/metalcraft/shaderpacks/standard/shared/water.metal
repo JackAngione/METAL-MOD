@@ -4,6 +4,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
+#ifndef MC_OPTION_REFLECTIONS_ENABLED
+#define MC_OPTION_REFLECTIONS_ENABLED 1
+#endif
+
 // Water animation deliberately repeats in both space and time. Chunk coordinates are reduced
 // before conversion to float, which keeps distant chunks precise; all wave vectors complete an
 // integer number of cycles over the 256-block spatial period and the 1024-second time period.
@@ -314,17 +318,20 @@ static inline float3 mc_water_detailed_normal(
     return mc_water_safe_normalize(broad - slope * clamp(strength, 0.0, 2.0), broad);
 }
 
-/// Unpolarized air-to-water Fresnel. Surface roughness changes the distribution of
-/// reflected directions, not the reflectance of each air/water interface.
-static inline float mc_water_fresnel(float nDotV) {
+/// Unpolarized air-to-dielectric Fresnel. Surface roughness changes the distribution
+/// of reflected directions, while the material IOR determines interface reflectance.
+static inline float mc_dielectric_fresnel(float nDotV, float ior) {
     float cosine = saturate(isfinite(nDotV) ? nDotV : 0.0);
-    const float ior = 1.333;
     float transmittedCosine = sqrt(max(0.0, 1.0 - (1.0 - cosine * cosine) / (ior * ior)));
     float perpendicular = (cosine - ior * transmittedCosine)
         / (cosine + ior * transmittedCosine);
     float parallel = (ior * cosine - transmittedCosine)
         / (ior * cosine + transmittedCosine);
     return 0.5 * (perpendicular * perpendicular + parallel * parallel);
+}
+
+static inline float mc_water_fresnel(float nDotV) {
+    return mc_dielectric_fresnel(nDotV, 1.333);
 }
 
 // Approximate the existing sky's horizon/zenith gradient in reflection direction.
@@ -343,11 +350,12 @@ static inline float3 mc_water_environment_radiance(float3 skyColor, float3 norma
 
 /// Adds the baseline sky and sun reflection while retaining vanilla lightmap/blocklight as baseColor.
 /// Without a shadow map in the forward pass, squared surface skylight is the cave/occlusion proxy.
-static inline float3 mc_water_reflection(
+static inline float3 mc_dielectric_reflection(
     float3 baseColor,
     float3 normalWorld,
     float3 viewToCameraWorld,
     float roughness,
+    float ior,
     float skyLight,
     float4 sunDirectionEnergy,
     float4 environment
@@ -361,7 +369,7 @@ static inline float3 mc_water_reflection(
     float envAvailability = saturate(isfinite(environment.w) ? environment.w : 0.0) * visibility;
     float3 envColor = max(select(float3(0.0), environment.rgb, isfinite(environment.rgb)), float3(0.0));
     float boundedRoughness = saturate(isfinite(roughness) ? roughness : 1.0);
-    float fresnel = mc_water_fresnel(dot(normal, view));
+    float fresnel = mc_dielectric_fresnel(dot(normal, view), ior);
     float3 reflected = mix(base, mc_water_environment_radiance(envColor, normal, view), fresnel * envAvailability);
 
     float sunEnergy = clamp(isfinite(sunDirectionEnergy.w) ? sunDirectionEnergy.w : 0.0, 0.0, 8.0);
@@ -384,18 +392,19 @@ static inline float3 mc_water_reflection(
     float viewMask = nDotL * sqrt(alphaSquared + (1.0 - alphaSquared) * nDotV * nDotV);
     float lightMask = nDotV * sqrt(alphaSquared + (1.0 - alphaSquared) * nDotL * nDotL);
     float geometry = 2.0 * nDotV * nDotL / max(viewMask + lightMask, 1.0e-6);
-    float sunFresnel = mc_water_fresnel(dot(view, halfVector));
+    float sunFresnel = mc_dielectric_fresnel(dot(view, halfVector), ior);
     return reflected + float3(sunEnergy * visibility * distribution * geometry * sunFresnel
         * nDotL / max(4.0 * nDotV, 1.0e-6));
 }
 
 /// Composes a screen-space hit as a replacement for the environment radiance. A miss takes the
 /// original path exactly, which keeps baseline and disabled tiers independent of SSR resources.
-static inline float3 mc_water_reflection_with_ssr(
+static inline float3 mc_dielectric_reflection_with_ssr(
     float3 baseColor,
     float3 normalWorld,
     float3 viewToCameraWorld,
     float roughness,
+    float ior,
     float skyLight,
     float4 sunDirectionEnergy,
     float4 environment,
@@ -403,7 +412,7 @@ static inline float3 mc_water_reflection_with_ssr(
 ) {
     float confidence = saturate(isfinite(ssr.confidence) ? ssr.confidence : 0.0);
     if (confidence == 0.0) {
-        return mc_water_reflection(baseColor, normalWorld, viewToCameraWorld, roughness,
+        return mc_dielectric_reflection(baseColor, normalWorld, viewToCameraWorld, roughness, ior,
             skyLight, sunDirectionEnergy, environment);
     }
 
@@ -416,13 +425,51 @@ static inline float3 mc_water_reflection_with_ssr(
     float3 normal = mc_water_safe_normalize(normalWorld, float3(0.0, 1.0, 0.0));
     float3 view = mc_water_safe_normalize(viewToCameraWorld, normal);
     if (dot(normal, view) < 0.0) normal = -normal;
-    float fresnel = mc_water_fresnel(dot(normal, view));
+    float fresnel = mc_dielectric_fresnel(dot(normal, view), ior);
     float3 fallbackSurface = mix(safeBase, mc_water_environment_radiance(fallbackColor, normal, view), fresnel * fallbackAvailability);
     float3 hitSurface = mix(safeBase, hitColor, fresnel);
-    float3 baseline = mc_water_reflection(baseColor, normalWorld, viewToCameraWorld, roughness,
+    float3 baseline = mc_dielectric_reflection(baseColor, normalWorld, viewToCameraWorld, roughness, ior,
         skyLight, sunDirectionEnergy, environment);
     // Only replace the environment share. The original sun term and its cave visibility remain.
     return baseline + confidence * (hitSurface - fallbackSurface);
+}
+
+static inline float3 mc_water_reflection(
+    float3 baseColor, float3 normalWorld, float3 viewToCameraWorld, float roughness,
+    float skyLight, float4 sunDirectionEnergy, float4 environment
+) {
+    return mc_dielectric_reflection(baseColor, normalWorld, viewToCameraWorld, roughness, 1.333,
+        skyLight, sunDirectionEnergy, environment);
+}
+
+static inline float3 mc_water_reflection_with_ssr(
+    float3 baseColor, float3 normalWorld, float3 viewToCameraWorld, float roughness,
+    float skyLight, float4 sunDirectionEnergy, float4 environment, McWaterSsrHit ssr
+) {
+    return mc_dielectric_reflection_with_ssr(baseColor, normalWorld, viewToCameraWorld, roughness, 1.333,
+        skyLight, sunDirectionEnergy, environment, ssr);
+}
+
+// Straight-alpha coverage includes the reflected share, so clear glass still reflects light.
+// Sky availability gates reflection in caves; valid screen-space hits work without skylight.
+static inline float4 mc_transparent_reflection(
+    float4 base, float3 normalWorld, float3 viewToCameraWorld, float roughness, float ior,
+    float skyLight, float4 sunDirectionEnergy, float4 environment, McWaterSsrHit ssr
+) {
+#if !MC_OPTION_REFLECTIONS_ENABLED || MC_OPTION_WATER_REFLECTION_QUALITY == 0
+    return base;
+#else
+    float3 normal = mc_water_safe_normalize(normalWorld, float3(0, 1, 0));
+    float3 view = mc_water_safe_normalize(viewToCameraWorld, normal);
+    float availability = mix(saturate(environment.w) * saturate(skyLight) * saturate(skyLight),
+        1.0, saturate(ssr.confidence));
+    float fresnel = mc_dielectric_fresnel(abs(dot(normal, view)), ior) * availability;
+    float coverage = base.a + (1.0 - base.a) * fresnel;
+    float3 surface = mc_dielectric_reflection_with_ssr(base.rgb, normal, view, roughness, ior,
+        skyLight, sunDirectionEnergy, environment, ssr);
+    float3 premultiplied = surface - base.rgb * (1.0 - fresnel) * (1.0 - base.a);
+    return float4(max(premultiplied, float3(0)) / max(coverage, 1.0e-5), coverage);
+#endif
 }
 
 // Keep the physical helper independently testable; quality zero disables both sky and sun.
@@ -430,7 +477,7 @@ static inline float3 mc_water_configured_reflection(
     float3 baseColor, float3 normalWorld, float3 viewToCameraWorld, float roughness,
     float skyLight, float4 sunDirectionEnergy, float4 environment
 ) {
-#if MC_OPTION_WATER_REFLECTION_QUALITY == 0
+#if !MC_OPTION_REFLECTIONS_ENABLED || MC_OPTION_WATER_REFLECTION_QUALITY == 0
     return baseColor;
 #else
     return mc_water_reflection(baseColor, normalWorld, viewToCameraWorld, roughness,
@@ -474,7 +521,7 @@ static inline McWaterSsrHit mc_water_screen_space_reflection(
     depth2d<float> opaqueDepth
 ) {
     McWaterSsrHit miss = {float3(0.0), 0.0, float3(0.0), 0.0};
-#if MC_OPTION_WATER_REFLECTION_QUALITY <= 1
+#if !MC_OPTION_REFLECTIONS_ENABLED || MC_OPTION_WATER_REFLECTION_QUALITY <= 1
     return miss;
 #else
     uint width = opaqueDepth.get_width();
@@ -485,7 +532,7 @@ static inline McWaterSsrHit mc_water_screen_space_reflection(
 
 #if MC_OPTION_WATER_REFLECTION_QUALITY == 2
     constexpr uint stepCount = 12u;
-    constexpr uint refinementCount = 3u;
+    constexpr uint refinementCount = 5u;
     constexpr float maxDistance = 24.0;
     constexpr float hitThickness = 0.35;
 #else
@@ -576,7 +623,10 @@ static inline McWaterSsrHit mc_water_screen_space_reflection(
             float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
             float edgeConfidence = smoothstep(0.0, 0.08, edge);
             float distanceConfidence = 1.0 - smoothstep(0.60, 1.0, high / maxDistance);
-            float thicknessConfidence = 1.0 - smoothstep(0.0, hitThickness, rayPenetration);
+            // Refinement leaves a small, quantized residual even on a perfectly flat wall.
+            // Keep well-resolved hits at full confidence; fading from zero turns that
+            // solver residual into visible horizontal bands on smooth reflectors.
+            float thicknessConfidence = 1.0 - smoothstep(hitThickness * 0.5, hitThickness, rayPenetration);
             float confidence = saturate(edgeConfidence * distanceConfidence * thicknessConfidence);
             if (confidence <= 0.0) return miss;
             return McWaterSsrHit{
@@ -594,7 +644,7 @@ static inline float3 mc_water_configured_reflection_with_ssr(
     float3 baseColor, float3 normalWorld, float3 viewToCameraWorld, float roughness,
     float skyLight, float4 sunDirectionEnergy, float4 environment, McWaterSsrHit ssr
 ) {
-#if MC_OPTION_WATER_REFLECTION_QUALITY == 0
+#if !MC_OPTION_REFLECTIONS_ENABLED || MC_OPTION_WATER_REFLECTION_QUALITY == 0
     return baseColor;
 #else
     return mc_water_reflection_with_ssr(baseColor, normalWorld, viewToCameraWorld, roughness,

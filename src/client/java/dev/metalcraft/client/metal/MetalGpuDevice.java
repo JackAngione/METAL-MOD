@@ -274,7 +274,7 @@ public final class MetalGpuDevice implements GpuDeviceBackend {
 		if (session == null || session.isClosed() || session.isPoisoned()) return;
 		var geometry = this.shaderPackRuntime == null ? null : this.shaderPackRuntime.worldGeometry();
 		if (!dev.metalcraft.client.shader.water.WaterSnapshotPolicy.capture(session.hasPreparedWater(),
-			geometry != null && geometry.waterEnabled(), dev.metalcraft.client.shader.water.WaterRoutingDebug.mode(),
+			geometry != null && geometry.translucentEffectsEnabled(), dev.metalcraft.client.shader.water.WaterRoutingDebug.mode(),
 			session.waterFrameInputs())) {
 			this.invalidateOpaqueWaterInputs();
 			return;

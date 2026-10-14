@@ -324,7 +324,7 @@ final class MetalRenderPassBackend implements RenderPassBackend {
 		RenderPipeline windPipeline = null;
 		var opaqueInputs = this.device.opaqueWaterInputs();
 		boolean waterEligible = geometry != null && worldInputs != null
-			&& dev.metalcraft.client.shader.water.WaterSnapshotPolicy.shadeWater(geometry.waterEnabled(), WaterRoutingDebug.mode())
+			&& dev.metalcraft.client.shader.water.WaterSnapshotPolicy.shadeWater(geometry.translucentEffectsEnabled(), WaterRoutingDebug.mode())
 			&& draws.stream().anyMatch(draw -> ((Object)draw) instanceof WaterDrawSource source && source.metalcraft$waterMesh() != null);
 		// Distant terrain draws sample their own colour atlas through Sampler0. The block atlas
 		// binding is restored for ordinary sections and when the multi-draw ends.

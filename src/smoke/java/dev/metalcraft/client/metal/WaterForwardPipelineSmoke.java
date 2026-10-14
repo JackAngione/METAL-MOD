@@ -361,8 +361,9 @@ final class WaterForwardPipelineSmoke {
 			source = source.substring(0, helperStart) + frozen[0] + source.substring(helperEnd);
 			int atlasStart = source.indexOf("    float2 pixelSize = 1.0 / float2(section.TextureSize);");
 			int atlasEnd = source.indexOf("    // The visibility fade changes alpha", atlasStart);
-			int conditionStart = source.indexOf("    bool shadeWater =", atlasStart);
-			int conditionEnd = source.indexOf(';', conditionStart) + 1;
+			int conditionStart = source.indexOf("    bool shadeReflector =", atlasStart);
+			int waterCondition = source.indexOf("    bool shadeWater =", conditionStart);
+			int conditionEnd = source.indexOf(';', waterCondition) + 1;
 			if (atlasStart < 0 || atlasEnd < 0 || conditionStart < 0 || conditionEnd <= conditionStart) {
 				throw new AssertionError("Could not locate terrain atlas branch fixture");
 			}

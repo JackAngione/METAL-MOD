@@ -63,6 +63,7 @@ public final class MetalCraftOptionsScreen extends Screen {
 			case "tonemap" -> Component.translatable(isStandardPack(ShaderPackRuntime.active())
 				? "metalcraft.options.shader_category.color_grading" : "metalcraft.options.shader_category.tonemap");
 			case "shadows" -> Component.translatable("metalcraft.options.shader_category.shadows");
+			case "reflections" -> Component.translatable("metalcraft.options.shader_category.reflections");
 			case "water" -> Component.translatable("metalcraft.options.shader_category.water");
 			case "wind" -> Component.translatable("metalcraft.options.shader_category.wind");
 			case "debug" -> Component.translatable("metalcraft.options.shader_category.debug");
@@ -217,6 +218,8 @@ public final class MetalCraftOptionsScreen extends Screen {
 				? Component.translatable("metalcraft.grading." + option.id() + ".tooltip")
 				: isStandardWindOption(runtime, option)
 				? Component.translatable("metalcraft.wind." + option.id() + ".tooltip")
+				: isStandardPack(runtime) && option.id().equals("reflections_enabled")
+				? Component.translatable("metalcraft.reflections.enabled.tooltip")
 				: isStandardWaterOption(runtime, option)
 				? Component.translatable("metalcraft.water." + option.id() + ".tooltip")
 				: isShadowDistanceOption(runtime, option)
@@ -328,6 +331,10 @@ public final class MetalCraftOptionsScreen extends Screen {
 				? Component.literal(Math.round(number.doubleValue() * 100) + "%")
 				: Component.translatable("metalcraft.options.value." + value);
 			return Component.translatable("metalcraft.wind." + option.id(), label);
+		}
+		if (isStandardPack(runtime) && option.id().equals("reflections_enabled")) {
+			return Component.translatable("metalcraft.reflections.enabled",
+				Component.translatable("metalcraft.options.value." + runtime.optionValue(option.id())));
 		}
 		if (isStandardWaterOption(runtime, option)) {
 			Object value = runtime.optionValue(option.id());

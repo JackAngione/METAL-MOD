@@ -4,6 +4,9 @@
 using namespace metal;
 
 // Defaults also support standalone shader fixtures without a pack preamble.
+#ifndef MC_OPTION_REFLECTIONS_ENABLED
+#define MC_OPTION_REFLECTIONS_ENABLED 1
+#endif
 #ifndef MC_OPTION_WATER_ENABLED
 #define MC_OPTION_WATER_ENABLED 1
 #endif
@@ -23,7 +26,7 @@ using namespace metal;
 #define MC_OPTION_WATER_UNDERWATER_DISTORTION 1.0
 #endif
 #ifndef MC_OPTION_WATER_REFLECTION_QUALITY
-#define MC_OPTION_WATER_REFLECTION_QUALITY 1
+#define MC_OPTION_WATER_REFLECTION_QUALITY 2
 #endif
 
 // Uniform-mode options in pack.json declaration order. 4-byte fields, no padding.

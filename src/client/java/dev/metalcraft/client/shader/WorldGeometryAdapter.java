@@ -708,6 +708,12 @@ public final class WorldGeometryAdapter implements AutoCloseable {
 			&& Boolean.TRUE.equals(this.optionValue.apply("water_enabled"));
 	}
 
+	public boolean translucentEffectsEnabled() {
+		return this.waterEnabled() || (!this.closed && ShaderPackRuntime.BUILTIN_ID.equals(this.packId)
+			&& Boolean.TRUE.equals(this.optionValue.apply("reflections_enabled"))
+			&& !"off".equals(this.optionValue.apply("water_reflection_quality")));
+	}
+
 	/** Underwater and Fabulous water retain waves/reflections without unused snapshot bindings. */
 	public Optional<RenderPipeline> waterPipeline(final RenderPipeline pipeline, final boolean opaqueInputs) {
 		if (this.closed || this.colorEncoding != FrameBindings.ColorEncoding.LINEAR_SRGB
