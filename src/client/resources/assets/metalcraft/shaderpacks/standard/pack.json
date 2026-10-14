@@ -230,8 +230,15 @@
       "apply": "recompile"
     },
     {
+      "id": "reflections_enabled",
+      "category": "reflections",
+      "type": "bool",
+      "default": true,
+      "apply": "recompile"
+    },
+    {
       "id": "water_reflection_quality",
-      "category": "water",
+      "category": "reflections",
       "type": "enum",
       "values": [
         "off",
@@ -239,7 +246,7 @@
         "ssr_low",
         "ssr_high"
       ],
-      "default": "baseline",
+      "default": "ssr_low",
       "apply": "recompile"
     },
     {

@@ -56,6 +56,15 @@ public final class WaterVertexMetadataSmoke {
 		for (int offset = 0; offset < 4 * WaterVertexMetadata.STRIDE_BYTES; offset += Float.BYTES) {
 			assertNear(bytes.getFloat(offset), 0.0F);
 		}
+        builder.putQuad(8, new float[]{0,0,0, 1,0,0, 1,1,0, 0,1,0}, 0,0,0, WaterVertexMetadata.MATERIAL_GLASS);
+        builder.putQuad(12, new float[]{0,0,0, 0,0,1, 1,0,1, 1,0,0}, 0,0,0, WaterVertexMetadata.MATERIAL_ICE);
+        var mixed = builder.build(20);
+        for (int vertex = 0; vertex < 20; vertex++) {
+            int expected = vertex < 4 || vertex >= 16 ? 0 : vertex / 4;
+            if (mixed.materialId(vertex) != expected) throw new AssertionError("Mixed surface identity at " + vertex);
+        }
+        assertNear(mixed.normalZ(8), 1);
+        assertNear(mixed.normalY(12), 1);
 		System.out.println("Water metadata: packed ABI, mixed non-water gaps, finite face normals and flow passed");
 	}
 

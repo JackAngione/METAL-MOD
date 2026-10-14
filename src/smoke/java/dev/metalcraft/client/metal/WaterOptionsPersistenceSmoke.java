@@ -22,6 +22,7 @@ final class WaterOptionsPersistenceSmoke {
 		var settings = root.resolve("settings.json");
 		Map<String, Object> expected = new LinkedHashMap<>();
 		expected.put("water_enabled", false);
+		expected.put("reflections_enabled", false);
 		expected.put("water_detail", 3);
 		expected.put("water_detail_distance", 24);
 		expected.put("water_wave_strength", 0.2);
@@ -36,6 +37,10 @@ final class WaterOptionsPersistenceSmoke {
 				if (((Number)runtime.optionValue("water_detail_distance")).intValue() != 16) {
 					throw new AssertionError("Water detail distance must default to 16 chunks");
 				}
+                if (!Boolean.TRUE.equals(runtime.optionValue("reflections_enabled"))
+                    || !"ssr_low".equals(runtime.optionValue("water_reflection_quality"))) {
+                    throw new AssertionError("Reflections must default to enabled with visible scenery");
+                }
 				expected.forEach(runtime::setOption);
 			}
 			try (var restarted = new ShaderPackRuntime(device, root.resolve("packs"), settings)) {
@@ -57,8 +62,8 @@ final class WaterOptionsPersistenceSmoke {
 			}
 			Files.writeString(settings, "{\"selectedPack\":\"metalcraft-standard\",\"packs\":{\"metalcraft-standard\":{\"water_reflection_quality\":\"invalid-tier\",\"water_enabled\":true}}}");
 			try (var recovered = new ShaderPackRuntime(device, root.resolve("packs"), settings)) {
-				if (!recovered.isActive() || !"baseline".equals(recovered.optionValue("water_reflection_quality"))) {
-					throw new AssertionError("Invalid persisted tier did not recover to baseline");
+				if (!recovered.isActive() || !"ssr_low".equals(recovered.optionValue("water_reflection_quality"))) {
+					throw new AssertionError("Invalid persisted tier did not recover to default");
 				}
 				recovered.selectPack("missing-water-test-pack");
 				if (recovered.isActive() || recovered.lastError().isEmpty()) {

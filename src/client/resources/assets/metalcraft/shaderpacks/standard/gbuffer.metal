@@ -368,6 +368,8 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     float2 atlasDx = dfdx(in.uv), atlasDy = dfdy(in.uv);
     float2 texelScreenSize = sqrt(atlasDx * atlasDx + atlasDy * atlasDy);
 #ifdef MC_WATER_FORWARD
+    bool shadeReflector = MC_OPTION_REFLECTIONS_ENABLED && MC_OPTION_WATER_REFLECTION_QUALITY > 0
+        && (in.waterMaterial == 2.0 || in.waterMaterial == 3.0) && waterDraw.debugMode == 0u;
     bool shadeWater = MC_OPTION_WATER_ENABLED && in.waterMaterial == 1.0
         && (waterDraw.debugMode == 0u || waterDraw.debugMode == 5u || waterDraw.debugMode == 6u
             || waterDraw.debugMode == 7u || waterDraw.debugMode == 8u);
@@ -389,7 +391,11 @@ fragment GBufferTargets gbuffer_terrain_fragment(
     float4 shaded = texel * in.tint * in.lightMapColor;
     shaded = mc_chunk_fade(mc_scene_seed(shaded), section.ChunkVisibility, fog);
 #if MC_HAS_ALPHA_CUTOUT
-    if (shaded.a < MC_ALPHA_CUTOUT) {
+    if (shaded.a < MC_ALPHA_CUTOUT
+#ifdef MC_WATER_FORWARD
+        && !shadeReflector
+#endif
+    ) {
         discard_fragment();
     }
 #endif
@@ -511,6 +517,30 @@ fragment GBufferTargets gbuffer_terrain_fragment(
             ), shaded.a);
         }
     }
+#if MC_OPTION_REFLECTIONS_ENABLED && MC_OPTION_WATER_REFLECTION_QUALITY > 0
+    else if (shadeReflector) {
+        float3x3 viewRotation = float3x3(section.ModelViewMat[0].xyz,
+            section.ModelViewMat[1].xyz, section.ModelViewMat[2].xyz);
+        float3 normalWorld = in.waterNormalWorld;
+        float3 viewToCameraWorld = transpose(viewRotation) * -in.worldPos;
+        McWaterSsrHit ssr = {float3(0), 0.0, float3(0), 0.0};
+#if MC_WATER_OPAQUE_INPUTS
+        if (waterFrame.cameraSubmerged == 0u && waterFrame.refractionEnabled != 0u) {
+            ssr = mc_water_screen_space_reflection(in.worldPos, viewRotation * normalWorld,
+                waterFrame.projection, waterFrame.inverseProjection, opaqueColor, opaqueDepth);
+            if (ssr.confidence > 0.0) {
+                float hitFog = mc_fog_amount(length(ssr.viewPosition),
+                    max(length(ssr.viewPosition.xz), abs(ssr.viewPosition.y)), fog);
+                ssr.color = mc_unfog(ssr.color, fog, hitFog);
+            }
+        }
+#endif
+        bool ice = in.waterMaterial == 3.0;
+        shaded = mc_transparent_reflection(shaded, normalWorld, viewToCameraWorld,
+            ice ? 0.18 : 0.06, ice ? 1.31 : 1.5, in.lightLevels.y,
+            waterFrame.sunDirectionEnergy, waterFrame.environment, ssr);
+    }
+#endif
     return mc_apply_fog(shaded, in.sphericalDistance, in.cylindricalDistance, fog);
 #else
     GBufferTargets out;

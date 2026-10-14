@@ -75,6 +75,10 @@ public final class MetalLifecycleGameTest implements FabricClientGameTest {
 			MetalSettingsGameTest.run(context);
 			return;
 		}
+		if (Boolean.getBoolean("metalcraft.reflectionsTest")) {
+			MetalReflectionsGameTest.run(context);
+			return;
+		}
 		if (Boolean.getBoolean("metalcraft.postEffectsTest")) {
 			MetalPostEffectsGameTest.run(context);
 			return;

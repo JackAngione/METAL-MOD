@@ -12,6 +12,7 @@ final class ShaderSettingLabels {
 			case "tonemap" -> Component.translatable(isStandardPack(ShaderPackRuntime.active())
 				? "metalcraft.options.shader_category.color_grading" : "metalcraft.options.shader_category.tonemap");
 			case "shadows" -> Component.translatable("metalcraft.options.shader_category.shadows");
+			case "reflections" -> Component.translatable("metalcraft.options.shader_category.reflections");
 			case "water" -> Component.translatable("metalcraft.options.shader_category.water");
 			case "wind" -> Component.translatable("metalcraft.options.shader_category.wind");
 			case "debug" -> Component.translatable("metalcraft.options.shader_category.debug");
@@ -39,6 +40,10 @@ final class ShaderSettingLabels {
 				? Component.literal(Math.round(number.doubleValue() * 100) + "%")
 				: Component.translatable("metalcraft.options.value." + value);
 			return Component.translatable("metalcraft.wind." + option.id(), label);
+		}
+		if (isReflectionsToggle(runtime, option)) {
+			return Component.translatable("metalcraft.reflections.enabled",
+				Component.translatable("metalcraft.options.value." + value));
 		}
 		if (isStandardWaterOption(runtime, option)) {
 			Component label = option.id().equals("water_detail")
@@ -120,12 +125,17 @@ final class ShaderSettingLabels {
 		return ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId()) && option.id().startsWith("water_");
 	}
 
+	static boolean isReflectionsToggle(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
+		return isStandardPack(runtime) && option.id().equals("reflections_enabled");
+	}
+
 	static boolean isShadowDistanceOption(final ShaderPackRuntime runtime, final ShaderPack.Option option) {
 		return ShaderPackRuntime.BUILTIN_ID.equals(runtime.selectedPackId())
 			&& (option.id().equals("shadow_distance") || option.id().equals("distant_shadow_distance"));
 	}
 
     static Component description(ShaderPackRuntime runtime, ShaderPack.Option option) {
+        if (isReflectionsToggle(runtime, option)) return Component.translatable("metalcraft.reflections.enabled.tooltip");
         String prefix = isStandardGradingOption(runtime, option) ? "metalcraft.grading."
             : isStandardWindOption(runtime, option) ? "metalcraft.wind."
             : isStandardWaterOption(runtime, option) ? "metalcraft.water."

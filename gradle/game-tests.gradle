@@ -1,6 +1,7 @@
 // Optional game-test and benchmark settings forwarded from -P to -D.
 def gameTestProperties = [
 	metalColorGradingTestWorld: 'metalcraft.colorGradingTestWorld',
+	metalReflectionsTestWorld: 'metalcraft.reflectionsTestWorld',
 	metalPostEffectsTestWorld: 'metalcraft.postEffectsTestWorld',
 	metalSettingsTestWorld: 'metalcraft.settingsTestWorld',
 	metalRealtimeShadowDistanceTestWorld: 'metalcraft.realtimeShadowDistanceTestWorld',
@@ -81,6 +82,7 @@ tasks.named('runClient') {
 			metalSkyMotionTest: 'metalcraft.skyMotionTest',
 			metalSettingsTest: 'metalcraft.settingsTest',
 			metalColorGradingTest: 'metalcraft.colorGradingTest',
+			metalReflectionsTest: 'metalcraft.reflectionsTest',
 			metalPostEffectsTest: 'metalcraft.postEffectsTest',
 			metalNativeChunkDistanceTest: 'metalcraft.nativeChunkDistanceTest',
 			metalLodTest: 'metalcraft.lodTest',

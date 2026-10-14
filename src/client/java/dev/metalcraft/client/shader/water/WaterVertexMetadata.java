@@ -10,6 +10,8 @@ public final class WaterVertexMetadata {
 	public static final int STRIDE_BYTES = FLOATS_PER_VERTEX * Float.BYTES;
 	public static final int MATERIAL_NONE = 0;
 	public static final int MATERIAL_WATER = 1;
+	public static final int MATERIAL_GLASS = 2;
+	public static final int MATERIAL_ICE = 3;
 
 	private final int vertexCount;
 	private final float[] values;
@@ -76,6 +78,12 @@ public final class WaterVertexMetadata {
 
 		public void putQuad(final int firstVertex, final float[] positions, final float flowX,
 			final float flowY, final float flowZ) {
+			this.putQuad(firstVertex, positions, flowX, flowY, flowZ, MATERIAL_WATER);
+		}
+
+		public void putQuad(final int firstVertex, final float[] positions, final float flowX,
+			final float flowY, final float flowZ, final int material) {
+			if (material < MATERIAL_WATER || material > MATERIAL_ICE) throw new IllegalArgumentException("Invalid surface material");
 			if (firstVertex < 0 || positions.length != 12) {
 				throw new IllegalArgumentException("Invalid water quad");
 			}
@@ -112,7 +120,7 @@ public final class WaterVertexMetadata {
 				this.values[offset] = nx;
 				this.values[offset + 1] = ny;
 				this.values[offset + 2] = nz;
-				this.values[offset + 3] = MATERIAL_WATER;
+				this.values[offset + 3] = material;
 				this.values[offset + 4] = safeFlowX;
 				this.values[offset + 5] = safeFlowY;
 				this.values[offset + 6] = safeFlowZ;

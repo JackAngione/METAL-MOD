@@ -2,32 +2,44 @@ package dev.metalcraft.client.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import dev.metalcraft.client.shader.world.WaterIdentityDebug;
+import com.mojang.blaze3d.vertex.VertexSorting;
 import dev.metalcraft.client.shader.water.SectionCompilerResultsWater;
 import dev.metalcraft.client.shader.water.WaterVertexMetadata;
+import dev.metalcraft.client.shader.world.WaterIdentityDebug;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
-import net.minecraft.client.renderer.block.BlockAndTintGetter;
-import net.minecraft.client.renderer.block.FluidRenderer;
 import net.minecraft.client.renderer.SectionBufferBuilderPack;
-import net.minecraft.client.renderer.chunk.SectionCompiler;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
+import net.minecraft.client.renderer.block.BlockQuadOutput;
+import net.minecraft.client.renderer.block.FluidRenderer;
+import net.minecraft.client.renderer.block.ModelBlockRenderer;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.chunk.RenderSectionRegion;
+import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.StainedGlassBlock;
+import net.minecraft.world.level.block.StainedGlassPaneBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
-import com.mojang.blaze3d.vertex.VertexSorting;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Identify fluids before their vertices join shared sorted terrain batches. */
+/** Identify reflective surfaces before their vertices join shared sorted terrain batches. */
 @Mixin(SectionCompiler.class)
 abstract class SectionCompilerWaterMixin {
 	@Unique
@@ -76,10 +88,47 @@ abstract class SectionCompilerWaterMixin {
 		renderer.tesselate(level, pos, WaterIdentityDebug.wrap(metadataOutput, fluid), block, fluid);
 	}
 
+	@WrapOperation(method = "compile", at = @At(value = "INVOKE", target =
+		"Lnet/minecraft/client/renderer/block/ModelBlockRenderer;tesselateBlock("
+		+ "Lnet/minecraft/client/renderer/block/BlockQuadOutput;FFFLnet/minecraft/client/renderer/block/BlockAndTintGetter;"
+		+ "Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;"
+		+ "Lnet/minecraft/client/renderer/block/dispatch/BlockStateModel;J)V"))
+	private void metalcraft$identifyReflector(ModelBlockRenderer renderer, BlockQuadOutput output, float x, float y, float z,
+		BlockAndTintGetter level, BlockPos pos, BlockState state, BlockStateModel model, long seed, Operation<Void> original) {
+		CompileCapture capture = this.metalcraft$waterCapture.get();
+		int previous = capture.material;
+		capture.material = state.is(Blocks.ICE) || state.is(Blocks.FROSTED_ICE) ? WaterVertexMetadata.MATERIAL_ICE
+			: state.is(Blocks.GLASS) || state.is(Blocks.GLASS_PANE) || state.is(Blocks.TINTED_GLASS)
+				|| state.getBlock() instanceof StainedGlassBlock || state.getBlock() instanceof StainedGlassPaneBlock
+			? WaterVertexMetadata.MATERIAL_GLASS : WaterVertexMetadata.MATERIAL_NONE;
+		try { original.call(renderer, output, x, y, z, level, pos, state, model, seed); }
+		finally { capture.material = previous; }
+	}
+
+	@Inject(method = "getOrBeginLayer", at = @At("RETURN"))
+	private void metalcraft$reflectorLayer(Map<ChunkSectionLayer, BufferBuilder> builders, SectionBufferBuilderPack pack,
+		ChunkSectionLayer layer, CallbackInfoReturnable<BufferBuilder> callback) {
+		CompileCapture capture = this.metalcraft$waterCapture.get();
+		if (capture == null || layer != ChunkSectionLayer.TRANSLUCENT) return;
+		int vertex = ((BufferBuilderAccessor)callback.getReturnValue()).metalcraft$vertices();
+		capture.mark(vertex, capture.material);
+	}
+
 	@Unique
 	private static final class CompileCapture {
 		private final Map<ChunkSectionLayer, WaterVertexMetadata.Builder> layers =
 			new EnumMap<>(ChunkSectionLayer.class);
+		private final List<ReflectorSpan> reflectors = new ArrayList<>();
+		private int material, firstVertex, spanMaterial;
+
+		void mark(int vertex, int nextMaterial) {
+			if (spanMaterial == nextMaterial) return;
+			if (spanMaterial != WaterVertexMetadata.MATERIAL_NONE && vertex > firstVertex) {
+				reflectors.add(new ReflectorSpan(firstVertex, vertex, spanMaterial));
+			}
+			firstVertex = vertex;
+			spanMaterial = nextMaterial;
+		}
 
 		VertexConsumer wrap(final ChunkSectionLayer layer, final VertexConsumer output, final Vec3 flow) {
 			if (!(output instanceof BufferBuilder builder)) {
@@ -92,6 +141,23 @@ abstract class SectionCompilerWaterMixin {
 		}
 
 		Map<ChunkSectionLayer, WaterVertexMetadata> finish(final SectionCompiler.Results results) {
+			var translucent = results.renderedLayers.get(ChunkSectionLayer.TRANSLUCENT);
+			if (translucent != null) {
+				mark(translucent.drawState().vertexCount(), WaterVertexMetadata.MATERIAL_NONE);
+				if (!reflectors.isEmpty()) {
+					var metadata = layers.computeIfAbsent(ChunkSectionLayer.TRANSLUCENT, ignored -> new WaterVertexMetadata.Builder());
+					var vertices = translucent.vertexBuffer().duplicate().order(ByteOrder.nativeOrder());
+					int stride = translucent.drawState().format().getVertexSize();
+					int start = vertices.position();
+					float[] positions = new float[12];
+					for (var span : reflectors) for (int vertex = span.first(); vertex < span.end(); vertex += 4) {
+						for (int corner = 0; corner < 4; corner++) for (int axis = 0; axis < 3; axis++) {
+							positions[corner * 3 + axis] = vertices.getFloat(start + (vertex + corner) * stride + axis * Float.BYTES);
+						}
+						metadata.putQuad(vertex, positions, 0, 0, 0, span.material());
+					}
+				}
+			}
 			Map<ChunkSectionLayer, WaterVertexMetadata> finished = new EnumMap<>(ChunkSectionLayer.class);
 			for (Map.Entry<ChunkSectionLayer, WaterVertexMetadata.Builder> entry : this.layers.entrySet()) {
 				if (!entry.getValue().isPopulated()) {
@@ -106,6 +172,8 @@ abstract class SectionCompilerWaterMixin {
 			return Map.copyOf(finished);
 		}
 	}
+
+	@Unique private record ReflectorSpan(int first, int end, int material) { }
 
 	@Unique
 	private static final class WaterVertices implements VertexConsumer {
